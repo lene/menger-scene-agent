@@ -1,0 +1,1211 @@
+{
+  "schemaVersion": "1.0.0",
+  "scalaVersion": "3.8.3",
+  "optixJniVersion": "0.3.3",
+  "minDriverVersion": "580.65",
+  "objects": [
+    {
+      "name": "Sphere",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Cube",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Sponge",
+      "fields": [
+        {
+          "name": "spongeType",
+          "type": "menger.dsl.SpongeType",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "level",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Tesseract",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "TesseractSponge",
+      "fields": [
+        {
+          "name": "spongeType",
+          "type": "menger.dsl.TesseractSpongeType",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "level",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Sierpinski4D",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "level",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "ParametricSurface",
+      "fields": [
+        {
+          "name": "f",
+          "type": "scala.Function2<java.lang.Object, java.lang.Object, menger.dsl.Vec3>",
+          "default": null
+        },
+        {
+          "name": "uRange",
+          "type": "scala.Tuple2<java.lang.Object, java.lang.Object>",
+          "default": "(0.0,6.2831855)"
+        },
+        {
+          "name": "vRange",
+          "type": "scala.Tuple2<java.lang.Object, java.lang.Object>",
+          "default": "(0.0,3.1415927)"
+        },
+        {
+          "name": "uSteps",
+          "type": "int",
+          "default": "64"
+        },
+        {
+          "name": "vSteps",
+          "type": "int",
+          "default": "32"
+        },
+        {
+          "name": "closedU",
+          "type": "boolean",
+          "default": "false"
+        },
+        {
+          "name": "closedV",
+          "type": "boolean",
+          "default": "false"
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Curve",
+      "fields": [
+        {
+          "name": "points",
+          "type": "scala.collection.immutable.Seq<menger.dsl.Vec3>",
+          "default": null
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "default": "0.05"
+        },
+        {
+          "name": "radii",
+          "type": "scala.Option<scala.collection.immutable.Seq<java.lang.Object>>",
+          "default": "None"
+        },
+        {
+          "name": "closed",
+          "type": "boolean",
+          "default": "false"
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "LSystem",
+      "fields": [
+        {
+          "name": "axiom",
+          "type": "java.lang.String",
+          "default": null
+        },
+        {
+          "name": "rules",
+          "type": "scala.collection.immutable.Map<java.lang.Object, java.lang.String>",
+          "default": null
+        },
+        {
+          "name": "iterations",
+          "type": "int",
+          "default": "4"
+        },
+        {
+          "name": "angleDegrees",
+          "type": "float",
+          "default": "25.7"
+        },
+        {
+          "name": "segmentLength",
+          "type": "float",
+          "default": "0.1"
+        },
+        {
+          "name": "initialWidth",
+          "type": "float",
+          "default": "0.1"
+        },
+        {
+          "name": "widthDecay",
+          "type": "float",
+          "default": "0.7"
+        },
+        {
+          "name": "seed",
+          "type": "long",
+          "default": "42"
+        },
+        {
+          "name": "normalizeScale",
+          "type": "boolean",
+          "default": "true"
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "Chrome",
+      "ior": 1,
+      "roughness": 0,
+      "metallic": 1,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Copper",
+      "ior": 1,
+      "roughness": 0.2,
+      "metallic": 1,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Diamond",
+      "ior": 2.42,
+      "roughness": 0,
+      "metallic": 0,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "DiamondDispersive",
+      "ior": 2.42,
+      "roughness": 0,
+      "metallic": 0,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 33
+    },
+    {
+      "name": "Film",
+      "ior": 1.33,
+      "roughness": 0.1,
+      "metallic": 0,
+      "specular": 0.5,
+      "emission": 0,
+      "filmThickness": 500,
+      "dispersion": 0
+    },
+    {
+      "name": "Glass",
+      "ior": 1.5,
+      "roughness": 0,
+      "metallic": 0,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "GlassDispersive",
+      "ior": 1.5,
+      "roughness": 0,
+      "metallic": 0,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 59
+    },
+    {
+      "name": "Gold",
+      "ior": 1,
+      "roughness": 0.1,
+      "metallic": 1,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Matte",
+      "ior": 1,
+      "roughness": 1,
+      "metallic": 0,
+      "specular": 0,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Parchment",
+      "ior": 1,
+      "roughness": 0.5,
+      "metallic": 0,
+      "specular": 0.2,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Plastic",
+      "ior": 1.5,
+      "roughness": 0.3,
+      "metallic": 0,
+      "specular": 0.5,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    },
+    {
+      "name": "Water",
+      "ior": 1.33,
+      "roughness": 0,
+      "metallic": 0,
+      "specular": 1,
+      "emission": 0,
+      "filmThickness": 0,
+      "dispersion": 0
+    }
+  ],
+  "lights": [
+    {
+      "name": "Directional",
+      "fields": [
+        {
+          "name": "direction",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "intensity",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "color",
+          "type": "menger.dsl.Color",
+          "default": "Color(1.0,1.0,1.0,1.0)"
+        }
+      ]
+    },
+    {
+      "name": "Point",
+      "fields": [
+        {
+          "name": "position",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "intensity",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "color",
+          "type": "menger.dsl.Color",
+          "default": "Color(1.0,1.0,1.0,1.0)"
+        }
+      ]
+    },
+    {
+      "name": "AreaLight",
+      "fields": [
+        {
+          "name": "position",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "normal",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "shape",
+          "type": "menger.dsl.AreaLightShape",
+          "default": "Disk"
+        },
+        {
+          "name": "intensity",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "color",
+          "type": "menger.dsl.Color",
+          "default": "Color(1.0,1.0,1.0,1.0)"
+        },
+        {
+          "name": "shadowSamples",
+          "type": "int",
+          "default": "4"
+        }
+      ]
+    }
+  ],
+  "placement": [
+    {
+      "name": "grid",
+      "parameters": [
+        {
+          "name": "rows",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "cols",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "spacing",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "node",
+          "type": "menger.dsl.SceneNode",
+          "default": null
+        }
+      ]
+    },
+    {
+      "name": "ring",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "radius",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "node",
+          "type": "menger.dsl.SceneNode",
+          "default": null
+        }
+      ]
+    },
+    {
+      "name": "scatter",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "bounds",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "seed",
+          "type": "long",
+          "default": "42"
+        },
+        {
+          "name": "node",
+          "type": "menger.dsl.SceneNode",
+          "default": null
+        }
+      ]
+    },
+    {
+      "name": "spiral",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "radiusStart",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "radiusEnd",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "turns",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "node",
+          "type": "menger.dsl.SceneNode",
+          "default": null
+        }
+      ]
+    }
+  ],
+  "colorPresets": [
+    "Black",
+    "Blue",
+    "Cyan",
+    "Gray",
+    "Green",
+    "Magenta",
+    "Red",
+    "White",
+    "Yellow"
+  ],
+  "plane": {
+    "name": "Plane",
+    "fields": [
+      {
+        "name": "axisPosition",
+        "type": "menger.dsl.AxisPosition",
+        "default": null
+      },
+      {
+        "name": "color",
+        "type": "scala.Option<menger.dsl.Color>",
+        "default": "None"
+      },
+      {
+        "name": "checkered",
+        "type": "scala.Option<scala.Tuple2<menger.dsl.Color, menger.dsl.Color>>",
+        "default": "None"
+      },
+      {
+        "name": "material",
+        "type": "scala.Option<menger.common.Material>",
+        "default": "None"
+      }
+    ]
+  },
+  "planeAxes": [
+    "X",
+    "Y",
+    "Z"
+  ],
+  "cameraPath": {
+    "name": "CameraPath",
+    "fields": [
+      {
+        "name": "positions",
+        "type": "scala.collection.immutable.List<menger.dsl.Vec3>",
+        "default": null
+      },
+      {
+        "name": "lookAt",
+        "type": "menger.dsl.Vec3",
+        "default": "Vec3(0.0,0.0,0.0)"
+      },
+      {
+        "name": "up",
+        "type": "menger.dsl.Vec3",
+        "default": "Vec3(0.0,1.0,0.0)"
+      }
+    ]
+  },
+  "cameraPathHelpers": [
+    {
+      "name": "cubic",
+      "parameters": [
+        {
+          "name": "p0",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "p1",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "p2",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "p3",
+          "type": "menger.dsl.Vec3",
+          "default": null
+        },
+        {
+          "name": "t",
+          "type": "float",
+          "default": null
+        }
+      ]
+    }
+  ],
+  "renderSettings": {
+    "name": "RenderSettings",
+    "fields": [
+      {
+        "name": "shadows",
+        "type": "boolean",
+        "default": "true"
+      },
+      {
+        "name": "transparentShadows",
+        "type": "boolean",
+        "default": "false"
+      },
+      {
+        "name": "antialiasing",
+        "type": "boolean",
+        "default": "false"
+      },
+      {
+        "name": "aaMaxDepth",
+        "type": "int",
+        "default": "2"
+      },
+      {
+        "name": "aaThreshold",
+        "type": "float",
+        "default": "0.1"
+      },
+      {
+        "name": "maxRayDepth",
+        "type": "scala.Option<java.lang.Object>",
+        "default": "None"
+      },
+      {
+        "name": "accumulation",
+        "type": "int",
+        "default": "1"
+      },
+      {
+        "name": "denoise",
+        "type": "menger.dsl.DenoiseMode",
+        "default": "Off"
+      }
+    ]
+  },
+  "renderSettingsPresets": [
+    "Default",
+    "HighQuality"
+  ]
+}
