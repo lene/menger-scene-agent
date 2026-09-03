@@ -1,0 +1,19 @@
+[project]
+name = "menger-scene-agent"
+version = "0.1.0"
+description = "AI scene agent for the Menger renderer: plain-language prompt -> validated Menger DSL scene text."
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+]
+
+[tool.pytest.ini_options]
+# core/ and adapters/ are plain packages, not installed -- run pytest from the repo root
+# and let it resolve `from core...` / `from adapters...` imports via this.
+pythonpath = ["."]
+testpaths = ["tests"]
