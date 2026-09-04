@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from adapters.model import ModelAdapter, ModelError, ModelRequest
+from adapters.model import ModelAdapter, ModelError, ModelRequest, extract_scene_text
 from core.types import (
     EXPECTED_CORPUS_SCHEMA_VERSION,
     EXPECTED_MANIFEST_SCHEMA_VERSION,
@@ -107,7 +107,16 @@ def _complete(system_prompt: str, user_prompt: str, adapter: ModelAdapter) -> Ge
         )
     if isinstance(result, ModelError):
         return _model_error_to_generation_error(result)
-    return result
+    # `extract_scene_text` (review round, story 6): the adapter returns the model's raw
+    # response text -- extracting a single scene file's text out of it (rejecting prose, a
+    # missing/misplaced `object` declaration, multiple candidate code blocks) is this
+    # module's own concern, not every `ModelAdapter` caller's. It used to run unconditionally
+    # inside `AnthropicModelAdapter.complete()`, which broke `core/readback.py`'s
+    # `semantic_readback()` (a deliberately non-scene-shaped response) in production.
+    extracted = extract_scene_text(result)
+    if isinstance(extracted, ModelError):
+        return _model_error_to_generation_error(extracted)
+    return extracted
 
 
 def generate(prompt: str, manifest: dict, corpus: dict, adapter: ModelAdapter) -> GenerationResult:

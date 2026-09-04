@@ -37,3 +37,25 @@ class GenerationError:
 
 # generate()/revise() return either the derived scene text, or a typed error -- never raise.
 GenerationResult = Union[str, GenerationError]
+
+ReadbackErrorKind = Literal[
+    "model_call_failed",
+    "invalid_model_output",
+]
+
+
+@dataclass(frozen=True)
+class ReadbackError:
+    """A typed failure result from `semantic_readback()` -- never an exception escaping to
+    the caller (I/O & Edge-Case Matrix: a model-call failure and an empty/unusable model
+    response are both reported this way, never a silent fallback or a best-effort guess).
+    Mirrors `GenerationError`'s shape exactly (story 6)."""
+
+    kind: ReadbackErrorKind
+    message: str
+    cause: Optional[BaseException] = None
+
+
+# semantic_readback() returns either the plain-language readback text, or a typed error --
+# never raise. Mirrors GenerationResult's exact convention.
+ReadbackResult = Union[str, ReadbackError]

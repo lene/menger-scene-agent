@@ -156,16 +156,45 @@ def test_extract_scene_text_rejects_stray_fence_syntax_with_no_clean_match():
 
 
 # --- complete(): response parsing, against a fake `_client`, no network -------------------
+#
+# Review round (story 6): `complete()` used to call `extract_scene_text` on every successful
+# response before returning -- which broke `core/readback.py`'s `semantic_readback()` in
+# production, since a real plain-language sentence has no code fence and no `object`
+# declaration and always failed `extract_scene_text`'s own checks. `complete()` now returns
+# the model's raw text verbatim; `core/generation.py`'s `generate()`/`revise()` apply
+# `extract_scene_text` themselves, since scene extraction is their concern, not every
+# `ModelAdapter` caller's.
 
 
-def test_complete_extracts_text_from_a_successful_response():
+def test_complete_returns_the_raw_response_text_verbatim_not_extracted():
     adapter = _adapter_with_fake_client(
         lambda **kwargs: _text_response("```scala\nobject Foo:\n  val scene = Scene()\n```")
     )
 
     result = adapter.complete(_A_REQUEST)
 
-    assert result == "object Foo:\n  val scene = Scene()"
+    assert result == "```scala\nobject Foo:\n  val scene = Scene()\n```"
+
+
+def test_complete_returns_plain_prose_verbatim_not_rejected_as_non_scene_text():
+    # The exact case that broke in production: a plain-language response (no fence, no
+    # `object` declaration) is a perfectly valid `complete()` result for a non-generation
+    # caller like `semantic_readback()` -- `complete()` itself has no opinion on shape.
+    prose = "A level-3 sponge, glass, camera 5 units out at 30 degrees."
+    adapter = _adapter_with_fake_client(lambda **kwargs: _text_response(prose))
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert result == prose
+
+
+def test_complete_maps_an_empty_response_to_a_typed_error():
+    adapter = _adapter_with_fake_client(lambda **kwargs: _text_response(""))
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"
 
 
 def test_complete_maps_a_refusal_stop_reason_to_a_typed_error():

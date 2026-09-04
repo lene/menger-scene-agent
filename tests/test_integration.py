@@ -13,7 +13,8 @@ import pytest
 from adapters.artifacts import load_corpus, load_manifest
 from adapters.model import AnthropicModelAdapter
 from core.generation import generate, revise
-from core.types import GenerationError
+from core.readback import semantic_readback
+from core.types import GenerationError, ReadbackError
 
 TURN_1_PROMPT = (
     "a tesseract sponge that gets more intricate as it turns, about ten seconds, "
@@ -82,3 +83,30 @@ def test_revise_preserves_an_unrelated_marker_against_the_real_anthropic_api():
         "Expected the unrelated camera-position marker to survive a 'make it darker' "
         "revision untouched; got:\n" + result
     )
+
+
+def test_semantic_readback_against_the_real_anthropic_api():
+    """Story 6: a real round-trip of `semantic_readback()` against the harness spike's own
+    generated scene (`poc-run/turn1-generated.scala`, story 2 output for the Turn 1 prompt).
+    Not over-asserting on exact wording since this is a real model call -- only that the
+    response is non-trivial prose and plausibly names something from the scene it describes
+    (tesseract/sponge/glass), not an exact-string match."""
+    with open("poc-run/turn1-generated.scala", encoding="utf-8") as f:
+        scene_text = f.read()
+    adapter = AnthropicModelAdapter()
+
+    result = semantic_readback(scene_text, adapter)
+
+    assert not isinstance(result, ReadbackError), (
+        result.message if isinstance(result, ReadbackError) else ""
+    )
+    assert isinstance(result, str)
+    stripped = result.strip()
+    assert stripped != ""
+    # A real, plausible readback of this scene is well short of a paragraph, but long enough
+    # to name object/material/camera -- not a one-word non-answer.
+    assert len(stripped) >= 20
+    lowered = stripped.lower()
+    assert any(
+        keyword in lowered for keyword in ("tesseract", "sponge", "glass")
+    ), f"Expected the readback to name something recognizable from the scene; got:\n{result}"

@@ -75,7 +75,20 @@ _FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 class AnthropicModelAdapter:
     """The one concrete `ModelAdapter`, backed by the real Anthropic API (`anthropic` SDK).
-    This is the only place in the repo that reads the API key or imports the SDK (AD-1)."""
+    This is the only place in the repo that reads the API key or imports the SDK (AD-1).
+
+    `complete()` returns the model's raw response text verbatim (stripped, non-empty), or a
+    typed `ModelError` for an actual call/refusal/truncation/parse failure -- it does NOT
+    apply `extract_scene_text` (review round, story 6): this adapter is a generic
+    `ModelAdapter` port implementation, shared by every caller (`core/generation.py`'s
+    scene-file generation, `core/readback.py`'s plain-language summary, and any future
+    caller), and scene-specific extraction is meaningful only to the caller that actually
+    wants scene text. An earlier version called `extract_scene_text` unconditionally here,
+    which made every successful, correctly-behaving `semantic_readback()` call fail with
+    `invalid_output` in production -- a real plain-language sentence has no code fence and no
+    top-level `object` declaration, so it always failed `extract_scene_text`'s own checks.
+    `core/generation.py`'s `generate()`/`revise()` now call `extract_scene_text` themselves,
+    on the raw text this method returns."""
 
     def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL) -> None:
         key = api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY")
@@ -140,7 +153,9 @@ class AnthropicModelAdapter:
                 kind="invalid_output", message=f"Could not parse the model response: {e}", cause=e
             )
 
-        return extract_scene_text(raw_text)
+        if not raw_text:
+            return ModelError(kind="invalid_output", message="Model returned an empty response")
+        return raw_text
 
 
 def extract_scene_text(raw_text: str) -> ModelResult:
