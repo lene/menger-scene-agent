@@ -59,3 +59,25 @@ class ReadbackError:
 # semantic_readback() returns either the plain-language readback text, or a typed error --
 # never raise. Mirrors GenerationResult's exact convention.
 ReadbackResult = Union[str, ReadbackError]
+
+TicketErrorKind = Literal[
+    "invalid_capability_text",
+    "drafts_dir_unavailable",
+    "write_failed",
+]
+
+
+@dataclass(frozen=True)
+class TicketError:
+    """A typed failure result from `adapters.tickets.write_draft()` -- never an exception
+    escaping to the caller (Boundaries & Constraints: "Returns a typed result, never raises
+    for an expected outcome"). Mirrors `GenerationError`/`ReadbackError`'s exact shape."""
+
+    kind: TicketErrorKind
+    message: str
+    cause: Optional[BaseException] = None
+
+
+# write_draft() returns either the written draft file's path as str, or a typed error --
+# never raise. Mirrors GenerationResult/ReadbackResult's exact convention.
+TicketResult = Union[str, TicketError]
