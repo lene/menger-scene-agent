@@ -760,6 +760,259 @@
       ]
     }
   ],
+  "enums": [
+    {
+      "name": "SpongeType",
+      "values": [
+        "VolumeFilling",
+        "SurfaceUnfolding",
+        "CubeSponge",
+        "RecursiveIAS"
+      ]
+    },
+    {
+      "name": "TesseractSpongeType",
+      "values": [
+        "VolumeRemoving",
+        "SurfaceSubdividing"
+      ]
+    },
+    {
+      "name": "AreaLightShape",
+      "values": [
+        "Disk"
+      ]
+    },
+    {
+      "name": "DenoiseMode",
+      "values": [
+        "Off",
+        "Final"
+      ]
+    }
+  ],
+  "sceneComposition": [
+    {
+      "name": "Camera",
+      "fields": [
+        {
+          "name": "position",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,3.0)"
+        },
+        {
+          "name": "lookAt",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "up",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,1.0,0.0)"
+        },
+        {
+          "name": "fov",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        }
+      ]
+    },
+    {
+      "name": "Scene",
+      "fields": [
+        {
+          "name": "camera",
+          "type": "menger.dsl.Camera",
+          "default": "Camera(Vec3(0.0,0.0,3.0),Vec3(0.0,0.0,0.0),Vec3(0.0,1.0,0.0),None)"
+        },
+        {
+          "name": "objects",
+          "type": "scala.collection.immutable.List<menger.dsl.SceneObject>",
+          "default": "List()"
+        },
+        {
+          "name": "lights",
+          "type": "scala.collection.immutable.List<menger.dsl.Light>",
+          "default": "List()"
+        },
+        {
+          "name": "planes",
+          "type": "scala.collection.immutable.List<menger.dsl.Plane>",
+          "default": "List()"
+        },
+        {
+          "name": "caustics",
+          "type": "scala.Option<menger.dsl.Caustics>",
+          "default": "None"
+        },
+        {
+          "name": "background",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "fog",
+          "type": "scala.Option<menger.dsl.Fog>",
+          "default": "None"
+        },
+        {
+          "name": "envMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "envMapVideo",
+          "type": "scala.Option<menger.video.EnvMapVideo>",
+          "default": "None"
+        },
+        {
+          "name": "ibl",
+          "type": "scala.Option<menger.dsl.IBL>",
+          "default": "None"
+        },
+        {
+          "name": "toneMapping",
+          "type": "menger.dsl.ToneMapping",
+          "default": "None"
+        },
+        {
+          "name": "root",
+          "type": "scala.Option<menger.dsl.SceneNode>",
+          "default": "None"
+        },
+        {
+          "name": "render",
+          "type": "scala.Option<menger.dsl.RenderSettings>",
+          "default": "None"
+        }
+      ]
+    },
+    {
+      "name": "SceneNode",
+      "fields": [
+        {
+          "name": "transform",
+          "type": "menger.dsl.Transform",
+          "default": "Transform(Vec3(0.0,0.0,0.0),Vec3(0.0,0.0,0.0),1.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "geometry",
+          "type": "scala.Option<menger.dsl.SceneObject>",
+          "default": "None"
+        },
+        {
+          "name": "children",
+          "type": "scala.collection.immutable.List<menger.dsl.SceneNode>",
+          "default": "List()"
+        }
+      ]
+    },
+    {
+      "name": "Transform",
+      "fields": [
+        {
+          "name": "translation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "scale",
+          "type": "float",
+          "default": "1.0"
+        }
+      ]
+    },
+    {
+      "name": "Caustics",
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "true"
+        },
+        {
+          "name": "photonsPerIteration",
+          "type": "int",
+          "default": "100000"
+        },
+        {
+          "name": "iterations",
+          "type": "int",
+          "default": "10"
+        },
+        {
+          "name": "initialRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "alpha",
+          "type": "float",
+          "default": "0.7"
+        }
+      ]
+    },
+    {
+      "name": "Fog",
+      "fields": [
+        {
+          "name": "density",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "color",
+          "type": "menger.dsl.Color",
+          "default": "Color(0.8,0.8,0.9,1.0)"
+        }
+      ]
+    },
+    {
+      "name": "IBL",
+      "fields": [
+        {
+          "name": "strength",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "samples",
+          "type": "int",
+          "default": "1"
+        }
+      ]
+    },
+    {
+      "name": "Vec3",
+      "fields": [
+        {
+          "name": "x",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "y",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "z",
+          "type": "float",
+          "default": null
+        }
+      ]
+    }
+  ],
   "materials": [
     {
       "name": "Chrome",
