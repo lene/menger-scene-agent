@@ -1,10 +1,18 @@
-"""Model adapter port and the one concrete Anthropic implementation.
+"""Model adapter port, shared error vocabulary, and the Anthropic implementation.
 
-AD-1: the Anthropic API credential lives ONLY here, read from the `ANTHROPIC_API_KEY`
-environment variable, never hardcoded, never logged. `ModelAdapter` is the port
-`core/` depends on (a `Protocol`) -- `core/` imports this module for the port and the
-typed request/result shapes, but never imports the `anthropic` SDK itself, so swapping
-providers later is an adapter swap, not a core rewrite (spike criterion 4).
+AD-1: each concrete adapter's API credential lives ONLY in that adapter (this file's
+`AnthropicModelAdapter`, and its siblings `adapters/gemini_model.py`,
+`adapters/openai_compatible_model.py`), read from that provider's own environment variable,
+never hardcoded, never logged. `ModelAdapter` is the port `core/` depends on (a `Protocol`)
+-- `core/` imports this module for the port and the typed request/result shapes, but never
+imports any concrete adapter or vendor SDK, so swapping or adding providers is an adapter
+swap, not a core rewrite (spike criterion 4, "bring your own model" -- see
+`adapters/model_factory.py` for the first place that promise is actually exercised).
+
+`MissingAPIKeyError` and `UnknownProviderError` live here, not in each adapter file, so
+every adapter across every provider raises the same two exception types for the same two
+failure shapes -- a caller (the factory, or anything else) can catch one type regardless of
+which provider is in play.
 """
 
 from __future__ import annotations
@@ -49,8 +57,19 @@ class ModelAdapter(Protocol):
 
 
 class MissingAPIKeyError(RuntimeError):
-    """Raised at `AnthropicModelAdapter` construction when ANTHROPIC_API_KEY is unset --
-    fails fast, before any network call (I/O & Edge-Case Matrix: missing API key)."""
+    """Raised at any concrete `ModelAdapter`'s construction when its required API-key
+    environment variable is unset -- fails fast, before any network call (I/O & Edge-Case
+    Matrix: missing API key). Shared across every adapter (`AnthropicModelAdapter` below,
+    `GeminiModelAdapter`, `OpenAICompatibleModelAdapter`) rather than one class per provider,
+    so a caller that only cares "was a key missing" can catch this one type."""
+
+
+class UnknownProviderError(RuntimeError):
+    """Raised for a bad/unrecognized provider name -- a programmer error (wrong string
+    literal at a call site), distinct from `MissingAPIKeyError`'s environment error, even
+    though both are construction-time `RuntimeError`s. Raised by `adapters.model_factory`
+    for an unrecognized top-level provider selection, and by `OpenAICompatibleModelAdapter`
+    for an unrecognized `provider=` argument (it serves three vendors from one class)."""
 
 
 # Matches a fenced code block, tagged with any word (scala, scala3, Scala, ...) or untagged.

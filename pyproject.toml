@@ -11,9 +11,34 @@ dependencies = [
 dev = [
     "pytest>=8.0.0,<9.0.0",
 ]
+# Per-provider model-adapter SDKs (adapters/model_factory.py). Optional, not `dependencies`:
+# the default provider is Anthropic, so a user who never selects another backend shouldn't
+# be forced to install three more vendor SDKs. Each new `ModelAdapter` implementation lazily
+# imports its own SDK inside `__init__` (same pattern `AnthropicModelAdapter` already uses),
+# so importing `adapters.model_factory` itself never requires any of these to be installed --
+# only actually constructing that provider's adapter does.
+gemini = [
+    "google-genai>=2.0.0,<3.0.0",
+]
+openai-compatible = [
+    "openai>=3.0.0,<4.0.0",
+]
+all-providers = [
+    "menger-scene-agent[gemini,openai-compatible]",
+]
 
 [tool.pytest.ini_options]
 # core/ and adapters/ are plain packages, not installed -- run pytest from the repo root
 # and let it resolve `from core...` / `from adapters...` imports via this.
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.setuptools]
+# `reference/` (JSON data, not Python) and `gauntlet/` sit alongside `core/`/`adapters/` at
+# the repo root, which setuptools' automatic flat-layout package discovery refuses to
+# resolve on its own ("Multiple top-level packages discovered"). Explicit list, so
+# `pip install -e ".[gemini]"` etc. (needed to install this task's optional extras) works at
+# all -- this project is still run from source via `pythonpath` above, not imported as an
+# installed distribution, so this exists only to make the extras installable, not to change
+# how the code itself is normally run.
+packages = ["core", "adapters", "gauntlet"]
