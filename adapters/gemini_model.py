@@ -27,7 +27,9 @@ from typing import Optional
 from adapters.model import MissingAPIKeyError, ModelRequest, ModelResult, ModelError
 
 # Current-generation default; a caller can override via the `model` constructor argument.
-DEFAULT_MODEL = "gemini-2.5-pro"
+# gemini-2.5-pro was retired for new API keys (404 NOT_FOUND, "no longer available to new
+# users") -- the error response itself named gemini-3.1-pro-preview as the replacement.
+DEFAULT_MODEL = "gemini-3.1-pro-preview"
 _MAX_TOKENS = 16000
 
 # The `FinishReason` values that mean "the model did not produce usable output," checked
