@@ -6,8 +6,8 @@ crosses a privilege boundary -- only plain dataclasses and string constants.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, Optional, Union
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional, Union
 
 # The manifest and corpus artifacts (AD-9) are versioned by the renderer-domain tools that
 # produce them (`ManifestGenerator`, `CorpusExporter`). This is the version this core knows
@@ -81,3 +81,54 @@ class TicketError:
 # write_draft() returns either the written draft file's path as str, or a typed error --
 # never raise. Mirrors GenerationResult/ReadbackResult's exact convention.
 TicketResult = Union[str, TicketError]
+
+# AD-5's tagged renderer-domain result, in this module's own snake_case form. Translated from
+# `SceneValidator.Tag`'s hyphenated wire strings (`ok` | `compile-errors` | `lint-findings` |
+# `refused`) by `adapters.scene_validator`'s `_WIRE_TAG_TO_VALIDATION_TAG` -- nothing outside
+# that adapter ever sees the wire string itself.
+ValidationTag = Literal["ok", "compile_errors", "lint_findings", "refused"]
+
+ValidationErrorKind = Literal["timeout", "malformed_output", "subprocess_failed"]
+
+
+@dataclass(frozen=True)
+class ValidationError:
+    """A typed failure result from `adapters.scene_validator.validate_scene()` -- never an
+    exception escaping to the caller (Boundaries & Constraints: "Returns a typed result,
+    never raises for an expected outcome"). Mirrors `GenerationError`/`ReadbackError`/
+    `TicketError`'s exact shape (story 10)."""
+
+    kind: ValidationErrorKind
+    message: str
+    cause: Optional[BaseException] = None
+
+
+@dataclass(frozen=True)
+class ValidationFinding:
+    """One geometric-invariant violation, mirroring `SceneValidator.Finding`
+    (`menger/menger-app/src/main/scala/menger/tools/SceneValidator.scala`, story 5)
+    field-for-field: a short, stable machine-readable `invariant` tag plus a human-readable
+    `message` -- carried structurally rather than flattened into `messages`, same reasoning
+    as the Scala side (Code Map: "don't invent fields it doesn't have")."""
+
+    invariant: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    """AD-5's tagged renderer-domain result, parsed from `SceneValidator.ValidationResult`'s
+    JSON (`menger`, story 5) field-for-field -- `tag`, `messages`, `findings`, `scene`,
+    `schema_version` -- no invented fields (Boundaries & Constraints). `tag` is this module's
+    own snake_case `ValidationTag`, never the wire format's hyphenated string."""
+
+    tag: ValidationTag
+    messages: List[str]
+    findings: List[ValidationFinding] = field(default_factory=list)
+    scene: Optional[str] = None
+    schema_version: str = ""
+
+
+# validate_scene() returns either the renderer's typed tagged result, or a typed error --
+# never raise. Mirrors GenerationResult/ReadbackResult/TicketResult's exact convention.
+ValidationOutcome = Union[ValidationResult, ValidationError]
