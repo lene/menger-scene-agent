@@ -107,8 +107,10 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
 
     recorded_calls = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path):
-        recorded_calls.append((prompt, prior_scene, script_path))
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
+        recorded_calls.append((prompt, prior_scene, script_path, on_stage))
         return TurnResult(tag="accepted", messages=[], ordinal=2)
 
     monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
@@ -125,10 +127,12 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
     # The turn issued after replay must see the resumed session's real current scene, not
     # None -- proves resume threads prior_scene through, not just replaying text.
     assert len(recorded_calls) == 1
-    prompt, prior_scene, script_path = recorded_calls[0]
+    prompt, prior_scene, script_path, on_stage = recorded_calls[0]
     assert prompt == "a third prompt"
     assert prior_scene == "object Scene:\n  val x = 1\n"
     assert script_path == "/fake/validator.sh"
+    # story 12 ("live status line"): cli.py's run_turn() call site forwards a callback.
+    assert on_stage is not None
 
 
 # --- --session <id>, dir doesn't exist: clear startup error, exits before any turn --------
@@ -186,6 +190,41 @@ def test_plain_text_turn_accepted_prints_ordinal_and_tag(monkeypatch, tmp_path, 
 
     assert exit_code == 0
     assert capsys.readouterr().out.splitlines() == ["Turn 5: accepted"]
+
+
+# --- Live status line (story 12): stage lines print, in order, before the result line -----
+
+
+def test_stage_callback_output_appears_before_final_turn_result_line(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+
+    def _fake_run_turn(*args, **kwargs):
+        on_stage = kwargs["on_stage"]
+        on_stage("generating")
+        on_stage("validating")
+        on_stage("reading back")
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    # Patch-level fix (post-review): stage lines are ephemeral progress output and go to
+    # stderr (with an explicit flush), never stdout -- stdout stays clean for the actual
+    # "Turn N: tag" result line.
+    assert captured.err.splitlines() == [
+        "... generating",
+        "... validating",
+        "... reading back",
+    ]
+    assert captured.out.splitlines() == ["Turn 1: accepted"]
 
 
 # --- Plain-text input, turn rejected: "Turn N: <tag>" printed with the tag/reason ----------
@@ -390,7 +429,9 @@ def test_fresh_session_first_turn_receives_prior_scene_none(monkeypatch, tmp_pat
 
     recorded_prior_scenes = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path):
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
         recorded_prior_scenes.append(prior_scene)
         return TurnResult(tag="accepted", messages=[], ordinal=1)
 
@@ -414,7 +455,9 @@ def test_prior_scene_refreshed_after_accepted_turn(monkeypatch, tmp_path):
     accepted_scene = "object Scene:\n  val y = 2\n"
     recorded_calls = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path):
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
         recorded_calls.append((prompt, prior_scene))
         if len(recorded_calls) == 1:
             # Stub also performs the real acceptance side effect so

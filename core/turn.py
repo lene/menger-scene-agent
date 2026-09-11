@@ -16,7 +16,7 @@ already holds itself to.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 from adapters.model import ModelAdapter
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -26,6 +26,7 @@ from core.readback import semantic_readback
 from core.types import (
     GenerationError,
     ReadbackError,
+    StageName,
     TurnResult,
     ValidationError,
     ValidationResult,
@@ -98,6 +99,8 @@ def run_turn(
     script_path: Union[str, Path],
     image: Optional[str] = None,
     timeout: Optional[float] = None,
+    *,
+    on_stage: Optional[Callable[[StageName], None]] = None,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -108,7 +111,30 @@ def run_turn(
     `script_path` is an explicit injected parameter (AD-10, "paths injected, never
     discovered") -- this function receives it; where an eventual CLI entry point sources it
     from is out of this story's scope. `image`/`timeout` are forwarded to `validate_scene()`
-    verbatim -- this function has no opinion of its own about either."""
+    verbatim -- this function has no opinion of its own about either.
+
+    `on_stage` (spec-ai-scene-agent story 12, "live status line"), when provided, is called
+    with a stage name at each transition this function actually reaches: `"generating"`
+    (before `generate()`/`revise()`), `"validating"` (before the local gauntlet checks --
+    this single call covers both agent-side and renderer-side validation as one
+    user-facing phase, no second call before `validate_scene()`), `"reading back"` (before
+    `semantic_readback()`, reached only on a renderer `ok`). Never fired for a stage that's
+    short-circuited past. Defaults to `None`, a no-op, so every existing caller is
+    unaffected. `on_stage` is called synchronously, inline, as part of this function's own
+    execution (no threading/async involved) -- callbacks should be cheap and non-blocking.
+    Any exception `on_stage` itself raises (including a `TypeError` from a non-callable
+    value) is swallowed rather than propagated: its only job is cosmetic reporting, and it
+    must never abort a turn that had otherwise succeeded up to that point."""
+
+    def _emit(stage: StageName) -> None:
+        if on_stage is None:
+            return
+        try:
+            on_stage(stage)
+        except Exception:  # noqa: BLE001 -- cosmetic reporting must never abort a turn
+            pass
+
+    _emit("generating")
     generation_result = (
         generate(prompt, manifest, corpus, adapter)
         if prior_scene is None
@@ -130,6 +156,7 @@ def run_turn(
 
     scene_text = generation_result
 
+    _emit("validating")
     local_findings = _run_local_checks(scene_text)
     if local_findings:
         # Always: "a renderer request is never made when a local finding exists" -- no
@@ -179,6 +206,7 @@ def run_turn(
             )
             return TurnResult(tag=outcome.tag, messages=messages)
 
+        _emit("reading back")
         readback_result = semantic_readback(scene_text, adapter)
         if isinstance(readback_result, ReadbackError):
             # I/O & Edge-Case Matrix: "turn is NOT accepted without its summary -- treated

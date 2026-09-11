@@ -201,6 +201,19 @@ def _format_turn_result(result: TurnResult) -> str:
     return text
 
 
+def _print_stage(stage: str) -> None:
+    # spec-ai-scene-agent story 12 ("live status line"): a multi-second turn (a real model
+    # call, later a sandboxed subprocess) prints nothing until fully done without this --
+    # PRD FR3. Sequential printed lines, no carriage-return overwrite (Design Notes: exact
+    # rendering format explicitly left open by the PRD, this is a documented implementation
+    # choice, not a human-values judgment). Printed to stderr (not stdout), flushed
+    # explicitly (patch-level fix, post-review): ephemeral progress output belongs on
+    # stderr, keeping stdout clean for the actual "Turn N: tag" result line -- and under any
+    # buffered/piped stdout, unflushed progress output would silently defeat the entire
+    # point of a live status line (it would just look hung).
+    print(f"... {stage}", file=sys.stderr, flush=True)
+
+
 def _is_consult_input(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
@@ -261,7 +274,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
 
         try:
-            result = run_turn(line, prior_scene, manifest, corpus, adapter, store, script_path)
+            result = run_turn(
+                line,
+                prior_scene,
+                manifest,
+                corpus,
+                adapter,
+                store,
+                script_path,
+                on_stage=_print_stage,
+            )
         except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
             print(f"Turn error: {e}")
             continue

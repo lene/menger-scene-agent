@@ -138,6 +138,11 @@ class ValidationResult:
 # never raise. Mirrors GenerationResult/ReadbackResult/TicketResult's exact convention.
 ValidationOutcome = Union[ValidationResult, ValidationError]
 
+# `on_stage`'s three-value contract (spec-ai-scene-agent story 12, "live status line") --
+# enforced at the type level via `Optional[Callable[[StageName], None]]` on `run_turn()`'s
+# signature, not just documented in its docstring.
+StageName = Literal["generating", "validating", "reading back"]
+
 # `run_turn()`'s own tagged outcome (story 20, core/turn.py), composed from every stage it
 # wires together rather than inventing a parallel vocabulary for the same failures:
 #   - "accepted" -- the only success tag; unique to this module.

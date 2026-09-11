@@ -528,3 +528,252 @@ def test_staging_file_content_matches_candidate_scene_text_when_validate_scene_i
     run_turn("make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH)
 
     assert observed_content["text"] == CLEAN_SCENE_TEXT
+
+
+# --- Live status line (story 12): on_stage fires at each stage transition, never skipped ---
+# and never fired for a stage that's short-circuited past.
+
+
+def test_on_stage_fires_generating_validating_reading_back_in_order_on_accepted_turn(
+    tmp_path, monkeypatch
+):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "accepted"
+    assert stages == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_fires_generating_only_when_generation_fails(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="call_failed", message="model unreachable"))
+    store = _make_store(tmp_path)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "generation_failed"
+    assert stages == ["generating"]
+
+
+def test_on_stage_never_fires_reading_back_on_local_finding(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=SCENE_TEXT_WITH_TODO)
+    store = _make_store(tmp_path)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "local_finding"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_never_fires_reading_back_on_renderer_rejection(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="compile_errors", messages=["renderer says no"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "compile_errors"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_omitted_is_a_no_op_and_behaves_exactly_as_before(tmp_path, monkeypatch):
+    # Boundaries & Constraints: "Defaults to None (a no-op) so every existing caller/test is
+    # unaffected without modification." -- no TypeError, no stray output, same TurnResult as
+    # every pre-story-12 test already asserts for this exact scenario.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert result.ordinal == 1
+
+
+# --- Patch-level fixes (post-review, story 12) ----------------------------------------------
+
+
+def test_on_stage_exception_does_not_abort_turn_and_result_is_still_correct(
+    tmp_path, monkeypatch
+):
+    # An on_stage callback's only job is cosmetic reporting -- a raise from it (or from a
+    # non-callable value) must never abort a turn that had otherwise succeeded up to that
+    # point.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    calls: List[str] = []
+
+    def _raising_on_stage(stage: str) -> None:
+        calls.append(stage)
+        if len(calls) == 1:
+            raise RuntimeError("boom: rendering the status line failed")
+
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=_raising_on_stage,
+    )
+
+    assert result.tag == "accepted"
+    assert result.ordinal == 1
+    assert result.readback_summary == CLEAN_SCENE_TEXT.strip()
+    # All three stages were still attempted, despite the first call raising.
+    assert calls == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_sequence_is_exactly_three_stages_on_readback_failure(tmp_path, monkeypatch):
+    # Previously untested path: the ReadbackError branch (rejected, not partially accepted)
+    # must still fire on_stage for all three stages, in order, never re-fired, never altered.
+    adapter = _SequencedModelAdapter(
+        results=[CLEAN_SCENE_TEXT, ModelError(kind="call_failed", message="readback model down")]
+    )
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "readback_failed"
+    assert stages == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_never_fires_reading_back_on_staging_write_failure(tmp_path, monkeypatch):
+    # Two independent reviewers flagged this exact path as untested and a real
+    # silent-regression risk: a pure storage failure (the staging file write raises
+    # OSError) must never fire "reading back" -- nothing would catch a future reordering
+    # of the write/emit calls that made it fire spuriously.
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    import pathlib
+
+    def failing_write_text(self, data, encoding=None, errors=None, newline=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", failing_write_text)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "storage_failed"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_never_fires_reading_back_on_validation_error(tmp_path, monkeypatch):
+    # Same reviewers found this branch untested too: validate_scene() returning a
+    # ValidationError (not a ValidationResult with a non-"ok" tag -- a structurally
+    # distinct rejection path) must also never fire "reading back".
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationError(kind="timeout", message="renderer subprocess timed out")
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "timeout"
+    assert stages == ["generating", "validating"]
