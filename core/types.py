@@ -9,6 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Union
 
+# `gauntlet/types.py`'s `Finding` is, like this module, a plain dataclass with no I/O of its
+# own -- importing it here (story 20, `TurnResult.findings`) doesn't cross AD-1/AD-3's
+# privilege boundary, and `gauntlet/` has no dependency on `core/` (no import cycle).
+from gauntlet.types import Finding
+
 # The manifest and corpus artifacts (AD-9) are versioned by the renderer-domain tools that
 # produce them (`ManifestGenerator`, `CorpusExporter`). This is the version this core knows
 # how to consume; a mismatch is a real failure mode (a stale artifact silently missing new
@@ -132,3 +137,55 @@ class ValidationResult:
 # validate_scene() returns either the renderer's typed tagged result, or a typed error --
 # never raise. Mirrors GenerationResult/ReadbackResult/TicketResult's exact convention.
 ValidationOutcome = Union[ValidationResult, ValidationError]
+
+# `run_turn()`'s own tagged outcome (story 20, core/turn.py), composed from every stage it
+# wires together rather than inventing a parallel vocabulary for the same failures:
+#   - "accepted" -- the only success tag; unique to this module.
+#   - "local_finding" -- one or more agent-side gauntlet.check_*() findings; unique to this
+#     module (there is no upstream type for "a local check found something").
+#   - "compile_errors" / "lint_findings" / "refused" -- reused verbatim from ValidationTag:
+#     the renderer's own non-"ok" tags, unchanged by passing through run_turn().
+#   - "timeout" / "malformed_output" / "subprocess_failed" -- reused verbatim from
+#     ValidationErrorKind: validate_scene() itself failed to produce a renderer verdict.
+#   - "generation_failed" -- generate()/revise() returned a GenerationError before any
+#     gauntlet check could run (check_*() requires a str; not one of the frozen I/O & Edge
+#     Case Matrix's five rows, but a real precondition for all of them).
+#   - "readback_failed" -- the renderer said "ok" but semantic_readback() itself failed;
+#     the I/O & Edge-Case Matrix's explicit "not accepted without its summary" row.
+#   - "storage_failed" -- a `SceneStore` write failed for real (`store.accept()` raised
+#     `SceneStoreError` after exhausting its ordinal-claim retries, or writing the staging
+#     file itself raised `OSError`) -- not one of the frozen I/O & Edge-Case Matrix's five
+#     rows either, but the same kind of real precondition failure `generation_failed`
+#     already covers on the generation side (review round, patch-level fix).
+TurnTag = Literal[
+    "accepted",
+    "generation_failed",
+    "local_finding",
+    "compile_errors",
+    "lint_findings",
+    "refused",
+    "timeout",
+    "malformed_output",
+    "subprocess_failed",
+    "readback_failed",
+    "storage_failed",
+]
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """The typed, never-raising outcome of one `core.turn.run_turn()` call -- covers every
+    row of that story's I/O & Edge-Case Matrix plus the `generation_failed` precondition
+    (see `TurnTag`). Mirrors `GenerationError`/`ReadbackError`/`TicketError`/`ValidationError`
+    's dataclass shape, extended with the fields a turn's outcome actually needs to carry:
+    `messages` (always populated with at least one human-readable string on any non-accepted
+    tag), `findings` (populated only for `local_finding`, the one outcome with structured
+    `gauntlet.types.Finding` data of its own), `readback_summary` (populated only on
+    `accepted` -- the plain-language sentence `semantic_readback()` produced), and `ordinal`
+    (populated only on `accepted` -- the new `SceneStore.accept()`-assigned ordinal)."""
+
+    tag: TurnTag
+    messages: List[str]
+    findings: List[Finding] = field(default_factory=list)
+    readback_summary: Optional[str] = None
+    ordinal: Optional[int] = None

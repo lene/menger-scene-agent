@@ -95,6 +95,9 @@ def test_accept_first_turn_records_one_accepted_history_entry_naming_ordinal_1(t
     assert entry["ordinal"] == 1
     assert entry["outcome"] == "accepted"
     assert entry["prompt"] == "make a scene"
+    # accept()'s docstring: when readback_summary is None, the key is left out of the
+    # entry entirely rather than written as `null`.
+    assert "readback_summary" not in entry
 
 
 def test_current_scene_after_first_accept_returns_its_text(tmp_path):

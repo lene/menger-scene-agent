@@ -269,11 +269,18 @@ class SceneStore:
     # silent hang instead of a clear failure.
     _MAX_ACCEPT_RETRIES = 10
 
-    def accept(self, scene_text: str, prompt: str) -> int:
+    def accept(self, scene_text: str, prompt: str, readback_summary: Optional[str] = None) -> int:
         """Records an accepted attempt: writes the next sequential zero-padded ordinal file
         (AD-12) atomically and exclusively (AD-14, AD-8 -- see `_write_new_file_exclusive`),
         appends an accepted `history.jsonl` entry (AD-7), and returns the new ordinal. Never
         touches any earlier ordinal file.
+
+        `readback_summary` (story 20, `core/turn.py`'s `run_turn()`) is optional and, when
+        given, folded into the same `history.jsonl` entry this method already appends --
+        this is the "history.jsonl's existing append call" that story's Boundaries &
+        Constraints names as the only place a turn's readback summary is ever persisted, not
+        a second write elsewhere. Omitted (`None`) for any caller with no readback summary to
+        record -- the key is left out of the entry entirely rather than written as `null`.
 
         Safe under concurrent callers targeting the same session (review round): if another
         writer claims the computed ordinal first, `_write_new_file_exclusive` raises
@@ -287,14 +294,15 @@ class SceneStore:
                 self._write_new_file_exclusive(target, scene_text)
             except FileExistsError:
                 continue  # another writer claimed this ordinal first -- retry with a fresh read
-            self._append_history(
-                {
-                    "ordinal": ordinal,
-                    "prompt": prompt,
-                    "file": target.name,
-                    "outcome": "accepted",
-                }
-            )
+            entry = {
+                "ordinal": ordinal,
+                "prompt": prompt,
+                "file": target.name,
+                "outcome": "accepted",
+            }
+            if readback_summary is not None:
+                entry["readback_summary"] = readback_summary
+            self._append_history(entry)
             return ordinal
         raise SceneStoreError(
             f"Could not claim a new ordinal in '{self.session_dir}' after "
