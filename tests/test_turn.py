@@ -300,6 +300,62 @@ def test_generation_timeout_maps_to_a_distinct_turn_tag_not_generation_failed(tm
     assert entries[-1]["outcome"] == "rejected"
 
 
+# --- spec-ai-scene-agent story 18: needs_clarification outcome ----------------------------
+
+
+def test_needs_clarification_maps_to_its_own_distinct_turn_tag(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="needs_clarification", message="'fribbly' is not a defined DSL term"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it more fribbly", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "needs_clarification"
+    assert result.tag != "generation_failed"
+    assert result.tag != "generation_timeout"
+    assert result.messages == ["'fribbly' is not a defined DSL term"]
+    # No scene file (staging or accepted) remains on disk; no ordinal consumed.
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+    assert entries[-1]["ordinal"] is None
+    assert "'fribbly' is not a defined DSL term" in entries[-1]["reason"]
+
+
+def test_needs_clarification_via_revise_also_maps_to_the_distinct_turn_tag(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="needs_clarification", message="redder and greener are contradictory"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it redder and greener",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "needs_clarification"
+    assert result.messages == ["redder and greener are contradictory"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
 def test_generation_timeout_via_revise_maps_to_a_distinct_turn_tag_not_generation_failed(
     tmp_path, monkeypatch
 ):

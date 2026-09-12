@@ -35,6 +35,7 @@ ErrorKind = Literal[
     "stale_manifest",
     "stale_corpus",
     "model_call_timeout",
+    "needs_clarification",
 ]
 
 
@@ -181,6 +182,13 @@ StageName = Literal["generating", "validating", "reading back"]
 #     failure mode: either function's `store.current_scene()`/`store.accept()` call raising
 #     `SceneStoreError` maps to this same tag -- a reader should not assume `run_turn()` is
 #     the only producer (review round, patch-level fix).
+#   - "needs_clarification" -- spec-ai-scene-agent story 18: a `GenerationError` whose kind
+#     is specifically "needs_clarification" -- the model itself judged the request too
+#     ambiguous or self-contradictory to compose (PRD FR5), via the `NEEDS_CLARIFICATION:`
+#     sentinel `extract_scene_text` detects before fence-parsing. Distinguished from
+#     "generation_failed" the same way "generation_timeout" is: a distinct, typed outcome
+#     end to end, never folded into the generic bucket every other `GenerationError` kind
+#     maps to.
 #   - "hand_edit_rejected" -- spec-ai-scene-agent story 17 (`core/turn.py`'s
 #     `check_hand_edit()`): an out-of-band hand edit to the current scene file tripped the
 #     local gauntlet aggregation -- unique to `check_hand_edit()`, never returned by
@@ -191,6 +199,7 @@ TurnTag = Literal[
     "accepted",
     "generation_failed",
     "generation_timeout",
+    "needs_clarification",
     "local_finding",
     "compile_errors",
     "lint_findings",

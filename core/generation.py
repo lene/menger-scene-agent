@@ -35,6 +35,11 @@ _RULES = (
     "within the first 60 lines (SceneLoader's detectObjectName heuristic).\n"
     "- Respond with exactly one Scala code block containing the complete scene file's "
     "source text -- no prose before or after, no multiple candidates.\n"
+    "- If the request is too ambiguous or self-contradictory to compose (an undefined "
+    "domain term, or a direct contradiction like \"redder and greener\"), do not guess -- "
+    "respond with exactly one plain line, NEEDS_CLARIFICATION: <reason naming the specific "
+    "term or contradiction>, instead of a scene code block. Do not wrap this line in "
+    "backticks or a code fence -- it must be plain text, not formatted as code.\n"
 )
 
 
@@ -98,6 +103,11 @@ def _model_error_to_generation_error(error: ModelError) -> GenerationError:
         kind = "model_call_timeout"
     elif error.kind == "call_failed":
         kind = "model_call_failed"
+    elif error.kind == "needs_clarification":
+        # spec-ai-scene-agent story 18: the model's own sentinel response (detected by
+        # `extract_scene_text`) is its own distinct outcome end to end -- never folded into
+        # "invalid_model_output" alongside every other malformed/rejected response shape.
+        kind = "needs_clarification"
     else:
         kind = "invalid_model_output"
     return GenerationError(kind=kind, message=error.message, cause=error.cause)

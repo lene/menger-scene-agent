@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Protocol, Union
 
-ModelErrorKind = Literal["call_failed", "invalid_output", "timeout"]
+ModelErrorKind = Literal["call_failed", "invalid_output", "timeout", "needs_clarification"]
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,19 @@ _CODE_FENCE = re.compile(r"```[ \t]*\w*[ \t]*\n(.*?)```", re.DOTALL)
 # anywhere in a prose response is not enough to call it scene text.
 _OBJECT_DECLARATION = re.compile(r"^\s*(?:private\s+)?object\s+\w", re.MULTILINE)
 _FIRST_OBJECT_LINE_LIMIT = 60
+
+# spec-ai-scene-agent story 18: the model's own sentinel for "too ambiguous or
+# self-contradictory to compose" (PRD FR5), added to `core/generation.py`'s `_RULES` system
+# prompt. Matched against the *entire* stripped response -- a single line, case-sensitive
+# keyword -- so a sentinel merely mentioned in passing, or wrapped in prose/a code fence,
+# does not match and falls through to the existing fence/`object`-declaration checks instead
+# (I/O & Edge-Case Matrix: malformed sentinel emission is not specially handled). `[ \t]*`,
+# not `\s*`, after the colon (review round, patch-level fix): `\s*` would let a newline
+# right after the colon absorb into the gap, letting a two-line response (keyword on its own
+# line, reason on the next) match despite this being documented as single-line-only -- `.`
+# without `re.DOTALL` already can't cross a newline, but the gap before the capture group
+# could.
+_NEEDS_CLARIFICATION = re.compile(r"^NEEDS_CLARIFICATION:[ \t]*(.+)$")
 
 # Per the claude-api skill's current defaults: claude-opus-5 unless a caller names a
 # different model (constructor argument), and a non-streaming max_tokens of 16000 --
@@ -210,6 +223,10 @@ def extract_scene_text(raw_text: str) -> ModelResult:
     story's Ask First boundary allows."""
     if not raw_text:
         return ModelError(kind="invalid_output", message="Model returned an empty response")
+
+    sentinel_match = _NEEDS_CLARIFICATION.match(raw_text.strip())
+    if sentinel_match is not None:
+        return ModelError(kind="needs_clarification", message=sentinel_match.group(1).strip())
 
     fences = _CODE_FENCE.findall(raw_text)
     if len(fences) > 1:

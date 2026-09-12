@@ -155,6 +155,52 @@ def test_revise_model_call_timeout_is_also_mapped_to_the_distinct_kind():
     assert result.kind == "model_call_timeout"
 
 
+# --- spec-ai-scene-agent story 18: needs_clarification outcome ----------------------------
+
+
+def test_generate_needs_clarification_maps_to_a_distinct_generation_error_kind():
+    adapter = FakeModelAdapter(
+        result=ModelError(kind="needs_clarification", message="'fribbly' is not a defined term")
+    )
+
+    result = generate("make it more fribbly", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert isinstance(result, GenerationError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "'fribbly' is not a defined term"
+
+
+def test_revise_needs_clarification_is_also_mapped_to_the_distinct_kind():
+    adapter = FakeModelAdapter(
+        result=ModelError(kind="needs_clarification", message="redder and greener contradict")
+    )
+
+    result = revise("make it redder and greener", "prior scene text", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert isinstance(result, GenerationError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "redder and greener contradict"
+
+
+def test_generate_system_prompt_actually_tells_the_model_about_the_sentinel():
+    # Review-round patch: a regression guard on the outbound prompt text itself, not just
+    # on how a returned ModelError maps through -- a typo/rewording here would silently break
+    # the whole feature with no other test catching it.
+    adapter = FakeModelAdapter(result="object Foo:\n  val scene = Scene()")
+
+    generate("a scene", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "NEEDS_CLARIFICATION:" in adapter.last_request.system_prompt
+
+
+def test_revise_system_prompt_also_tells_the_model_about_the_sentinel():
+    adapter = FakeModelAdapter(result="object Foo:\n  val scene = Scene()")
+
+    revise("a change", "object Prior:\n  val scene = Scene()", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "NEEDS_CLARIFICATION:" in adapter.last_request.system_prompt
+
+
 # --- Edge-Case Matrix: model returns non-scene text ---------------------------------------
 
 

@@ -309,3 +309,108 @@ def test_construction_accepts_a_small_positive_timeout(monkeypatch):
     adapter = AnthropicModelAdapter(api_key="test-key-not-a-real-credential", timeout=0.1)
 
     assert adapter._client.timeout == 0.1
+
+
+# --- spec-ai-scene-agent story 18: needs_clarification sentinel detection -----------------
+
+
+def test_extract_scene_text_detects_the_needs_clarification_sentinel():
+    result = extract_scene_text("NEEDS_CLARIFICATION: 'fribbly' is not a defined DSL term")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "'fribbly' is not a defined DSL term"
+
+
+def test_extract_scene_text_strips_whitespace_around_the_sentinel_and_its_reason():
+    result = extract_scene_text(
+        "  \n NEEDS_CLARIFICATION:   redder and greener are contradictory  \n  "
+    )
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "redder and greener are contradictory"
+
+
+def test_extract_scene_text_does_not_match_the_sentinel_mentioned_in_passing():
+    raw = "I could return NEEDS_CLARIFICATION: but here's a scene instead.\n```scala\nobject Foo:\n  val scene = Scene()\n```"
+
+    result = extract_scene_text(raw)
+
+    assert result == "object Foo:\n  val scene = Scene()"
+
+
+def test_extract_scene_text_does_not_match_the_sentinel_wrapped_in_a_code_fence():
+    # I/O & Edge-Case Matrix: malformed sentinel emission (fenced) is not specially handled --
+    # it falls through to the existing object-declaration check and is rejected the same way
+    # any other non-scene fenced content would be.
+    raw = "```\nNEEDS_CLARIFICATION: fribbly is undefined\n```"
+
+    result = extract_scene_text(raw)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"
+
+
+def test_extract_scene_text_does_not_match_the_sentinel_followed_by_extra_prose():
+    # The sentinel must be the *entire* stripped text (single line) to match -- extra
+    # content after it means the whole response falls through to the ordinary
+    # object-declaration/fence checks instead. In this case it actually finds a top-level
+    # object declaration, so it is accepted as scene text, not specially rejected -- exactly
+    # the "not specially handled" contract (I/O & Edge-Case Matrix).
+    raw = "NEEDS_CLARIFICATION: fribbly is undefined\nHere is my best guess anyway:\nobject Foo:\n  val scene = Scene()\n"
+
+    result = extract_scene_text(raw)
+
+    assert result == raw
+
+
+def test_extract_scene_text_sentinel_match_is_case_sensitive():
+    result = extract_scene_text("needs_clarification: lowercase should not match")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"
+
+
+def test_extract_scene_text_ordinary_scene_response_is_unaffected_by_the_sentinel_check():
+    raw = "```scala\nobject Foo:\n  val scene = Scene()\n```"
+
+    result = extract_scene_text(raw)
+
+    assert result == "object Foo:\n  val scene = Scene()"
+
+
+def test_extract_scene_text_does_not_match_an_empty_reason():
+    # Nothing meaningful after the colon (once outer whitespace is stripped) -- the
+    # sentinel's capture group requires at least one character, so this falls through to
+    # the ordinary fence/object-declaration checks instead of matching with an empty reason.
+    result = extract_scene_text("NEEDS_CLARIFICATION:")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"
+
+
+def test_extract_scene_text_does_not_truncate_a_reason_containing_a_colon():
+    result = extract_scene_text("NEEDS_CLARIFICATION: ratio 3:2 is ambiguous")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "ratio 3:2 is ambiguous"
+
+
+def test_extract_scene_text_matches_the_sentinel_with_no_space_after_the_colon():
+    result = extract_scene_text("NEEDS_CLARIFICATION:fribbly is undefined")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "needs_clarification"
+    assert result.message == "fribbly is undefined"
+
+
+def test_extract_scene_text_does_not_match_sentinel_split_across_two_lines():
+    # Review-round patch: the regex's post-colon gap is `[ \t]*`, not `\s*` -- a newline
+    # right after the colon (keyword on its own line, reason on the next) must not match,
+    # since the sentinel is documented as single-line-only.
+    result = extract_scene_text("NEEDS_CLARIFICATION:\nfribbly is undefined")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"

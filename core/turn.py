@@ -151,8 +151,16 @@ def run_turn(
         # ("generation_timeout") rather than the generic "generation_failed" every other
         # GenerationError kind maps to -- a user seeing "Turn N: generation_failed" has no
         # way to tell a hung model-provider request apart from any other generation failure.
-        is_timeout = generation_result.kind == "model_call_timeout"
-        tag = "generation_timeout" if is_timeout else "generation_failed"
+        #
+        # spec-ai-scene-agent story 18: same reasoning for "needs_clarification" -- the model
+        # itself judged the request too ambiguous or self-contradictory to compose (PRD FR5),
+        # distinct from both "generation_failed" and "generation_timeout" end to end.
+        if generation_result.kind == "needs_clarification":
+            tag = "needs_clarification"
+        elif generation_result.kind == "model_call_timeout":
+            tag = "generation_timeout"
+        else:
+            tag = "generation_failed"
         messages = _record_rejected_safely(
             store,
             prompt,
