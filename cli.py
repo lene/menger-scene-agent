@@ -52,6 +52,22 @@ changes nothing: `prior_scene` stays put and the render window is untouched. Eit
 loop still goes on to process the line the user actually typed this iteration -- an
 accepted hand edit and a "real" prompt can both be handled in the same iteration, the latter
 seeing the former's freshly-promoted content as its `prior_scene`.
+
+spec-ai-scene-agent story 22 ("interactive retry confirmation and /retry command"): PRD FR7
+requires that a `generation_timeout` (story 15) never auto-retries, and that `/retry` "does
+not blindly resend the last request" without either the scene having changed since the
+failure or an explicit second confirmation. `main()`'s loop tracks a `_RetryState` (the
+failed prompt, the scene at the moment of that failure, and whether a resend has already
+been confirmed once) alongside `prior_scene`/`render_process`. The existing inline
+"run_turn() -> print -> on-accept refresh" block is factored into `_execute_turn()` so both
+the normal dispatch and `/retry`'s resend call the identical path (mirrors story 17's own
+`_accept_and_refresh_render()` factoring). `/retry` (recognized as a dispatch branch
+alongside `_is_consult_input()`, before blank-line/`run_turn()` dispatch) is handled by
+`_handle_retry()`: no pending timeout reports "nothing to retry"; a changed scene resends
+immediately; an unchanged scene arms a confirmation gate on the first `/retry` and resends
+only on the second. `_next_retry_state()` is the single place either dispatch path
+(re)arms the gate on a fresh `"generation_timeout"` or clears it on any other tag -- no other
+`TurnTag` gets retry semantics (PRD FR7 narrows this to `generation_timeout` specifically).
 """
 
 from __future__ import annotations
@@ -61,8 +77,9 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
@@ -123,7 +140,14 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "\n"
             "/ask <question> or /question <question>: a consult turn -- a domain question "
             "answered in prose, grounded in the DSL manifest/corpus and the current scene. "
-            "Never edits the scene, never gauntlet-checked, never consumes a turn ordinal."
+            "Never edits the scene, never gauntlet-checked, never consumes a turn ordinal.\n"
+            "\n"
+            "/retry: resends the prompt that most recently failed with a generation_timeout. "
+            "With no pending timeout, reports there is nothing to retry. If the scene has "
+            "changed since the failure (a hand edit or another accepted turn), resends "
+            "immediately. If unchanged, the first /retry explains nothing has changed and "
+            "requires a second /retry (still unchanged) before actually resending -- never "
+            "auto-retried, per PRD FR7."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -350,6 +374,174 @@ def _accept_and_refresh_render(
         return None
 
 
+@dataclass(frozen=True)
+class _RetryState:
+    """Tracks the most recent `generation_timeout` so `/retry` (story 22, PRD FR7) can tell
+    "resend this" apart from "nothing to retry" and enforce its own confirmation gate.
+    `prompt` is the exact text that failed; `scene_at_failure` is `prior_scene` as it stood
+    at that moment (a plain equality compare against the loop's current `prior_scene` is how
+    `_handle_retry()` detects "the scene changed since the failure" -- a hand edit or another
+    accepted turn always refreshes `prior_scene`, so a stale `scene_at_failure` reliably means
+    "changed"). `confirmed` is `False` until a first `/retry` with an unchanged scene arms the
+    gate; only then does a second `/retry` (still unchanged) actually resend. Reassigned
+    wholesale on every transition (never mutated in place) -- frozen like every other typed
+    outcome in this module."""
+
+    prompt: str
+    scene_at_failure: Optional[str]
+    confirmed: bool
+
+
+def _next_retry_state(
+    result: TurnResult, prompt: str, scene_at_failure: Optional[str]
+) -> Optional[_RetryState]:
+    """Computes the freshly-armed `_RetryState` for a `"generation_timeout"` tag -- `None`
+    for every other tag. A fresh `"generation_timeout"` -- including one produced by a
+    resend -- always re-arms the gate from scratch, unconfirmed (Boundaries & Constraints:
+    "previous confirmation state never carries over across a new failure").
+
+    Callers decide what a `None` return means for THEM, which differs by dispatch path:
+    - The normal per-loop `run_turn()` dispatch (an unrelated prompt the user just typed)
+      only calls this, and only assigns its result, when the tag actually IS
+      `"generation_timeout"` -- an unrelated turn's `accepted`/rejection tag must NOT erase
+      an existing pending retry, precisely so the I/O & Edge-Case Matrix's "scene changed
+      since the failure (a hand edit or another accepted turn happened in between)" row is
+      even reachable: that row's `/retry` still needs the ORIGINAL failed prompt remembered
+      after such an intervening turn, not wiped by it.
+    - `/retry`'s own resend (`_handle_retry`) always assigns this result verbatim, `None`
+      included: once a pending retry has been acted on (resent), it is resolved either way
+      -- a fresh timeout replaces it, anything else clears it, since there is nothing left
+      to retry (a second `/retry` afterward must report "nothing to retry", never resend
+      the same already-resolved prompt again)."""
+    if result.tag == "generation_timeout":
+        return _RetryState(prompt=prompt, scene_at_failure=scene_at_failure, confirmed=False)
+    return None
+
+
+def _execute_turn(
+    prompt: str,
+    prior_scene: Optional[str],
+    manifest: dict,
+    corpus: dict,
+    adapter,
+    store: SceneStore,
+    script_path: str,
+    render_launcher_path: str,
+    render_process: Optional[subprocess.Popen[str]],
+    *,
+    on_stage=None,
+) -> Tuple[Optional[TurnResult], Optional[str], Optional[subprocess.Popen[str]]]:
+    """Factored out of main()'s own inline dispatch block (story 22) so both the normal
+    `run_turn()` dispatch and `/retry`'s resend (`_handle_retry()`) call the identical
+    path, rather than a third copy alongside `check_hand_edit()`'s existing use of
+    `_accept_and_refresh_render()` (Intent: "the resend itself reuses the exact same
+    run_turn() -> print -> accept-and-refresh-render path a normal turn already uses").
+
+    Calls `run_turn()`, prints its result, and on an `"accepted"` tag refreshes
+    `prior_scene`/`render_process` via `_accept_and_refresh_render()` -- exactly the
+    behavior the pre-story-22 inline block had. A `run_turn()` exception is caught here
+    (guarded exactly like the call site it replaces: "a single bad turn must not kill the
+    REPL"), printed as `"Turn error: ..."`, and reported back as a `None` result so the
+    caller can skip any further per-turn processing (retry-state update included) without
+    duplicating the guard.
+
+    Returns `(result, prior_scene, render_process)`: the latter two are the caller's own
+    tracked values, passed back unchanged unless this call's tag was `"accepted"`."""
+    try:
+        result = run_turn(
+            prompt,
+            prior_scene,
+            manifest,
+            corpus,
+            adapter,
+            store,
+            script_path,
+            on_stage=on_stage,
+        )
+    except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
+        print(f"Turn error: {e}")
+        return None, prior_scene, render_process
+
+    print(_format_turn_result(result))
+    if result.tag == "accepted":
+        prior_scene = store.current_scene()
+        render_process = _accept_and_refresh_render(
+            store, render_launcher_path, render_process
+        )
+    return result, prior_scene, render_process
+
+
+def _handle_retry(
+    retry_state: Optional[_RetryState],
+    prior_scene: Optional[str],
+    manifest: dict,
+    corpus: dict,
+    adapter,
+    store: SceneStore,
+    script_path: str,
+    render_launcher_path: str,
+    render_process: Optional[subprocess.Popen[str]],
+    *,
+    on_stage=None,
+) -> Tuple[Optional[TurnResult], Optional[_RetryState], Optional[str], Optional[subprocess.Popen[str]]]:
+    """Implements `/retry`'s confirmation-gate semantics end to end (Boundaries &
+    Constraints, I/O & Edge-Case Matrix): with no pending timeout, reports "nothing to
+    retry" and never calls `run_turn()`; with a changed scene, resends immediately, no gate;
+    with an unchanged scene, the first call arms the gate (explains nothing changed, no
+    model call yet) and only a second call (still unchanged) actually resends.
+
+    Returns `(result, retry_state, prior_scene, render_process)`. `result` is the resend's
+    `TurnResult` when a resend actually happened this call, `None` otherwise (nothing to
+    retry, or an unconfirmed first `/retry` that only armed the gate). `prior_scene`/
+    `render_process` mirror `_execute_turn()`'s own contract -- unchanged unless a resend
+    happened and was accepted."""
+    if retry_state is None:
+        print("Retry: nothing to retry -- no prior generation_timeout to resend.")
+        return None, None, prior_scene, render_process
+
+    scene_changed = prior_scene != retry_state.scene_at_failure
+
+    if not scene_changed and not retry_state.confirmed:
+        # Boundaries & Constraints: "Resending byte-identical input against an unchanged
+        # scene always requires the second /retry -- never a single invocation." No
+        # run_turn() call on this path.
+        print(
+            "Retry: nothing has changed since the last generation_timeout. Type /retry "
+            "again to resend the identical prompt."
+        )
+        armed = _RetryState(
+            prompt=retry_state.prompt,
+            scene_at_failure=retry_state.scene_at_failure,
+            confirmed=True,
+        )
+        return None, armed, prior_scene, render_process
+
+    # Either the scene changed since the failure (resend immediately, no gate) or the gate
+    # was already armed by a prior /retry and the scene is still unchanged (second /retry) --
+    # both resend now, via the exact same call path a normal turn uses.
+    resend_scene = prior_scene
+    result, prior_scene, render_process = _execute_turn(
+        retry_state.prompt,
+        resend_scene,
+        manifest,
+        corpus,
+        adapter,
+        store,
+        script_path,
+        render_launcher_path,
+        render_process,
+        on_stage=on_stage,
+    )
+    if result is None:
+        # run_turn() itself raised -- _execute_turn() already printed "Turn error: ...".
+        # Leave retry_state exactly as it was: an untyped exception carries no tag to
+        # reason about, so neither arming nor clearing the gate is warranted.
+        return None, retry_state, prior_scene, render_process
+
+    new_retry_state = _next_retry_state(result, retry_state.prompt, resend_scene)
+    return result, new_retry_state, prior_scene, render_process
+
+
 def _print_stage(stage: str) -> None:
     # spec-ai-scene-agent story 12 ("live status line"): a multi-second turn (a real model
     # call, later a sandboxed subprocess) prints nothing until fully done without this --
@@ -450,6 +642,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # (or `None` again on a failed refresh) after every subsequent accepted turn.
     render_process: Optional[subprocess.Popen[str]] = None
 
+    # story 22: `None` until a `generation_timeout` occurs, then the failed prompt/scene
+    # snapshot `/retry` needs to implement its own confirmation gate -- threaded the same
+    # way `prior_scene`/`render_process` are.
+    retry_state: Optional[_RetryState] = None
+
     while True:
         try:
             line = input("> ")
@@ -502,36 +699,64 @@ def main(argv: Optional[List[str]] = None) -> int:
                 _record_consult_safely(store, question, answer=consult_result)
             continue
 
-        if not line.strip():
-            continue
-
-        try:
-            result = run_turn(
-                line,
+        # story 22: recognized alongside the /ask/-question check above, before blank-line/
+        # run_turn() dispatch. Exact stripped line, no arguments -- `_handle_retry()` owns
+        # the whole confirmation-gate decision tree (Boundaries & Constraints, I/O &
+        # Edge-Case Matrix).
+        if line.strip() == "/retry":
+            _, retry_state, prior_scene, render_process = _handle_retry(
+                retry_state,
                 prior_scene,
                 manifest,
                 corpus,
                 adapter,
                 store,
                 script_path,
+                render_launcher_path,
+                render_process,
                 on_stage=_print_stage,
             )
-        except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
-            print(f"Turn error: {e}")
             continue
-        print(_format_turn_result(result))
-        if result.tag == "accepted":
-            prior_scene = store.current_scene()
 
-            # story 21: refresh_render_window() is only ever called after an "accepted"
-            # TurnResult (Boundaries & Constraints) -- never on any rejection tag. The
-            # adapter terminates `render_process` unconditionally before attempting the new
-            # launch, so the old handle is invalid either way once the call returns --
-            # `render_process` is therefore always overwritten below, never conditionally
-            # kept (Design Notes).
-            render_process = _accept_and_refresh_render(
-                store, render_launcher_path, render_process
-            )
+        if not line.strip():
+            continue
+
+        # story 22: the pre-story-22 inline "run_turn() -> print -> on-accept refresh"
+        # block is now `_execute_turn()`, shared with `/retry`'s own resend above -- see its
+        # docstring for the exact contract (including the run_turn()-exception guard this
+        # replaces verbatim).
+        scene_before_turn = prior_scene
+        result, prior_scene, render_process = _execute_turn(
+            line,
+            prior_scene,
+            manifest,
+            corpus,
+            adapter,
+            store,
+            script_path,
+            render_launcher_path,
+            render_process,
+            on_stage=_print_stage,
+        )
+        if result is not None and result.tag == "generation_timeout":
+            # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
+            # the gate from scratch. Any other tag -- including a run_turn() exception
+            # (result is None) -- deliberately leaves an existing pending retry_state
+            # untouched: an intervening accepted/rejected turn must not erase the memory of
+            # an earlier generation_timeout, or the I/O & Edge-Case Matrix's "scene changed
+            # since the failure via another accepted turn" row could never be reached (see
+            # _next_retry_state's docstring).
+            #
+            # Review round (blind-hunter, not corroborated -- documented, not changed): an
+            # ALREADY-ARMED gate (confirmed=True) survives an intervening non-timeout,
+            # non-accepted rejection the same way -- retry_state is untouched here since the
+            # new tag isn't "generation_timeout". A later /retry would then resend without a
+            # fresh second confirmation, even though a turn happened in between. This is
+            # deliberate under the frozen contract as written (only a NEW timeout re-arms;
+            # scene-content equality, not turn history, is what "unchanged" means throughout
+            # this story), but is flagged here in case a future spec revision wants an
+            # intervening turn of any kind to also reset an already-armed confirmation.
+            retry_state = _next_retry_state(result, line, scene_before_turn)
 
     return 0
 

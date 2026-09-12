@@ -1385,3 +1385,386 @@ def test_hand_edit_accepted_and_same_iterations_real_prompt_see_it_as_prior_scen
     # The hand edit really was promoted under a brand-new ordinal (002.scala), never an
     # in-place rewrite of 001.scala.
     assert (store.session_dir / "002.scala").read_text(encoding="utf-8") == edited_text
+
+
+# --- story 22: /retry command and its confirmation-gate semantics (PRD FR7) ----------------
+# One test per I/O & Edge-Case Matrix row, driven through cli.main() like every other
+# dispatch branch in this file.
+
+
+def test_retry_with_no_prior_timeout_reports_nothing_to_retry(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/retry"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == ["Retry: nothing to retry -- no prior generation_timeout to resend."]
+
+
+def test_first_retry_after_timeout_with_unchanged_scene_arms_gate_without_resending(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        return TurnResult(tag="generation_timeout", messages=["model hung"])
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["timeout prompt", "/retry"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The first /retry must NOT call run_turn() again -- only the original prompt's own
+    # failed attempt is in the log.
+    assert call_log == ["timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "Turn None: generation_timeout - model hung",
+        "Retry: nothing has changed since the last generation_timeout. Type /retry "
+        "again to resend the identical prompt.",
+    ]
+
+
+def test_second_retry_with_still_unchanged_scene_resends_exactly_once(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["timeout prompt", "/retry", "/retry"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The resend must reuse the exact same remembered prompt -- not the literal "/retry"
+    # text -- and must happen only once (on the SECOND /retry, not the first).
+    assert call_log == ["timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "Turn None: generation_timeout - model hung",
+        "Retry: nothing has changed since the last generation_timeout. Type /retry "
+        "again to resend the identical prompt.",
+        "Turn 1: accepted",
+        "Render window: refreshed",
+    ]
+
+
+def test_retry_with_scene_changed_via_hand_edit_resends_immediately_no_gate(
+    monkeypatch, tmp_path, capsys
+):
+    # The frozen I/O & Edge-Case Matrix names both triggers for "scene changed since the
+    # failure" -- "a hand edit OR another accepted turn" -- and check_hand_edit() never
+    # goes through run_turn()/_execute_turn() at all, so this is a distinct code path from
+    # test_retry_with_scene_changed_since_failure_resends_immediately_no_gate above.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    run_turn_calls = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        run_turn_calls.append(prompt)
+        if len(run_turn_calls) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        # Second call: the /retry resend of the original failed prompt.
+        store_arg.accept("object C:\n  val x = 3\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=2)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+
+    hand_edit_calls = []
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        hand_edit_calls.append(known_scene)
+        if len(hand_edit_calls) == 2:
+            store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")
+            return TurnResult(tag="accepted", messages=[], ordinal=1)
+        return None
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["timeout prompt", "", "/retry"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The hand edit (detected on the second loop iteration) changed the tracked scene --
+    # the single /retry on the third iteration resends the ORIGINAL failed prompt right
+    # away, no confirmation-gate message in between.
+    assert run_turn_calls == ["timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert not any("nothing has changed" in line for line in out_lines)
+    assert "Turn 2: accepted" in out_lines
+
+
+def test_retry_with_scene_changed_since_failure_resends_immediately_no_gate(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        idx = len(call_log)
+        if idx == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        if idx == 2:
+            store_arg.accept("object A:\n  val x = 1\n", prompt)
+            return TurnResult(tag="accepted", messages=[], ordinal=1)
+        # idx == 3: the /retry resend of the original failed prompt.
+        store_arg.accept("object B:\n  val x = 2\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=2)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input",
+        _scripted_input(["timeout prompt", "unrelated accepted prompt", "/retry"]),
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # An intervening accepted turn changed the scene -- the single /retry resends the
+    # ORIGINAL failed prompt right away, no confirmation-gate message in between.
+    assert call_log == ["timeout prompt", "unrelated accepted prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "Turn None: generation_timeout - model hung",
+        "Turn 1: accepted",
+        "Render window: refreshed",
+        "Turn 2: accepted",
+        "Render window: refreshed",
+    ]
+    assert not any("nothing has changed" in line for line in out_lines)
+
+
+def test_retry_resend_that_times_out_again_resets_an_unarmed_gate(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        return TurnResult(tag="generation_timeout", messages=["model hung again"])
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input",
+        _scripted_input(["timeout prompt", "/retry", "/retry", "/retry"]),
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # Only two run_turn() calls total: the original failing prompt, and the one resend
+    # triggered by the SECOND /retry. The fourth input ("/retry" again) must NOT resend a
+    # third time -- a fresh, un-armed retry state replaced the old one when the resend
+    # itself timed out again, so it must be re-confirmed from scratch.
+    assert call_log == ["timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    arm_message = (
+        "Retry: nothing has changed since the last generation_timeout. Type /retry "
+        "again to resend the identical prompt."
+    )
+    assert out_lines == [
+        "Turn None: generation_timeout - model hung again",
+        arm_message,
+        "Turn None: generation_timeout - model hung again",
+        arm_message,
+    ]
+
+
+# --- Story 22 review round: gaps two independent reviewers (blind-hunter, verification-gap)
+# corroborated, plus one edge-case-hunter reject-adjacent gap worth locking down anyway --------
+
+
+def test_retry_resend_that_raises_leaves_retry_state_untouched(monkeypatch, tmp_path, capsys):
+    # blind-hunter + verification-gap, independently corroborated: an untyped exception
+    # during a /retry resend must not silently clear the pending retry -- the user should
+    # still be able to /retry again rather than being told "nothing to retry".
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        if len(call_log) == 2:
+            raise RuntimeError("transient network blip")
+        return TurnResult(tag="generation_timeout", messages=["model hung"])
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["timeout prompt", "/retry", "/retry", "/retry"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # Sequence: 1) fails with a timeout, arming the gate. 2) first /retry only arms/confirms
+    # (no run_turn call). 3) second /retry resends -- run_turn RAISES this time. 4) a third
+    # /retry must still see the pending retry_state (not wiped by the exception) and resend
+    # again, rather than reporting "nothing to retry".
+    assert call_log == ["timeout prompt", "timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert not any("nothing to retry" in line for line in out_lines)
+    assert any("Turn error: transient network blip" in line for line in out_lines)
+
+
+def test_normal_turn_exception_does_not_clear_a_pending_retry_state(
+    monkeypatch, tmp_path, capsys
+):
+    # verifies the main-loop guard itself: an unrelated prompt's run_turn() raising (result is
+    # None) must leave an existing pending retry_state untouched, exactly like any other
+    # non-generation_timeout tag would.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        if len(call_log) == 2:
+            raise RuntimeError("unrelated turn's own failure")
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input",
+        _scripted_input(["timeout prompt", "an unrelated prompt", "/retry", "/retry"]),
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The gate is still unconfirmed after the unrelated prompt's own exception (retry_state
+    # untouched) -- the first post-exception /retry only arms it, the second resends
+    # "timeout prompt". Either way, retry_state survived the exception in between.
+    assert call_log == ["timeout prompt", "an unrelated prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert not any("nothing to retry" in line for line in out_lines)
+
+
+def test_retry_resend_landing_on_a_non_timeout_rejection_clears_the_gate(
+    monkeypatch, tmp_path, capsys
+):
+    # A resend that lands on some other rejection tag (not generation_timeout, not accepted)
+    # resolves the pending retry either way -- a further /retry must report "nothing to
+    # retry", never silently resend the same already-resolved prompt again.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        if len(call_log) == 2:
+            return TurnResult(tag="local_finding", messages=["allowlist: disallowed import"])
+        raise AssertionError("must not be called a third time")
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["timeout prompt", "/retry", "/retry", "/retry"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # 1) timeout, arms gate. 2) first /retry only confirms. 3) second /retry resends -- lands
+    # on local_finding, resolving (clearing) the gate. 4) third /retry must report "nothing
+    # to retry", never call run_turn() a third time.
+    assert call_log == ["timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines[-1] == "Retry: nothing to retry -- no prior generation_timeout to resend."
+
+
+def test_double_retry_after_a_successful_resend_reports_nothing_to_retry(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="generation_timeout", messages=["model hung"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["timeout prompt", "/retry", "/retry", "/retry"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The resend (second /retry) succeeds. A THIRD /retry immediately after must not
+    # re-resend the now-resolved prompt.
+    assert call_log == ["timeout prompt", "timeout prompt"]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines[-1] == "Retry: nothing to retry -- no prior generation_timeout to resend."
