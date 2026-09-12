@@ -279,6 +279,56 @@ def test_generation_failure_short_circuits_before_any_local_check_or_renderer_ca
     assert entries[-1]["outcome"] == "rejected"
 
 
+# --- spec-ai-scene-agent story 15: model-call timeout gets its own distinct TurnTag --------
+
+
+def test_generation_timeout_maps_to_a_distinct_turn_tag_not_generation_failed(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="model call timed out"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "generation_timeout"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["model call timed out"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+def test_generation_timeout_via_revise_maps_to_a_distinct_turn_tag_not_generation_failed(
+    tmp_path, monkeypatch
+):
+    # The existing generation-timeout test only covers the generate()/prior_scene=None path
+    # -- mirrors tests/test_generation.py testing both generate() and revise() for the same
+    # mapping (core/generation.py's _model_error_to_generation_error is shared by both).
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="model call timed out"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "change it",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "generation_timeout"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["model call timed out"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
 # --- revise() path: prior_scene is not None -------------------------------------------------
 
 

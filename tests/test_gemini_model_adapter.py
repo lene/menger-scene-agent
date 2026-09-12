@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from google import genai
+
 from adapters.model import ModelRequest, MissingAPIKeyError, ModelError
 from adapters.gemini_model import GeminiModelAdapter
 
@@ -180,6 +182,24 @@ def test_complete_maps_an_sdk_api_error_from_the_call_to_a_typed_error():
     assert result.kind == "call_failed"
 
 
+def test_complete_maps_a_genuine_api_error_to_call_failed_not_shadowed_by_timeout_reorder():
+    # Regression test (review round): the `except (TimeoutError, httpx.TimeoutException)`
+    # clause sits ahead of `except errors.APIError` in complete() -- this proves that
+    # reordering didn't shadow the APIError branch for a real, non-timeout `errors.APIError`
+    # (constructed directly, not via the `ClientError` subclass the test above already uses).
+    from google.genai import errors
+
+    def raise_it(**kwargs):
+        raise errors.APIError(code=500, response_json={"error": {"message": "server error"}})
+
+    adapter = _adapter_with_fake_client(raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "call_failed"
+
+
 def test_complete_maps_a_raised_bare_exception_from_the_sdk_call_to_a_typed_error():
     def raise_it(**kwargs):
         raise RuntimeError("simulated SDK failure")
@@ -190,3 +210,113 @@ def test_complete_maps_a_raised_bare_exception_from_the_sdk_call_to_a_typed_erro
 
     assert isinstance(result, ModelError)
     assert result.kind == "call_failed"
+
+
+# --- spec-ai-scene-agent story 15: model-call timeout, typed and distinct -----------------
+#
+# google.genai.errors has no dedicated timeout exception type -- the SDK's default sync HTTP
+# client re-raises the underlying httpx timeout exception verbatim after exhausting its own
+# retries (confirmed against the installed google-genai package), so that's what complete()
+# must catch, before the generic `except Exception` would otherwise swallow it.
+
+
+def test_complete_maps_an_httpx_timeout_exception_to_a_distinct_timeout_kind():
+    import httpx
+
+    exc = httpx.ReadTimeout("simulated timeout")
+
+    def raise_it(**kwargs):
+        raise exc
+
+    adapter = _adapter_with_fake_client(raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "timeout"
+    # The original exception must be preserved as `cause`, not swallowed.
+    assert result.cause is exc
+
+
+def test_complete_maps_a_bare_timeout_error_to_a_distinct_timeout_kind():
+    exc = TimeoutError("simulated timeout")
+
+    def raise_it(**kwargs):
+        raise exc
+
+    adapter = _adapter_with_fake_client(raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "timeout"
+    # The original exception must be preserved as `cause`, not swallowed.
+    assert result.cause is exc
+
+
+def test_complete_does_not_miscategorize_a_non_timeout_httpx_exception_as_timeout():
+    # Negative test (review round): httpx.ConnectError is NOT in the timeout exception
+    # hierarchy caught by `except (TimeoutError, httpx.TimeoutException)` -- it must fall
+    # through to a generic call_failed, never be miscategorized as a timeout.
+    import httpx
+
+    def raise_it(**kwargs):
+        raise httpx.ConnectError("simulated connection failure")
+
+    adapter = _adapter_with_fake_client(raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "call_failed"
+
+
+def test_construction_forwards_an_explicit_timeout_as_milliseconds_via_http_options(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    adapter = GeminiModelAdapter(api_key="test-key-not-a-real-credential", timeout=5.0)
+
+    assert adapter._client._api_client._http_options.timeout == 5000
+
+
+def test_construction_leaves_the_sdk_default_timeout_alone_when_unset(monkeypatch):
+    # Boundaries & Constraints: "No adapter's default behavior changes when timeout is left
+    # unset" -- leaving `http_options` unset entirely (rather than passing one with
+    # `timeout=None`) preserves the SDK's own default.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    adapter = GeminiModelAdapter(api_key="test-key-not-a-real-credential")
+    reference_client = genai.Client(api_key="test-key-not-a-real-credential")
+
+    assert (
+        adapter._client._api_client._http_options.timeout
+        == reference_client._api_client._http_options.timeout
+    )
+
+
+# --- Patch-level fixes (review round) -----------------------------------------------------
+
+
+def test_construction_rounds_the_seconds_to_milliseconds_conversion_not_truncates(monkeypatch):
+    # int(timeout * 1000) would truncate 0.1006s to 100ms instead of rounding to 101ms.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    adapter = GeminiModelAdapter(api_key="test-key-not-a-real-credential", timeout=0.1006)
+
+    assert adapter._client._api_client._http_options.timeout == 101
+
+
+def test_construction_floors_a_tiny_positive_timeout_at_one_millisecond_not_zero(monkeypatch):
+    # A tiny-but-positive timeout (e.g. 0.0003s) must never round down to a degenerate 0ms.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    adapter = GeminiModelAdapter(api_key="test-key-not-a-real-credential", timeout=0.0003)
+
+    assert adapter._client._api_client._http_options.timeout == 1
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -1.0, float("nan"), float("inf"), float("-inf")])
+def test_construction_rejects_a_non_finite_or_non_positive_timeout(bad_timeout, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError):
+        GeminiModelAdapter(api_key="test-key-not-a-real-credential", timeout=bad_timeout)

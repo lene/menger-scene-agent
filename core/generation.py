@@ -90,7 +90,16 @@ def _build_system_prompt(manifest: dict, corpus: dict) -> str:
 
 
 def _model_error_to_generation_error(error: ModelError) -> GenerationError:
-    kind = "model_call_failed" if error.kind == "call_failed" else "invalid_model_output"
+    # spec-ai-scene-agent story 15: a timeout is mapped to its own distinct kind, never
+    # folded into "model_call_failed" -- otherwise a hung model-provider request would be
+    # indistinguishable from a network error or a rate limit all the way up through
+    # `run_turn()`'s eventual `TurnTag`.
+    if error.kind == "timeout":
+        kind = "model_call_timeout"
+    elif error.kind == "call_failed":
+        kind = "model_call_failed"
+    else:
+        kind = "invalid_model_output"
     return GenerationError(kind=kind, message=error.message, cause=error.cause)
 
 

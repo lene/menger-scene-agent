@@ -133,6 +133,28 @@ def test_revise_model_call_failure_is_also_a_typed_error():
     assert result.kind == "model_call_failed"
 
 
+# --- spec-ai-scene-agent story 15: model-call timeout, typed and distinct -----------------
+
+
+def test_model_call_timeout_maps_to_a_distinct_generation_error_kind_not_call_failed():
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="request timed out"))
+
+    result = generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert isinstance(result, GenerationError)
+    assert result.kind == "model_call_timeout"
+    assert result.message == "request timed out"
+
+
+def test_revise_model_call_timeout_is_also_mapped_to_the_distinct_kind():
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="request timed out"))
+
+    result = revise("prompt", "prior scene text", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert isinstance(result, GenerationError)
+    assert result.kind == "model_call_timeout"
+
+
 # --- Edge-Case Matrix: model returns non-scene text ---------------------------------------
 
 

@@ -146,13 +146,20 @@ def run_turn(
         # for all of them: gauntlet.check_*() takes a `str`, so a generation failure must be
         # handled before any local check runs -- no staging file is ever written, no
         # renderer call is ever made, same as the local-finding path below.
+        #
+        # spec-ai-scene-agent story 15: a model-call timeout gets its own distinct tag
+        # ("generation_timeout") rather than the generic "generation_failed" every other
+        # GenerationError kind maps to -- a user seeing "Turn N: generation_failed" has no
+        # way to tell a hung model-provider request apart from any other generation failure.
+        is_timeout = generation_result.kind == "model_call_timeout"
+        tag = "generation_timeout" if is_timeout else "generation_failed"
         messages = _record_rejected_safely(
             store,
             prompt,
-            f"generation_failed: {generation_result.message}",
+            f"{tag}: {generation_result.message}",
             [generation_result.message],
         )
-        return TurnResult(tag="generation_failed", messages=messages)
+        return TurnResult(tag=tag, messages=messages)
 
     scene_text = generation_result
 

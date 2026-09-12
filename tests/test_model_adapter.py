@@ -241,3 +241,71 @@ def test_complete_maps_a_raised_exception_from_the_sdk_call_to_a_typed_error():
 
     assert isinstance(result, ModelError)
     assert result.kind == "call_failed"
+
+
+# --- spec-ai-scene-agent story 15: model-call timeout, typed and distinct -----------------
+
+
+def test_complete_maps_an_api_timeout_error_to_a_distinct_timeout_kind_not_call_failed():
+    import anthropic
+    import httpx
+
+    exc = anthropic.APITimeoutError(request=httpx.Request("POST", "https://example.com"))
+
+    def raise_it(**kwargs):
+        raise exc
+
+    adapter = _adapter_with_fake_client(raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "timeout"
+    # The original exception must be preserved as `cause`, not swallowed -- a caller
+    # inspecting the failure (or re-raising it for a traceback) needs the real SDK exception.
+    assert result.cause is exc
+
+
+def test_construction_forwards_an_explicit_timeout_to_the_sdk_client(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    adapter = AnthropicModelAdapter(api_key="test-key-not-a-real-credential", timeout=5.0)
+
+    assert adapter._client.timeout == 5.0
+
+
+def test_construction_leaves_the_sdk_default_timeout_alone_when_unset(monkeypatch):
+    # Boundaries & Constraints: "No adapter's default behavior changes when timeout is left
+    # unset" -- passing `timeout=None` to the SDK client would override its own internal
+    # default with "no timeout", which is not the same thing as leaving it alone. Compares
+    # against a bare `anthropic.Anthropic(api_key=...)` construction (no `timeout` kwarg at
+    # all) to prove this adapter doesn't pass one either when its own `timeout` is unset.
+    import anthropic
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    adapter = AnthropicModelAdapter(api_key="test-key-not-a-real-credential")
+    reference_client = anthropic.Anthropic(api_key="test-key-not-a-real-credential")
+
+    assert adapter._client.timeout == reference_client.timeout
+
+
+# --- Patch-level fix (review round): reject a non-finite/non-positive timeout ------------
+# before it's forwarded straight to the SDK client unchecked. Mirrors
+# adapters/render_window.py's `grace_period <= 0` precondition -- a programmer-error
+# precondition, not a modeled runtime outcome.
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -1.0, float("nan"), float("inf"), float("-inf")])
+def test_construction_rejects_a_non_finite_or_non_positive_timeout(bad_timeout, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(ValueError):
+        AnthropicModelAdapter(api_key="test-key-not-a-real-credential", timeout=bad_timeout)
+
+
+def test_construction_accepts_a_small_positive_timeout(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    adapter = AnthropicModelAdapter(api_key="test-key-not-a-real-credential", timeout=0.1)
+
+    assert adapter._client.timeout == 0.1

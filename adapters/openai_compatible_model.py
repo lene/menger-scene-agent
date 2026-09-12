@@ -16,6 +16,7 @@ integration path each of these vendors documents for third-party OpenAI-SDK comp
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -56,7 +57,11 @@ class OpenAICompatibleModelAdapter:
     """
 
     def __init__(
-        self, provider: str, api_key: Optional[str] = None, model: Optional[str] = None
+        self,
+        provider: str,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> None:
         spec = _PROVIDERS.get(provider)
         if spec is None:
@@ -70,10 +75,21 @@ class OpenAICompatibleModelAdapter:
                 f"{spec.api_key_env} is not set -- the {spec.name} model adapter refuses to "
                 "construct without it, before making any network call."
             )
+        # A programmer-error precondition, not a modeled runtime outcome (mirrors
+        # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
+        # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
+        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
+            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
         import openai  # imported lazily: keeps the SDK out of every module that merely
 
         # imports this file's type annotations without ever constructing this adapter.
-        self._client = openai.OpenAI(api_key=key, base_url=spec.base_url)
+        # `timeout` is only forwarded when explicitly set -- passing `timeout=None` to the
+        # SDK client disables its own default timeout rather than leaving it alone (see
+        # `adapters/model.py`'s `AnthropicModelAdapter.__init__` for the same reasoning).
+        client_kwargs: dict[str, object] = {"api_key": key, "base_url": spec.base_url}
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        self._client = openai.OpenAI(**client_kwargs)
         self._model = model or spec.default_model
         self._provider_name = spec.name
 
@@ -88,6 +104,15 @@ class OpenAICompatibleModelAdapter:
                     {"role": "system", "content": request.system_prompt},
                     {"role": "user", "content": request.user_prompt},
                 ],
+            )
+        except openai.APITimeoutError as e:
+            # Must come before `APIConnectionError` below -- `APITimeoutError` is a subclass
+            # of it, so the broader except would otherwise shadow this one and every timeout
+            # would be misreported as a generic network error.
+            return ModelError(
+                kind="timeout",
+                message=f"{self._provider_name} API call timed out: {e}",
+                cause=e,
             )
         except openai.APIConnectionError as e:
             return ModelError(

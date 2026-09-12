@@ -17,12 +17,13 @@ which provider is in play.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Protocol, Union
 
-ModelErrorKind = Literal["call_failed", "invalid_output"]
+ModelErrorKind = Literal["call_failed", "invalid_output", "timeout"]
 
 
 @dataclass(frozen=True)
@@ -109,17 +110,34 @@ class AnthropicModelAdapter:
     `core/generation.py`'s `generate()`/`revise()` now call `extract_scene_text` themselves,
     on the raw text this method returns."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = DEFAULT_MODEL,
+        timeout: Optional[float] = None,
+    ) -> None:
         key = api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise MissingAPIKeyError(
                 "ANTHROPIC_API_KEY is not set -- the Anthropic model adapter refuses to "
                 "construct without it, before making any network call."
             )
+        # A programmer-error precondition, not a modeled runtime outcome (mirrors
+        # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
+        # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
+        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
+            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
         import anthropic  # imported lazily: keeps the SDK out of every module that merely
 
         # imports this file's type annotations without ever constructing this adapter.
-        self._client = anthropic.Anthropic(api_key=key)
+        # `timeout` is only forwarded when explicitly set -- passing `timeout=None` to the
+        # SDK client disables its own default timeout rather than leaving it alone, which
+        # would change today's behavior for every caller that doesn't set it (Boundaries &
+        # Constraints: "No adapter's default behavior changes when timeout is left unset").
+        client_kwargs: dict[str, object] = {"api_key": key}
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        self._client = anthropic.Anthropic(**client_kwargs)
         self._model = model
 
     def complete(self, request: ModelRequest) -> ModelResult:
@@ -133,6 +151,13 @@ class AnthropicModelAdapter:
                 messages=[{"role": "user", "content": request.user_prompt}],
                 betas=[_FALLBACK_BETA],
                 fallbacks="default",
+            )
+        except anthropic.APITimeoutError as e:
+            # Must come before `APIConnectionError` below -- `APITimeoutError` is a subclass
+            # of it, so the broader except would otherwise shadow this one and every timeout
+            # would be misreported as a generic network error.
+            return ModelError(
+                kind="timeout", message=f"Anthropic API call timed out: {e}", cause=e
             )
         except anthropic.APIConnectionError as e:
             return ModelError(

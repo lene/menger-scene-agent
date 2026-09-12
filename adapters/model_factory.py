@@ -20,37 +20,37 @@ from typing import Callable, Dict, Optional
 from adapters.model import ModelAdapter, UnknownProviderError
 
 
-def _build_anthropic() -> ModelAdapter:
+def _build_anthropic(timeout: Optional[float]) -> ModelAdapter:
     from adapters.model import AnthropicModelAdapter
 
-    return AnthropicModelAdapter()
+    return AnthropicModelAdapter(timeout=timeout)
 
 
-def _build_gemini() -> ModelAdapter:
+def _build_gemini(timeout: Optional[float]) -> ModelAdapter:
     from adapters.gemini_model import GeminiModelAdapter
 
-    return GeminiModelAdapter()
+    return GeminiModelAdapter(timeout=timeout)
 
 
-def _build_deepseek() -> ModelAdapter:
+def _build_deepseek(timeout: Optional[float]) -> ModelAdapter:
     from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 
-    return OpenAICompatibleModelAdapter(provider="deepseek")
+    return OpenAICompatibleModelAdapter(provider="deepseek", timeout=timeout)
 
 
-def _build_openai() -> ModelAdapter:
+def _build_openai(timeout: Optional[float]) -> ModelAdapter:
     from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 
-    return OpenAICompatibleModelAdapter(provider="openai")
+    return OpenAICompatibleModelAdapter(provider="openai", timeout=timeout)
 
 
-def _build_kimi() -> ModelAdapter:
+def _build_kimi(timeout: Optional[float]) -> ModelAdapter:
     from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 
-    return OpenAICompatibleModelAdapter(provider="kimi")
+    return OpenAICompatibleModelAdapter(provider="kimi", timeout=timeout)
 
 
-_FACTORIES: Dict[str, Callable[[], ModelAdapter]] = {
+_FACTORIES: Dict[str, Callable[[Optional[float]], ModelAdapter]] = {
     "anthropic": _build_anthropic,
     "gemini": _build_gemini,
     "deepseek": _build_deepseek,
@@ -64,7 +64,7 @@ DEFAULT_PROVIDER = "anthropic"
 _ENV_VAR = "MENGER_AGENT_MODEL_PROVIDER"
 
 
-def get_model_adapter(provider: Optional[str] = None) -> ModelAdapter:
+def get_model_adapter(provider: Optional[str] = None, timeout: Optional[float] = None) -> ModelAdapter:
     """Resolves and constructs a `ModelAdapter` for the selected provider.
 
     Precedence (mirrors `AnthropicModelAdapter.__init__`'s own arg-beats-env-var shape, so
@@ -73,11 +73,21 @@ def get_model_adapter(provider: Optional[str] = None) -> ModelAdapter:
     is used if set to a non-empty value (case-insensitive, whitespace-stripped). Otherwise
     `DEFAULT_PROVIDER`.
 
+    `timeout` (story 15, "model-call timeout, typed and distinct from other failures") is
+    forwarded verbatim to whichever provider builder is selected -- `None` (the default)
+    leaves every adapter's own SDK-default timeout behavior unchanged, exactly as before this
+    parameter existed.
+
     Raises `UnknownProviderError` immediately -- before any SDK import or network call -- if
     the resolved provider name isn't recognized; never silently falls back to the default for
     a bad explicit selection. Raises `MissingAPIKeyError` (unchanged, propagated from the
     provider's own builder) if the resolved provider's API key isn't set; not caught or
-    wrapped here, so callers can catch one exception type regardless of provider.
+    wrapped here, so callers can catch one exception type regardless of provider. Also raises
+    `ValueError` (propagated from the constructed adapter's own `__init__`, unchanged) if
+    `timeout` is not `None` and isn't a finite, positive number -- a zero, negative, NaN, or
+    infinite `timeout` is a programmer error rejected before any network call, the same
+    precondition every adapter (`AnthropicModelAdapter`, `GeminiModelAdapter`,
+    `OpenAICompatibleModelAdapter`) enforces itself.
     """
     resolved = provider if provider is not None else os.environ.get(_ENV_VAR)
     resolved = (resolved or DEFAULT_PROVIDER).strip().lower()
@@ -88,4 +98,4 @@ def get_model_adapter(provider: Optional[str] = None) -> ModelAdapter:
             f"Unknown model provider '{resolved}' -- valid values: "
             f"{', '.join(sorted(_FACTORIES))}"
         )
-    return build()
+    return build(timeout)

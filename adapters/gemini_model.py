@@ -21,6 +21,7 @@ SDK, not the deprecated `google-generativeai` package.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Optional
 
@@ -54,22 +55,64 @@ class GeminiModelAdapter:
     `revise()` apply `extract_scene_text` themselves, on the raw text this method returns.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = DEFAULT_MODEL,
+        timeout: Optional[float] = None,
+    ) -> None:
         key = api_key if api_key is not None else os.environ.get("GEMINI_API_KEY")
         if not key:
             raise MissingAPIKeyError(
                 "GEMINI_API_KEY is not set -- the Gemini model adapter refuses to construct "
                 "without it, before making any network call."
             )
+        # A programmer-error precondition, not a modeled runtime outcome (mirrors
+        # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
+        # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
+        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
+            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
         from google import genai  # imported lazily: keeps the SDK out of every module that
+        from google.genai import types
 
         # merely imports this file's type annotations without ever constructing this adapter.
-        self._client = genai.Client(api_key=key)
+        # `timeout` is only forwarded when explicitly set -- leaving `http_options` unset
+        # preserves the SDK's own default timeout exactly (see
+        # `adapters/model.py`'s `AnthropicModelAdapter.__init__` for the same reasoning).
+        # `HttpOptions.timeout` is in milliseconds per the SDK's own convention (verified
+        # against the installed `google-genai` package), while this adapter's own `timeout`
+        # parameter is in seconds, matching the other two adapters' convention. Rounded
+        # (not truncated) to the nearest millisecond, with a 1ms floor -- `int(timeout * 1000)`
+        # would truncate (0.1005s -> 100ms instead of 101ms) and could round a tiny-but-positive
+        # timeout (e.g. 0.0003s) down to 0ms, a degenerate timeout the caller never asked for.
+        client_kwargs: dict[str, object] = {"api_key": key}
+        if timeout is not None:
+            client_kwargs["http_options"] = types.HttpOptions(
+                timeout=max(1, round(timeout * 1000))
+            )
+        self._client = genai.Client(**client_kwargs)
         self._model = model
 
     def complete(self, request: ModelRequest) -> ModelResult:
+        import httpx  # the google-genai SDK's default sync HTTP client is an httpx.Client
         from google.genai import errors, types
 
+        # subclass (confirmed against the installed package: `SyncHttpxClient(httpx.Client)`)
+        # and re-raises the underlying transport exception verbatim after exhausting its own
+        # retries on a timeout -- `google.genai.errors` has no dedicated timeout exception
+        # type (confirmed: no `Timeout`/`TimeoutError` member), so the raw `httpx` exception
+        # (plus the builtin `TimeoutError`, for any code path that raises that instead) is
+        # what must be caught here, before the generic `except Exception` below would
+        # otherwise swallow it into an indistinguishable `call_failed`.
+        #
+        # Caveat worth keeping visible in the code, not just in a chat transcript: this
+        # detection depends on google-genai's internal transport choice (an undocumented
+        # implementation detail, not a public contract), confirmed only against the version
+        # of the SDK installed when this was written. A future SDK upgrade that swaps its
+        # default sync transport away from httpx would silently break this except clause --
+        # a genuine timeout would then fall through to the generic `except Exception` below
+        # and be misreported as `call_failed` instead of `timeout`, with nothing catching the
+        # regression until that upgrade actually happens.
         try:
             response = self._client.models.generate_content(
                 model=self._model,
@@ -79,6 +122,8 @@ class GeminiModelAdapter:
                     max_output_tokens=_MAX_TOKENS,
                 ),
             )
+        except (TimeoutError, httpx.TimeoutException) as e:
+            return ModelError(kind="timeout", message=f"Gemini API call timed out: {e}", cause=e)
         except errors.APIError as e:
             return ModelError(kind="call_failed", message=f"Gemini API returned an error: {e}", cause=e)
         except Exception as e:  # noqa: BLE001 -- never let a raw exception escape the adapter

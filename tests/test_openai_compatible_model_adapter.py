@@ -200,3 +200,60 @@ def test_complete_error_message_names_the_failing_provider():
 
     assert isinstance(result, ModelError)
     assert "DeepSeek" in result.message
+
+
+# --- spec-ai-scene-agent story 15: model-call timeout, typed and distinct -----------------
+
+
+def test_complete_maps_an_api_timeout_error_to_a_distinct_timeout_kind_not_call_failed():
+    import openai
+    import httpx
+
+    exc = openai.APITimeoutError(request=httpx.Request("POST", "https://example.com"))
+
+    def raise_it(**kwargs):
+        raise exc
+
+    adapter = _adapter_with_fake_client("deepseek", raise_it)
+
+    result = adapter.complete(_A_REQUEST)
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "timeout"
+    # The original exception must be preserved as `cause`, not swallowed.
+    assert result.cause is exc
+
+
+@pytest.mark.parametrize("provider", ["deepseek", "openai", "kimi"])
+def test_construction_forwards_an_explicit_timeout_to_the_sdk_client(provider):
+    adapter = OpenAICompatibleModelAdapter(
+        provider=provider, api_key="test-key-not-a-real-credential", timeout=5.0
+    )
+
+    assert adapter._client.timeout == 5.0
+
+
+@pytest.mark.parametrize("provider", ["deepseek", "openai", "kimi"])
+def test_construction_leaves_the_sdk_default_timeout_alone_when_unset(provider):
+    # Boundaries & Constraints: "No adapter's default behavior changes when timeout is left
+    # unset" -- passing `timeout=None` to the SDK client would override its own internal
+    # default with "no timeout", not leave it alone. Compared against a bare
+    # `openai.OpenAI(api_key=..., base_url=...)` construction (no `timeout` kwarg at all).
+    import openai
+
+    spec = _PROVIDERS[provider]
+    adapter = OpenAICompatibleModelAdapter(provider=provider, api_key="test-key-not-a-real-credential")
+    reference_client = openai.OpenAI(api_key="test-key-not-a-real-credential", base_url=spec.base_url)
+
+    assert adapter._client.timeout == reference_client.timeout
+
+
+# --- Patch-level fix (review round): reject a non-finite/non-positive timeout ------------
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -1.0, float("nan"), float("inf"), float("-inf")])
+def test_construction_rejects_a_non_finite_or_non_positive_timeout(bad_timeout):
+    with pytest.raises(ValueError):
+        OpenAICompatibleModelAdapter(
+            provider="deepseek", api_key="test-key-not-a-real-credential", timeout=bad_timeout
+        )

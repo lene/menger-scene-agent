@@ -110,6 +110,27 @@ def test_missing_key_for_the_selected_provider_propagates_unchanged(monkeypatch)
         get_model_adapter(provider="deepseek")
 
 
+# --- Patch-level fix (review round): `timeout` threading had zero test coverage ----------
+
+
+def test_timeout_is_threaded_through_to_the_constructed_anthropic_adapter(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-a-real-credential")
+
+    adapter = get_model_adapter(provider="anthropic", timeout=7.5)
+
+    assert isinstance(adapter, AnthropicModelAdapter)
+    assert adapter._client.timeout == 7.5
+
+
+def test_timeout_is_threaded_through_to_a_constructed_openai_compatible_adapter(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-a-real-credential")
+
+    adapter = get_model_adapter(provider="deepseek", timeout=7.5)
+
+    assert isinstance(adapter, OpenAICompatibleModelAdapter)
+    assert adapter._client.timeout == 7.5
+
+
 def test_importing_the_factory_alone_does_not_import_any_provider_sdk():
     # A regression test for the load-bearing property described in model_factory.py's own
     # module docstring: importing this module must not force google-genai/openai to be

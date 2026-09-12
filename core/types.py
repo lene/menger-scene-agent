@@ -34,6 +34,7 @@ ErrorKind = Literal[
     "invalid_model_output",
     "stale_manifest",
     "stale_corpus",
+    "model_call_timeout",
 ]
 
 
@@ -163,6 +164,12 @@ StageName = Literal["generating", "validating", "reading back"]
 #   - "generation_failed" -- generate()/revise() returned a GenerationError before any
 #     gauntlet check could run (check_*() requires a str; not one of the frozen I/O & Edge
 #     Case Matrix's five rows, but a real precondition for all of them).
+#   - "generation_timeout" -- spec-ai-scene-agent story 15: a GenerationError whose kind is
+#     specifically "model_call_timeout" (the model-provider call itself hung past its
+#     configured timeout), distinguished from every other "generation_failed" cause so a
+#     user can tell "the model hung" apart from a generic generation failure. Distinct from
+#     the existing "timeout" tag above, which is validate_scene()'s renderer-side subprocess
+#     timeout (story 20) -- conflating the two would hide *which* stage timed out.
 #   - "readback_failed" -- the renderer said "ok" but semantic_readback() itself failed;
 #     the I/O & Edge-Case Matrix's explicit "not accepted without its summary" row.
 #   - "storage_failed" -- a `SceneStore` write failed for real (`store.accept()` raised
@@ -173,6 +180,7 @@ StageName = Literal["generating", "validating", "reading back"]
 TurnTag = Literal[
     "accepted",
     "generation_failed",
+    "generation_timeout",
     "local_finding",
     "compile_errors",
     "lint_findings",
