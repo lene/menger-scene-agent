@@ -28,6 +28,14 @@ attempting the new launch, so the old handle is invalid either way once the call
 `launcher_path` comes from a required env var, `MENGER_RENDER_LAUNCHER` (AD-10, mirrors
 `MENGER_SCENE_VALIDATOR_SCRIPT`'s existing pattern), checked alongside it before session
 bootstrap.
+
+spec-ai-scene-agent story 14 ("staleness pre-flight"): right after the manifest/corpus are
+loaded, `core/generation.py`'s `validate_artifacts()` (public per this story -- a rename of
+the private `_validate_artifacts`, no logic change) is called once here. A non-`None`
+result exits with a clear message naming the stale artifact, before the model adapter is
+constructed or a session directory is created -- the same schema-version check
+`generate()`/`revise()` already ran on the first turn, just moved earlier so staleness is
+caught at startup instead of after the first prompt.
 """
 
 from __future__ import annotations
@@ -45,6 +53,7 @@ from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
 from adapters.render_window import refresh_render_window
 from adapters.scene_store import SceneStore
+from core.generation import validate_artifacts
 from core.turn import run_turn
 from core.types import RenderWindowOutcome, RenderWindowResult, TurnResult
 
@@ -285,6 +294,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         corpus = load_corpus(_CORPUS_PATH)
     except ArtifactError as e:
         raise SystemExit(f"error: {e}") from e
+
+    # story 14 (staleness pre-flight): `core/generation.py`'s schema-version check
+    # (already real, already fail-fast, already zero-model-call) used to only run
+    # implicitly on the first generate()/revise() call inside a turn -- moved here so a
+    # stale manifest/corpus is caught at startup, before any paid model call or session
+    # directory is created (matches this function's existing anti-orphan ordering, AD-15).
+    stale = validate_artifacts(manifest, corpus)
+    if stale is not None:
+        raise SystemExit(f"error: {stale.message}")
 
     try:
         adapter = get_model_adapter()

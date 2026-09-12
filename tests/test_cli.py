@@ -21,7 +21,13 @@ import pytest
 import cli
 from adapters.model import MissingAPIKeyError
 from adapters.scene_store import SceneStore
-from core.types import RenderWindowError, RenderWindowResult, TurnResult
+from core.types import (
+    EXPECTED_CORPUS_SCHEMA_VERSION,
+    EXPECTED_MANIFEST_SCHEMA_VERSION,
+    RenderWindowError,
+    RenderWindowResult,
+    TurnResult,
+)
 
 _FAKE_RENDER_LAUNCHER = "/fake/menger-app/target/universal/stage/bin/menger-app"
 
@@ -400,6 +406,79 @@ def test_model_adapter_construction_failure_exits_cleanly(monkeypatch, tmp_path)
 
     assert "ANTHROPIC_API_KEY" in str(exc_info.value)
     assert not sessions_dir.exists()
+
+
+# --- Staleness pre-flight (story 14): stale manifest/corpus exits before the model adapter -
+# --- is constructed or a session directory is created; a valid pair passes silently --------
+
+
+_VALID_MANIFEST = {"schemaVersion": EXPECTED_MANIFEST_SCHEMA_VERSION, "objects": []}
+_VALID_CORPUS = {"schemaVersion": EXPECTED_CORPUS_SCHEMA_VERSION, "scenes": []}
+
+
+def test_stale_manifest_exits_before_model_adapter_construction(monkeypatch, tmp_path):
+    sessions_dir = tmp_path / "sessions"
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(
+        cli, "load_manifest", lambda path: {"schemaVersion": "0.9.0", "objects": []}
+    )
+    monkeypatch.setattr(cli, "load_corpus", lambda path: dict(_VALID_CORPUS))
+    _refuse_model_adapter(monkeypatch)
+    _refuse_create_session(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    message = str(exc_info.value)
+    assert "schemaVersion" in message
+    assert "0.9.0" in message
+    assert not sessions_dir.exists()
+
+
+def test_stale_corpus_exits_before_model_adapter_construction(monkeypatch, tmp_path):
+    sessions_dir = tmp_path / "sessions"
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(cli, "load_manifest", lambda path: dict(_VALID_MANIFEST))
+    monkeypatch.setattr(
+        cli, "load_corpus", lambda path: {"schemaVersion": "0.1.0", "scenes": []}
+    )
+    _refuse_model_adapter(monkeypatch)
+    _refuse_create_session(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    message = str(exc_info.value)
+    assert "schemaVersion" in message
+    assert "0.1.0" in message
+    assert not sessions_dir.exists()
+
+
+def test_valid_manifest_and_corpus_preflight_passes_silently(monkeypatch, tmp_path, capsys):
+    sessions_dir = tmp_path / "sessions"
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    monkeypatch.setattr(cli, "load_manifest", lambda path: dict(_VALID_MANIFEST))
+    monkeypatch.setattr(cli, "load_corpus", lambda path: dict(_VALID_CORPUS))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert sessions_dir.is_dir()
+    assert capsys.readouterr().out == ""
 
 
 # --- _sessions_base_dir() default (MENGER_AGENT_SESSIONS_DIR unset): "./sessions" ----------

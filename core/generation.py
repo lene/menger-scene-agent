@@ -38,7 +38,7 @@ _RULES = (
 )
 
 
-def _validate_artifacts(manifest: dict, corpus: dict) -> Optional[GenerationError]:
+def validate_artifacts(manifest: dict, corpus: dict) -> Optional[GenerationError]:
     if not isinstance(manifest, dict):
         return GenerationError(
             kind="stale_manifest",
@@ -121,7 +121,7 @@ def _complete(system_prompt: str, user_prompt: str, adapter: ModelAdapter) -> Ge
 
 def generate(prompt: str, manifest: dict, corpus: dict, adapter: ModelAdapter) -> GenerationResult:
     """CAP-1: compose a brand-new scene from a plain-language prompt. No prior scene."""
-    invalid = _validate_artifacts(manifest, corpus)
+    invalid = validate_artifacts(manifest, corpus)
     if invalid is not None:
         return invalid
 
@@ -140,7 +140,7 @@ def revise(
     regeneration (Design Notes: CAP-2 is not held to CAP-3's full diff-minimality rigor
     here, but the model is explicitly instructed to carry over anything the request does
     not implicate)."""
-    invalid = _validate_artifacts(manifest, corpus)
+    invalid = validate_artifacts(manifest, corpus)
     if invalid is not None:
         return invalid
 
