@@ -13,6 +13,7 @@ occurs but the render-window call itself isn't under test, so no test shells out
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -20,8 +21,9 @@ import pytest
 
 import cli
 from adapters.model import MissingAPIKeyError
-from adapters.scene_store import SceneStore
+from adapters.scene_store import SceneStore, SceneStoreError
 from core.types import (
+    ConsultError,
     EXPECTED_CORPUS_SCHEMA_VERSION,
     EXPECTED_MANIFEST_SCHEMA_VERSION,
     RenderWindowError,
@@ -150,6 +152,10 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
     store = SceneStore.create_session(sessions_dir, session_id="resume-test")
     store.record_rejected("first prompt", "local_finding: bad thing")
     store.accept("object Scene:\n  val x = 1\n", "second prompt")
+    # Review round, patch-level fix (story 19): a consult entry has its own replay shape --
+    # seeded here so replay is actually exercised against a "consult"-outcome history line,
+    # not just accepted/rejected ones.
+    store.record_consult("where should the light go?", answer="upper-left, warm color")
 
     monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
     _set_render_launcher_env(monkeypatch)
@@ -174,7 +180,8 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines[0] == "Turn None: rejected - local_finding: bad thing"
     assert out_lines[1] == "Turn 1: accepted"
-    assert out_lines[2] == "Turn 2: accepted"
+    assert out_lines[2] == "Consult: 'where should the light go?' -> upper-left, warm color"
+    assert out_lines[3] == "Turn 2: accepted"
 
     # The turn issued after replay must see the resumed session's real current scene, not
     # None -- proves resume threads prior_scene through, not just replaying text.
@@ -322,16 +329,30 @@ def test_plain_text_turn_rejected_prints_tag_and_reason(monkeypatch, tmp_path, c
     assert out_lines == ["Turn None: local_finding - allowlist: disallowed import"]
 
 
-# --- /ask or /question input: stub response, run_turn() never called ----------------------
+# --- /ask or /question input: real answer_consult() dispatch, run_turn() never called -----
+# spec-ai-scene-agent story 19: the stub is gone -- /ask/-question now reaches
+# core.consult.answer_consult() for real, prints its result, and logs it via
+# store.record_consult(), never run_turn().
 
 
-def test_ask_and_question_prefixes_route_to_stub_not_run_turn(monkeypatch, tmp_path, capsys):
+def test_ask_and_question_prefixes_reach_answer_consult_not_run_turn(
+    monkeypatch, tmp_path, capsys
+):
+    sessions_dir = tmp_path / "sessions"
     monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
     _set_render_launcher_env(monkeypatch)
-    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
     _stub_model_adapter(monkeypatch)
     _refuse_run_turn(monkeypatch)
     _refuse_render_window(monkeypatch)
+
+    consult_calls = []
+
+    def _fake_answer_consult(question, manifest, corpus, adapter, prior_scene):
+        consult_calls.append((question, prior_scene))
+        return f"answer to: {question}"
+
+    monkeypatch.setattr(cli, "answer_consult", _fake_answer_consult)
     monkeypatch.setattr(
         "builtins.input",
         _scripted_input(["/ask what does this scene contain?", "/question why is this here?"]),
@@ -341,7 +362,159 @@ def test_ask_and_question_prefixes_route_to_stub_not_run_turn(monkeypatch, tmp_p
 
     assert exit_code == 0
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines == [cli._CONSULT_STUB_MESSAGE, cli._CONSULT_STUB_MESSAGE]
+    assert out_lines == [
+        "answer to: what does this scene contain?",
+        "answer to: why is this here?",
+    ]
+    assert consult_calls == [
+        ("what does this scene contain?", None),
+        ("why is this here?", None),
+    ]
+
+    # No scene file written, no ordinal consumed, and both consult turns logged with
+    # outcome="consult" and ordinal=None.
+    session_dirs = list(sessions_dir.iterdir())
+    assert len(session_dirs) == 1
+    assert list(session_dirs[0].glob("*.scala")) == []
+    history_lines = (
+        (session_dirs[0] / "history.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    entries = [json.loads(line) for line in history_lines]
+    assert len(entries) == 2
+    assert entries[0]["outcome"] == "consult"
+    assert entries[0]["ordinal"] is None
+    assert entries[0]["file"] is None
+    assert entries[0]["prompt"] == "what does this scene contain?"
+    assert entries[0]["answer"] == "answer to: what does this scene contain?"
+    assert "error" not in entries[0]
+    assert entries[1]["prompt"] == "why is this here?"
+
+
+def test_consult_turn_model_failure_prints_typed_error_and_logs_it(
+    monkeypatch, tmp_path, capsys
+):
+    sessions_dir = tmp_path / "sessions"
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    monkeypatch.setattr(
+        cli,
+        "answer_consult",
+        lambda *a, **kw: ConsultError(kind="model_call_failed", message="model unavailable"),
+    )
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["/ask where should the light go?"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == ["Consult error: model_call_failed - model unavailable"]
+
+    session_dirs = list(sessions_dir.iterdir())
+    entry = json.loads(
+        (session_dirs[0] / "history.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert entry["outcome"] == "consult"
+    assert entry["ordinal"] is None
+    assert entry["file"] is None
+    assert entry["prompt"] == "where should the light go?"
+    assert entry["error"] == "model unavailable"
+    assert "answer" not in entry
+
+
+def test_consult_turn_empty_question_never_calls_answer_consult(monkeypatch, tmp_path, capsys):
+    # Review-round patch: a bare "/ask" (or "/ask   ") must fail fast rather than sending an
+    # empty Question: to the model, which would waste a real, paid model call on nothing.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    def _refuse_answer_consult(*a, **kw):
+        raise AssertionError("answer_consult() must not be called for an empty question")
+
+    monkeypatch.setattr(cli, "answer_consult", _refuse_answer_consult)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/ask", "/ask   "]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "Consult error: empty question -- type a question after /ask or /question",
+        "Consult error: empty question -- type a question after /ask or /question",
+    ]
+
+
+def test_consult_turn_storage_failure_prints_note_and_does_not_crash_the_repl(
+    monkeypatch, tmp_path, capsys
+):
+    # spec-ai-scene-agent story 19, verification-gap review round: no test previously drove
+    # _record_consult_safely's SceneStoreError-swallowing branch through the actual REPL loop.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    monkeypatch.setattr(cli, "answer_consult", lambda *a, **kw: "an answer")
+
+    def _raising_record_consult(self, prompt, answer=None, error=None):
+        raise SceneStoreError("disk full")
+
+    monkeypatch.setattr(SceneStore, "record_consult", _raising_record_consult)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/ask where should the light go?"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines[0] == "an answer"
+    assert any("Consult history: storage_failed" in line for line in out_lines)
+    assert any("disk full" in line for line in out_lines)
+
+
+def test_consult_turn_sees_the_sessions_existing_scene_as_prior_scene(
+    monkeypatch, tmp_path, capsys
+):
+    # blind-hunter review round: every existing consult CLI test starts from a fresh
+    # session, so prior_scene was only ever asserted None -- this confirms the real CLI
+    # wiring (not just core.consult's own unit tests) threads an existing scene through.
+    sessions_dir = tmp_path / "sessions"
+    store = SceneStore.create_session(sessions_dir, session_id="has-a-scene")
+    store.accept("object Sponge:\n  val x = 1\n", "make a sponge")
+
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    seen_prior_scenes = []
+
+    def _fake_answer_consult(question, manifest, corpus, adapter, prior_scene):
+        seen_prior_scenes.append(prior_scene)
+        return "an answer"
+
+    monkeypatch.setattr(cli, "answer_consult", _fake_answer_consult)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["/ask where should the light go?"])
+    )
+
+    exit_code = cli.main(["--session", "has-a-scene"])
+
+    assert exit_code == 0
+    assert seen_prior_scenes == ["object Sponge:\n  val x = 1\n"]
 
 
 # --- --session <id> path-escape validation: clear startup error, before session bootstrap -
@@ -1022,7 +1195,7 @@ def test_check_hand_edit_is_called_every_loop_iteration(monkeypatch, tmp_path):
     exit_code = cli.main([])
 
     assert exit_code == 0
-    # Called once per iteration -- including the /ask (consult-stub) and blank-line
+    # Called once per iteration -- including the /ask (consult-turn) and blank-line
     # iterations, which never reach run_turn() at all.
     assert call_count == 3
 

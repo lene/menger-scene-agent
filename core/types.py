@@ -75,6 +75,29 @@ class ReadbackError:
 # never raise. Mirrors GenerationResult's exact convention.
 ReadbackResult = Union[str, ReadbackError]
 
+ConsultErrorKind = Literal[
+    "model_call_failed",
+    "invalid_model_output",
+    "model_call_timeout",
+]
+
+
+@dataclass(frozen=True)
+class ConsultError:
+    """A typed failure result from `answer_consult()` -- never an exception escaping to
+    the caller (I/O & Edge-Case Matrix: a model-call failure and an empty/unusable model
+    response are both reported this way, never a silent fallback or a best-effort guess).
+    Mirrors `ReadbackError`'s shape exactly (spec-ai-scene-agent story 19)."""
+
+    kind: ConsultErrorKind
+    message: str
+    cause: Optional[BaseException] = None
+
+
+# answer_consult() returns either the plain-language answer text, or a typed error --
+# never raise. Mirrors GenerationResult/ReadbackResult's exact convention.
+ConsultResult = Union[str, ConsultError]
+
 TicketErrorKind = Literal[
     "invalid_capability_text",
     "drafts_dir_unavailable",

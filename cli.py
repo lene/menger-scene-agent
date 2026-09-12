@@ -9,8 +9,11 @@ location, not CWD -- AD-9, this package's own build-time artifacts), constructs 
 adapter via `adapters.model_factory.get_model_adapter()`, then loops: read a line, call
 `run_turn()` for plain text, print "Turn N: <outcome>" reusing `TurnResult.ordinal`/`.tag`
 (Boundaries & Constraints: "Every run_turn() outcome prints its ordinal-or-none and tag,
-never silently"). A `/ask`/`/question` prefix is recognized and routed to a stub -- story 19
-(Epic 3, not yet built) replaces the stub's body, not this recognition logic (Design Notes).
+never silently"). A `/ask`/`/question` prefix is recognized and routed to `core.consult`'s
+`answer_consult()` (spec-ai-scene-agent story 19, PRD FR10) -- a consult turn never calls
+`run_turn()`, never touches the scene file, and never consumes an ordinal; it is answered in
+prose, printed, and logged to `history.jsonl` via `SceneStore.record_consult()` on both
+success and failure.
 
 `script_path` (AD-10, injected, never discovered) comes from a required env var,
 `MENGER_SCENE_VALIDATOR_SCRIPT` -- unset is a clear startup error before any turn runs or
@@ -65,10 +68,11 @@ from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
 from adapters.render_window import refresh_render_window
-from adapters.scene_store import SceneStore
+from adapters.scene_store import SceneStore, SceneStoreError
+from core.consult import answer_consult
 from core.generation import validate_artifacts
 from core.turn import check_hand_edit, run_turn
-from core.types import RenderWindowOutcome, RenderWindowResult, TurnResult
+from core.types import ConsultError, RenderWindowOutcome, RenderWindowResult, TurnResult
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
 # location (never CWD) -- same reasoning `adapters/artifacts.py`'s docstring already gives
@@ -92,14 +96,10 @@ _DEFAULT_SESSIONS_DIR = "./sessions"
 # env var with no default, checked alongside it before session bootstrap.
 _RENDER_LAUNCHER_ENV = "MENGER_RENDER_LAUNCHER"
 
-# Recognized verbatim as the first whitespace-separated token of a line -- Design Notes:
-# "Recognizing the prefix and returning a clear 'not implemented' response satisfies FR2's
-# routing requirement without calling into code that doesn't exist" (story 19 isn't built).
+# Recognized verbatim as the first whitespace-separated token of a line -- story 11's
+# original recognition logic, unchanged by story 19 (Design Notes: "story 19 replaces the
+# stub's body, not this recognition logic").
 _CONSULT_PREFIXES = ("/ask", "/question")
-_CONSULT_STUB_MESSAGE = (
-    "Consult turns (/ask, /question) are not implemented yet -- story 19 (Epic 3) will "
-    "replace this stub."
-)
 
 
 def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
@@ -119,7 +119,11 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "directly between turns. Each loop iteration checks for such an edit (no model "
             "call) and either promotes it to a new ordinal, reports the lint violation that "
             "blocked it, or reports a storage failure if promoting a clean edit itself could "
-            "not be persisted."
+            "not be persisted.\n"
+            "\n"
+            "/ask <question> or /question <question>: a consult turn -- a domain question "
+            "answered in prose, grounded in the DSL manifest/corpus and the current scene. "
+            "Never edits the scene, never gauntlet-checked, never consumes a turn ordinal."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -214,6 +218,15 @@ def _bootstrap_session(session_id: Optional[str]) -> SceneStore:
 
 
 def _format_history_entry(entry: dict) -> str:
+    # spec-ai-scene-agent story 19 (review round, patch-level fix): a "consult" entry has
+    # neither a "reason" key (that's rejected/failed-attempt shaped) nor an ordinal -- without
+    # this branch, replaying a resumed session's prior /ask/-question turns collapsed to the
+    # bare, content-free "Turn None: consult", silently dropping the recorded prompt/answer/
+    # error that history.jsonl actually preserved.
+    if entry.get("outcome") == "consult":
+        prompt = entry.get("prompt")
+        detail = entry.get("answer") if "answer" in entry else entry.get("error")
+        return f"Consult: {prompt!r} -> {detail}"
     text = f"Turn {entry.get('ordinal')}: {entry.get('outcome')}"
     reason = entry.get("reason")
     if reason:
@@ -358,6 +371,33 @@ def _is_consult_input(line: str) -> bool:
     return first_word in _CONSULT_PREFIXES
 
 
+def _consult_question(line: str) -> str:
+    """Strips the recognized `/ask`/`/question` prefix off `line`, returning the bare
+    question text -- called only after `_is_consult_input(line)` is already `True`. Mirrors
+    `_is_consult_input`'s own tokenization (`str.split(None, 1)`) so the two never disagree
+    about where the prefix ends."""
+    parts = line.strip().split(None, 1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
+def _record_consult_safely(
+    store: SceneStore,
+    question: str,
+    *,
+    answer: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    """Attempts `store.record_consult(...)` but never lets a failure there propagate --
+    guarded the same way `core/turn.py`'s `_record_rejected_safely` guards
+    `store.record_rejected()` (Code Map): a `SceneStore` write failure while recording a
+    consult turn is exactly as real, and as unpropagatable, as one while recording an
+    accepted or rejected turn. Prints a storage-failure note; never crashes the REPL loop."""
+    try:
+        store.record_consult(question, answer=answer, error=error)
+    except SceneStoreError as e:
+        print(f"Consult history: storage_failed - could not record consult turn: {e}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
 
@@ -444,8 +484,22 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if _is_consult_input(line):
             # Never reaches run_turn() -- Boundaries & Constraints: "a /ask/-question
-            # prefix never reaches run_turn()".
-            print(_CONSULT_STUB_MESSAGE)
+            # prefix never reaches run_turn()", "never calls generate()/revise(), never
+            # runs any gauntlet check, and never consumes a turn ordinal" (story 19).
+            question = _consult_question(line)
+            if not question:
+                # Review-round patch: a bare "/ask" or "/ask   " has no question text -- fail
+                # fast with a clear message rather than sending an empty Question: to the
+                # model, which would waste a real, paid model call on nothing.
+                print("Consult error: empty question -- type a question after /ask or /question")
+                continue
+            consult_result = answer_consult(question, manifest, corpus, adapter, prior_scene)
+            if isinstance(consult_result, ConsultError):
+                print(f"Consult error: {consult_result.kind} - {consult_result.message}")
+                _record_consult_safely(store, question, error=consult_result.message)
+            else:
+                print(consult_result)
+                _record_consult_safely(store, question, answer=consult_result)
             continue
 
         if not line.strip():

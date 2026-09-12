@@ -220,6 +220,83 @@ def test_record_rejected_on_a_fresh_session_still_grows_history_by_one(tmp_path)
     assert store.current_scene() is None
 
 
+# --- record_consult() (spec-ai-scene-agent story 19) ---------------------------------------
+
+
+def test_record_consult_with_an_answer_writes_no_scene_file_and_consumes_no_ordinal(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object First:\n  val scene = Scene()\n", "make a scene")
+
+    store.record_consult("where should the light go?", answer="upper-left, warm color")
+    next_ordinal = store.accept("object Second:\n  val scene = Scene()\n", "try again")
+
+    scala_files = sorted(p.name for p in store.session_dir.glob("*.scala"))
+    assert scala_files == ["001.scala", "002.scala"]
+    # The consult turn must not have consumed ordinal 2 -- the next accepted attempt after
+    # it is still ordinal 2, not 3.
+    assert next_ordinal == 2
+
+
+def test_record_consult_with_an_answer_appends_a_consult_history_entry(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object First:\n  val scene = Scene()\n", "make a scene")
+
+    store.record_consult("where should the light go?", answer="upper-left, warm color")
+
+    lines = store.history_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    entry = json.loads(lines[1])
+    assert entry["outcome"] == "consult"
+    assert entry["ordinal"] is None
+    assert entry["file"] is None
+    assert entry["prompt"] == "where should the light go?"
+    assert entry["answer"] == "upper-left, warm color"
+    assert "error" not in entry
+
+
+def test_record_consult_with_an_error_appends_a_consult_history_entry(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+
+    store.record_consult("where should the light go?", error="model call failed")
+
+    lines = store.history_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["outcome"] == "consult"
+    assert entry["ordinal"] is None
+    assert entry["file"] is None
+    assert entry["prompt"] == "where should the light go?"
+    assert entry["error"] == "model call failed"
+    assert "answer" not in entry
+    assert store.current_scene() is None
+
+
+def test_record_consult_on_a_fresh_session_still_grows_history_by_one(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+
+    store.record_consult("a question", answer="an answer")
+
+    lines = store.history_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert store.current_scene() is None
+
+
+def test_record_consult_rejects_both_answer_and_error(tmp_path):
+    # edge-case-hunter review round: the docstring's "exactly one of answer/error" contract
+    # is now enforced, not just documented.
+    store = SceneStore.create_session(tmp_path)
+
+    with pytest.raises(ValueError):
+        store.record_consult("a question", answer="an answer", error="an error")
+
+
+def test_record_consult_rejects_neither_answer_nor_error(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+
+    with pytest.raises(ValueError):
+        store.record_consult("a question")
+
+
 # --- history.jsonl append-only shape ----------------------------------------------------------
 
 

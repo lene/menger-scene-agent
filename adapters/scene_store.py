@@ -332,3 +332,32 @@ class SceneStore:
                 "reason": reason,
             }
         )
+
+    def record_consult(
+        self, prompt: str, answer: Optional[str] = None, error: Optional[str] = None
+    ) -> None:
+        """Records a consult turn (spec-ai-scene-agent story 19, `/ask`/`/question`): a
+        third `history.jsonl` outcome value, `"consult"`, alongside the existing
+        `"accepted"`/`"rejected"` -- extending AD-12's outcome model exactly as the PRD
+        names it, never consuming an ordinal. Mirrors `record_rejected()`'s shape
+        (`ordinal: None, file: None`) -- a consult turn never writes a scene file either,
+        it only ever answers a question. Exactly one of `answer`/`error` is included in the
+        entry, whichever the caller passed (the caller's own contract: `answer_consult()`
+        returns either prose or a typed error, never both, never neither).
+
+        Review round, patch-level fix: this contract is now enforced, not just documented --
+        a caller passing both or neither would otherwise silently write a `history.jsonl`
+        entry with both fields or with neither, with no signal anything was wrong."""
+        if (answer is None) == (error is None):
+            raise ValueError("record_consult() requires exactly one of answer/error")
+        entry = {
+            "ordinal": None,
+            "prompt": prompt,
+            "file": None,
+            "outcome": "consult",
+        }
+        if answer is not None:
+            entry["answer"] = answer
+        if error is not None:
+            entry["error"] = error
+        self._append_history(entry)
