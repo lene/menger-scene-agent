@@ -70,6 +70,34 @@ def test_current_scene_is_none_for_a_fresh_session(tmp_path):
     assert store.current_scene() is None
 
 
+# --- current_scene_path() (spec-ai-scene-agent story 21) -----------------------------------
+
+
+def test_current_scene_path_is_none_for_a_fresh_session(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+
+    assert store.current_scene_path() is None
+
+
+def test_current_scene_path_after_accept_returns_the_correct_ordinal_path(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object First:\n  val scene = Scene()\n", "make a scene")
+
+    path = store.current_scene_path()
+
+    assert path == store.session_dir / "001.scala"
+    assert path.is_file()
+    assert path.read_text(encoding="utf-8") == "object First:\n  val scene = Scene()\n"
+
+
+def test_current_scene_path_after_second_accept_returns_the_newest_ordinal_path(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object First:\n  val scene = Scene()\n", "make a scene")
+    store.accept("object First:\n  val scene = Scene(objects = List(Sphere()))\n", "add a sphere")
+
+    assert store.current_scene_path() == store.session_dir / "002.scala"
+
+
 # --- First accepted turn --------------------------------------------------------------------
 
 

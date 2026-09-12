@@ -18,6 +18,16 @@ model adapter is constructed, mirroring `MissingAPIKeyError`'s construction-time
 pattern (Design Notes). The sessions base directory is `MENGER_AGENT_SESSIONS_DIR`,
 defaulting to `./sessions` (relative to CWD) when unset -- a documented default, not a
 silent filesystem search (Design Notes).
+
+spec-ai-scene-agent story 21 ("render window refresh wiring"): after every `"accepted"`
+`TurnResult`, `adapters.render_window.refresh_render_window()` is called with the
+just-accepted file's path (`SceneStore.current_scene_path()`) and the previously tracked
+`render_process`, updating `render_process` from the outcome -- the new handle on success,
+`None` on failure (the adapter terminates `previous_process` unconditionally before
+attempting the new launch, so the old handle is invalid either way once the call returns).
+`launcher_path` comes from a required env var, `MENGER_RENDER_LAUNCHER` (AD-10, mirrors
+`MENGER_SCENE_VALIDATOR_SCRIPT`'s existing pattern), checked alongside it before session
+bootstrap.
 """
 
 from __future__ import annotations
@@ -25,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -32,9 +43,10 @@ from typing import List, Optional
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
+from adapters.render_window import refresh_render_window
 from adapters.scene_store import SceneStore
 from core.turn import run_turn
-from core.types import TurnResult
+from core.types import RenderWindowOutcome, RenderWindowResult, TurnResult
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
 # location (never CWD) -- same reasoning `adapters/artifacts.py`'s docstring already gives
@@ -52,6 +64,11 @@ _SCRIPT_PATH_ENV = "MENGER_SCENE_VALIDATOR_SCRIPT"
 # search, so it doesn't violate AD-10's spirit the way guessing `script_path` would.
 _SESSIONS_DIR_ENV = "MENGER_AGENT_SESSIONS_DIR"
 _DEFAULT_SESSIONS_DIR = "./sessions"
+
+# story 21: `launcher_path` names the staged `menger-app` binary (sibling repo, deployment-
+# varying location) -- same AD-10 reasoning as `_SCRIPT_PATH_ENV` above, so it's a required
+# env var with no default, checked alongside it before session bootstrap.
+_RENDER_LAUNCHER_ENV = "MENGER_RENDER_LAUNCHER"
 
 # Recognized verbatim as the first whitespace-separated token of a line -- Design Notes:
 # "Recognizing the prefix and returning a clear 'not implemented' response satisfies FR2's
@@ -71,6 +88,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "Environment variables:\n"
             f"  {_SCRIPT_PATH_ENV}   required; path to the renderer-side scene validator "
             "script (menger repo, AD-10).\n"
+            f"  {_RENDER_LAUNCHER_ENV}   required; path to the staged menger-app render "
+            "window launcher binary (menger repo, AD-10).\n"
             f"  {_SESSIONS_DIR_ENV}  optional; sessions base directory (default: "
             f"'{_DEFAULT_SESSIONS_DIR}')."
         ),
@@ -102,6 +121,22 @@ def _require_script_path() -> str:
             "never discovered). Set it before starting the REPL."
         )
     return script_path
+
+
+def _require_render_launcher() -> str:
+    """Reads `MENGER_RENDER_LAUNCHER`. Missing is a clear startup error -- exits before any
+    turn runs, before session bootstrap, and before a model adapter is constructed, checked
+    alongside `_require_script_path()` (mirrors that function's pattern exactly, AD-10)."""
+    launcher_path = os.environ.get(_RENDER_LAUNCHER_ENV)
+    if launcher_path is not None:
+        launcher_path = launcher_path.strip()
+    if not launcher_path:
+        raise SystemExit(
+            f"error: environment variable {_RENDER_LAUNCHER_ENV} is not set. It must name "
+            "the staged menger-app render window launcher binary (menger repo, AD-10: "
+            "paths are injected, never discovered). Set it before starting the REPL."
+        )
+    return launcher_path
 
 
 def _sessions_base_dir() -> Path:
@@ -201,6 +236,15 @@ def _format_turn_result(result: TurnResult) -> str:
     return text
 
 
+def _format_render_outcome(outcome: RenderWindowOutcome) -> str:
+    # story 21: "print a one-line status" -- success carries nothing else to report (the
+    # live Popen handle isn't printable status), failure names its typed kind/message so a
+    # refused/failed launch is never silent.
+    if isinstance(outcome, RenderWindowResult):
+        return "Render window: refreshed"
+    return f"Render window: {outcome.kind} - {outcome.message}"
+
+
 def _print_stage(stage: str) -> None:
     # spec-ai-scene-agent story 12 ("live status line"): a multi-second turn (a real model
     # call, later a sandboxed subprocess) prints nothing until fully done without this --
@@ -225,10 +269,12 @@ def _is_consult_input(line: str) -> bool:
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
 
-    # Always checked first: a missing script_path or invalid --session must exit before
-    # manifest/corpus loading, model adapter construction, or session bootstrap (I/O &
-    # Edge-Case Matrix). Neither check has a filesystem side effect to clean up on failure.
+    # Always checked first: a missing script_path, missing render launcher path, or invalid
+    # --session must exit before manifest/corpus loading, model adapter construction, or
+    # session bootstrap (I/O & Edge-Case Matrix). None of these checks has a filesystem side
+    # effect to clean up on failure.
     script_path = _require_script_path()
+    render_launcher_path = _require_render_launcher()
     _validate_session_id(args.session_id)
 
     try:
@@ -257,6 +303,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # AD-13: "the current scene" is always the last file that actually exists on disk --
     # re-read here rather than assumed, matching every other reader of this value.
     prior_scene = store.current_scene()
+
+    # story 21: tracks the render window launched for THIS session, threaded the same way
+    # `prior_scene` is -- `None` until the first accepted turn, then the live `Popen` handle
+    # (or `None` again on a failed refresh) after every subsequent accepted turn.
+    render_process: Optional[subprocess.Popen[str]] = None
 
     while True:
         try:
@@ -290,6 +341,45 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(_format_turn_result(result))
         if result.tag == "accepted":
             prior_scene = store.current_scene()
+
+            # story 21: refresh_render_window() is only ever called after an "accepted"
+            # TurnResult (Boundaries & Constraints) -- never on any rejection tag. The
+            # adapter terminates `render_process` unconditionally before attempting the new
+            # launch, so the old handle is invalid either way once the call returns --
+            # `render_process` is therefore always overwritten below, never conditionally
+            # kept (Design Notes).
+            #
+            # Guarded the same way the run_turn() call above is: current_scene_path() does a
+            # fresh filesystem scan (AD-13) and can theoretically raise SceneStoreError on a
+            # filesystem-level failure, and refresh_render_window's own contract doesn't cover
+            # exceptions raised before it's even called -- a single turn's post-processing
+            # must not be able to kill the whole REPL any more than run_turn() itself can.
+            try:
+                scene_path = store.current_scene_path()
+                if scene_path is None:
+                    # Should never happen: an "accepted" tag is only ever returned after
+                    # store.accept() has already written the ordinal this reads back
+                    # (core/turn.py's run_turn()) -- but current_scene_path()'s own return
+                    # type is Optional, so this is handled rather than silently trusted.
+                    raise RuntimeError(
+                        "accepted turn but current_scene_path() returned None -- this "
+                        "should be impossible; SceneStore/run_turn's accept-then-report "
+                        "invariant may be broken"
+                    )
+                render_outcome = refresh_render_window(
+                    scene_path,
+                    render_launcher_path,
+                    previous_process=render_process,
+                )
+                render_process = (
+                    render_outcome.process
+                    if isinstance(render_outcome, RenderWindowResult)
+                    else None
+                )
+                print(_format_render_outcome(render_outcome))
+            except Exception as e:  # noqa: BLE001 -- a render-refresh failure must not kill the REPL
+                print(f"Render window: error - {e}")
+                render_process = None
 
     return 0
 

@@ -191,6 +191,17 @@ class SceneStore:
             return None
         return self.read_ordinal(ordinal)
 
+    def current_scene_path(self) -> Optional[Path]:
+        """The last written file's `Path`, per AD-13 -- mirrors `current_scene()` exactly,
+        except it returns the ordinal's path rather than reading its text back (spec-ai-
+        scene-agent story 21: `refresh_render_window()` needs a filesystem path to pass as
+        `--scene`, not the scene's text). `None` if no turn has been accepted yet in this
+        session, same "no scene yet" convention as `current_scene()`."""
+        ordinal = self._last_ordinal()
+        if ordinal is None:
+            return None
+        return self._ordinal_path(ordinal)
+
     def read_ordinal(self, n: int) -> str:
         """Reads one prior ordinal's real content back from disk -- used both by
         `current_scene()` and to restore an earlier turn (Boundaries & Constraints: restoring
