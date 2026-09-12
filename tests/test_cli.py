@@ -886,3 +886,329 @@ def test_render_refresh_exception_prints_error_and_repl_continues(
     assert "Turn 1: accepted" in out_lines
     assert "Turn 2: accepted" in out_lines
     assert any(line.startswith("Render window: error - ") for line in out_lines)
+
+
+# --- story 17: hand-edit fallback -- checked once per loop iteration, before /ask/run_turn -
+
+
+def test_hand_edit_accepted_refreshes_render_window_and_updates_prior_scene(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    render_calls = _stub_render_window(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+
+    known_scenes_seen = []
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        known_scenes_seen.append(known_scene)
+        if len(known_scenes_seen) == 1:
+            store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")
+            return TurnResult(tag="accepted", messages=[], ordinal=1)
+        return None
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+    monkeypatch.setattr("builtins.input", _scripted_input(["", ""]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # The second iteration's check_hand_edit() call receives the newly-accepted content as
+    # known_scene -- proving the CLI's tracked prior_scene really advanced.
+    assert known_scenes_seen == [None, "object HandEdited:\n  val x = 1\n"]
+    assert len(render_calls) == 1
+    out_lines = capsys.readouterr().out.splitlines()
+    assert any("Hand edit: accepted" in line for line in out_lines)
+    assert "Render window: refreshed" in out_lines
+
+
+def test_hand_edit_rejected_does_not_refresh_render_window_or_change_prior_scene(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+
+    known_scenes_seen = []
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        known_scenes_seen.append(known_scene)
+        return TurnResult(
+            tag="hand_edit_rejected",
+            messages=["allowlist: disallowed import"],
+            findings=[],
+        )
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+    monkeypatch.setattr("builtins.input", _scripted_input(["", ""]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # Both iterations see prior_scene unchanged (None) -- a rejected hand edit never
+    # advances the CLI's tracked known_scene/prior_scene.
+    assert known_scenes_seen == [None, None]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert any("hand_edit_rejected" in line for line in out_lines)
+    assert any("allowlist: disallowed import" in line for line in out_lines)
+    assert not any("Render window" in line for line in out_lines)
+
+
+def test_no_hand_edit_detected_produces_no_output_and_normal_turn_proceeds(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    hand_edit_calls = []
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        hand_edit_calls.append(known_scene)
+        return None
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw
+    ):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert hand_edit_calls == [None]
+    out_lines = capsys.readouterr().out.splitlines()
+    # No hand-edit-related output at all -- just the normal turn result and render refresh,
+    # exactly as story 21 left it (no behavior change when no external edit occurred).
+    assert not any("hand edit" in line.lower() for line in out_lines)
+    assert out_lines == ["Turn 1: accepted", "Render window: refreshed"]
+
+
+def test_check_hand_edit_is_called_every_loop_iteration(monkeypatch, tmp_path):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_count = 0
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        nonlocal call_count
+        call_count += 1
+        return None
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+    monkeypatch.setattr(
+        cli, "run_turn", lambda *a, **kw: TurnResult(tag="local_finding", messages=["x"])
+    )
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["/ask something", "", "a real prompt"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # Called once per iteration -- including the /ask (consult-stub) and blank-line
+    # iterations, which never reach run_turn() at all.
+    assert call_count == 3
+
+
+def test_hand_edit_check_exception_prints_error_and_repl_continues(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("session directory vanished")
+
+    monkeypatch.setattr(cli, "check_hand_edit", _boom)
+
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw
+    ):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    assert "Hand edit check error: session directory vanished" in out_lines
+    # The REPL survived the exception and still ran the real turn.
+    assert "Turn 1: accepted" in out_lines
+
+
+# --- Patch-level fixes (post-review, story 17) ---------------------------------------------
+# --- Test gaps three parallel automated reviewers corroborated ------------------------------
+
+
+def test_hand_edit_storage_failure_does_not_refresh_render_window_or_change_prior_scene(
+    monkeypatch, tmp_path, capsys
+):
+    # No test previously drove the "storage_failed" tag through the actual cli.py REPL loop
+    # (only tests/test_turn.py exercised check_hand_edit() directly for this) -- simulates
+    # check_hand_edit() itself failing with a storage error (standing in for its underlying
+    # store.accept() call exhausting its ordinal-claim retries) and confirms prior_scene/
+    # render_process are left untouched, exactly like the hand_edit_rejected case, and the
+    # render window is never refreshed.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_render_window(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+
+    known_scenes_seen = []
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        known_scenes_seen.append(known_scene)
+        return TurnResult(
+            tag="storage_failed",
+            messages=["ordinal-claim retries exhausted"],
+        )
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+    monkeypatch.setattr("builtins.input", _scripted_input(["", ""]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # Both iterations see known_scene/prior_scene unchanged (None) -- a storage failure never
+    # advances the CLI's tracked value, same as a hand_edit_rejected tag.
+    assert known_scenes_seen == [None, None]
+    out_lines = capsys.readouterr().out.splitlines()
+    assert any("Hand edit: storage_failed" in line for line in out_lines)
+    assert any("ordinal-claim retries exhausted" in line for line in out_lines)
+    assert not any("Render window" in line for line in out_lines)
+
+
+def test_hand_edit_render_refresh_exception_prints_error_and_repl_continues(
+    monkeypatch, tmp_path, capsys
+):
+    # No test previously exercised a render-window exception specifically on the
+    # hand-edit-accepted path through the shared _accept_and_refresh_render() helper -- the
+    # existing exception-safety test (test_render_refresh_exception_prints_error_and_repl_
+    # continues) only covers the normal run_turn()-accepted path, even though both paths now
+    # share this helper.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("render launcher path is a directory, not a file")
+
+    monkeypatch.setattr(cli, "refresh_render_window", _boom)
+
+    def _fake_check_hand_edit(store_arg, known_scene):
+        if known_scene is None:
+            store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")
+            return TurnResult(tag="accepted", messages=[], ordinal=1)
+        return None
+
+    monkeypatch.setattr(cli, "check_hand_edit", _fake_check_hand_edit)
+
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw
+    ):
+        store_arg.accept("object B:\n  val x = 2\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=2)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    # The hand-edit-accepted path's own render-refresh call raised -- proving the REPL
+    # survived it via _accept_and_refresh_render()'s own guard, the same way the existing
+    # test already proves for the normal run_turn()-accepted path.
+    assert any(line.startswith("Render window: error - ") for line in out_lines)
+    assert any("Hand edit: accepted" in line for line in out_lines)
+    # The real prompt this same iteration still ran to completion afterward.
+    assert "Turn 2: accepted" in out_lines
+
+
+def test_hand_edit_accepted_and_same_iterations_real_prompt_see_it_as_prior_scene_end_to_end(
+    monkeypatch, tmp_path
+):
+    # The cli.py module docstring describes "an accepted hand edit and a real prompt
+    # processed in the same loop iteration, with the latter seeing the former's
+    # freshly-promoted content as prior_scene" as supported behavior, but this was only ever
+    # tested at the core/turn.py level (calling run_turn() directly) -- never end to end
+    # through cli.main(). This scripts the scenario through main() itself: check_hand_edit()
+    # is NOT mocked (only run_turn() is, matching every other test in this module), so the
+    # real detection-and-promotion logic runs; the fake input() simulates a hand edit landing
+    # on disk immediately before the user's real prompt is submitted, both within the same
+    # loop iteration.
+    sessions_dir = tmp_path / "sessions"
+    store = SceneStore.create_session(sessions_dir, session_id="hand-edit-e2e")
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    edited_text = "object New:\n  val scene = Scene()\n"
+
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_count = [0]
+
+    def _fake_input(prompt: str = "") -> str:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # Simulates the user hand-editing the scene file in their editor, then typing a
+            # real prompt and hitting enter -- both land within this single input() call, so
+            # the loop iteration that follows sees the edit AND processes the real prompt.
+            (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+            return "a real prompt"
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    recorded_calls = []
+
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
+        recorded_calls.append((prompt, prior_scene))
+        return TurnResult(tag="accepted", messages=[], ordinal=3)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+
+    exit_code = cli.main(["--session", "hand-edit-e2e"])
+
+    assert exit_code == 0
+    assert len(recorded_calls) == 1
+    prompt, prior_scene = recorded_calls[0]
+    assert prompt == "a real prompt"
+    # The real prompt's run_turn() call received the hand-edit-promoted content as
+    # prior_scene, not the pre-edit value -- proving the wiring, not just core/turn.py's own
+    # already-tested internals.
+    assert prior_scene == edited_text
+    # The hand edit really was promoted under a brand-new ordinal (002.scala), never an
+    # in-place rewrite of 001.scala.
+    assert (store.session_dir / "002.scala").read_text(encoding="utf-8") == edited_text

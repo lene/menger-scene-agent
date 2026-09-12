@@ -246,3 +246,95 @@ def run_turn(
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted
         # (success or failure) before run_turn returns -- never left in session_dir").
         staging_path.unlink(missing_ok=True)
+
+
+# spec-ai-scene-agent story 17 ("hand-edit fallback, lint-gated and ordinal-assigned"): the
+# synthetic prompt recorded for a promoted hand edit -- names the source in history.jsonl the
+# same way any other prompt would, without inventing a second history schema.
+_HAND_EDIT_PROMPT = "<hand-edit>"
+
+
+def check_hand_edit(store: SceneStore, known_scene: Optional[str]) -> Optional[TurnResult]:
+    """Detects and gates an out-of-band hand edit to the current scene file (spec-ai-scene-
+    agent story 17): AD-13 defines "current scene" as whatever the last file on disk
+    contains, but nothing checked a hand-edited file before this -- AD-4's lint/allowlist
+    gate and AD-7/AD-8's "no in-place mutation" invariant both assumed content reaches disk
+    only through `run_turn()`. A raw hand edit reaches neither.
+
+    Detection is a plain value comparison, not a filesystem watch: re-reads
+    `store.current_scene()` fresh from disk and compares it against `known_scene` (the
+    caller's last-known value). Returns `None` when they match -- either nothing changed, or
+    (both `None`) no turn has been accepted yet in this session -- there is nothing to
+    compare or gate.
+
+    When they differ, an external edit is assumed. Only the same *local* gauntlet
+    aggregation `run_turn()` already uses (`_run_local_checks`/`_local_finding_reason`) runs
+    against it -- per FR9's explicit Out of Scope, and unlike `run_turn()`, this never runs a
+    model call and never invokes `validate_scene()` (AD-4 control 1, lint-only). A clean pass
+    is persisted under a brand-new ordinal via `store.accept()` -- never an in-place rewrite
+    of the edited file -- with a synthetic prompt (`_HAND_EDIT_PROMPT`) naming the source, and
+    returned as an `"accepted"` `TurnResult`; callers should treat this exactly like any other
+    accepted turn (refresh their tracked "current scene" value and the render window).
+
+    A finding calls `store.record_rejected(_HAND_EDIT_PROMPT, reason)` (review round,
+    patch-level fix: this used to be the one rejection path in this system with no
+    `history.jsonl` trace at all -- every other rejection path, local-finding or
+    renderer-side, already calls `record_rejected()`; a rejected hand edit is exactly as real
+    an attempt and is now recorded the same way, using the same synthetic prompt the accepted
+    case already uses) before returning a `"hand_edit_rejected"` `TurnResult` naming the
+    violation (via `_local_finding_reason`, the same reason string `run_turn()`'s own
+    local-finding path computes). The edit itself is never promoted to a new ordinal -- it is
+    simply left un-promoted. The caller's `known_scene` is untouched by this function
+    returning -- it just doesn't hand back an updated value, so the prior accepted content
+    remains current for pipeline purposes even though the on-disk file itself still holds the
+    failing edit until the user fixes or reverts it.
+
+    Never raises for an expected outcome, mirroring `run_turn()`'s own contract: both the
+    initial `store.current_scene()` read and the later `store.accept()` call can each raise
+    `SceneStoreError` (the same "exhausted ordinal-claim retries under contention"/"session
+    directory became inaccessible" failure modes `run_turn()` guards against -- review round,
+    patch-level fix: the `current_scene()` read used to be unguarded here, able to escape this
+    function's own never-raises contract if the session directory became inaccessible between
+    calls). Both are reported as a `"storage_failed"` `TurnResult`, never an unhandled
+    `SceneStoreError`.
+    """
+    try:
+        current = store.current_scene()
+    except SceneStoreError as e:
+        return TurnResult(tag="storage_failed", messages=[str(e)])
+    if current == known_scene:
+        return None
+    if current is None:
+        # Unreachable through this function's own normal call paths (three independent
+        # automated reviewers confirmed this, review round -- including one noting the
+        # existing test named as covering it actually short-circuits earlier via the
+        # `current == known_scene` check above instead): current_scene() returning None means
+        # no ordinal file exists at all, which requires known_scene to also be None for any
+        # caller following this module's own contract (nothing accepted yet in this
+        # session) -- and current == known_scene (both None) already returns above before
+        # this line is ever reached. Reaching here would require every ordinal file to vanish
+        # from session_dir between the caller learning a non-None known_scene and this call;
+        # AD-8 says this codebase itself never deletes an ordinal, so no code path of this
+        # module's own can produce that -- only an external actor (someone manually deleting
+        # files from the session directory) could. Kept, not deleted, as a defensive backstop
+        # against exactly that external-tampering scenario: current_scene()'s own return type
+        # is Optional, and _run_local_checks() below requires a str, so this must still be
+        # handled rather than assumed away.
+        return None
+
+    findings = _run_local_checks(current)
+    if findings:
+        reason = _local_finding_reason(findings)
+        messages = _record_rejected_safely(store, _HAND_EDIT_PROMPT, reason, [reason])
+        return TurnResult(
+            tag="hand_edit_rejected",
+            messages=messages,
+            findings=findings,
+        )
+
+    try:
+        ordinal = store.accept(current, _HAND_EDIT_PROMPT)
+    except SceneStoreError as e:
+        return TurnResult(tag="storage_failed", messages=[str(e)])
+
+    return TurnResult(tag="accepted", messages=[], ordinal=ordinal)

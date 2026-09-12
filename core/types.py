@@ -176,7 +176,17 @@ StageName = Literal["generating", "validating", "reading back"]
 #     `SceneStoreError` after exhausting its ordinal-claim retries, or writing the staging
 #     file itself raised `OSError`) -- not one of the frozen I/O & Edge-Case Matrix's five
 #     rows either, but the same kind of real precondition failure `generation_failed`
-#     already covers on the generation side (review round, patch-level fix).
+#     already covers on the generation side (review round, patch-level fix). Produced by
+#     `run_turn()` itself, but also by `check_hand_edit()` (story 17) for the same underlying
+#     failure mode: either function's `store.current_scene()`/`store.accept()` call raising
+#     `SceneStoreError` maps to this same tag -- a reader should not assume `run_turn()` is
+#     the only producer (review round, patch-level fix).
+#   - "hand_edit_rejected" -- spec-ai-scene-agent story 17 (`core/turn.py`'s
+#     `check_hand_edit()`): an out-of-band hand edit to the current scene file tripped the
+#     local gauntlet aggregation -- unique to `check_hand_edit()`, never returned by
+#     `run_turn()` itself. The edit is never promoted to a new ordinal, and the caller's
+#     tracked "current scene" value is left unchanged (the on-disk file may still hold the
+#     failing edit until the user fixes or reverts it -- this module never rewrites it).
 TurnTag = Literal[
     "accepted",
     "generation_failed",
@@ -190,6 +200,7 @@ TurnTag = Literal[
     "subprocess_failed",
     "readback_failed",
     "storage_failed",
+    "hand_edit_rejected",
 ]
 
 

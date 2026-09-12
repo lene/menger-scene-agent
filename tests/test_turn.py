@@ -18,7 +18,7 @@ import pytest
 import core.turn as turn_module
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.scene_store import SceneStore, SceneStoreError
-from core.turn import run_turn
+from core.turn import check_hand_edit, run_turn
 from core.types import TurnResult, ValidationError, ValidationResult
 from tests.fakes import FakeModelAdapter
 
@@ -827,3 +827,173 @@ def test_on_stage_never_fires_reading_back_on_validation_error(tmp_path, monkeyp
 
     assert result.tag == "timeout"
     assert stages == ["generating", "validating"]
+
+
+# ============================================================================================
+# check_hand_edit() -- story 17: hand-edit fallback, lint-gated and ordinal-assigned
+#
+# One test per frozen I/O & Edge-Case Matrix row, plus the "accepted edit becomes prior_scene
+# for the next turn" row (exercised end to end via a real run_turn() call using revise()).
+# ============================================================================================
+
+
+def _refuse_local_checks(monkeypatch) -> None:
+    """Fails the test loudly if _run_local_checks() is ever invoked -- used to prove
+    check_hand_edit() never runs the lint gate when disk matches known_scene (or when there
+    is nothing to compare)."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("_run_local_checks() must not be called on this path")
+
+    monkeypatch.setattr(turn_module, "_run_local_checks", _boom)
+
+
+def test_check_hand_edit_no_prior_scene_and_empty_disk_returns_none(tmp_path, monkeypatch):
+    _refuse_local_checks(monkeypatch)
+    store = _make_store(tmp_path)
+
+    result = check_hand_edit(store, None)
+
+    assert result is None
+
+
+def test_check_hand_edit_disk_matches_known_scene_returns_none_no_lint_check(
+    tmp_path, monkeypatch
+):
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+    _refuse_local_checks(monkeypatch)
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result is None
+
+
+def test_check_hand_edit_clean_edit_is_accepted_under_new_ordinal(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    # Simulate an out-of-band hand edit: overwrite the accepted ordinal file directly on
+    # disk, bypassing store.accept() entirely -- exactly what a user's editor would do.
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    result = check_hand_edit(store, original_text)
+
+    assert isinstance(result, TurnResult)
+    assert result.tag == "accepted"
+    assert result.ordinal == 2
+    # A brand-new ordinal was written -- the edited file itself (001.scala) was never
+    # touched/renamed (AD-8: never an in-place mutation).
+    assert _ordinal_paths(store) == [
+        store.session_dir / "001.scala",
+        store.session_dir / "002.scala",
+    ]
+    assert store.current_scene() == edited_text
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "accepted"
+    assert entries[-1]["ordinal"] == 2
+    assert entries[-1]["prompt"] == "<hand-edit>"
+
+
+def test_check_hand_edit_dirty_edit_is_rejected_naming_the_violation(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+    (store.session_dir / "001.scala").write_text(SCENE_TEXT_WITH_TODO, encoding="utf-8")
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result.tag == "hand_edit_rejected"
+    assert result.findings
+    assert any("TODO" in f.message for f in result.findings)
+    assert any("TODO" in m for m in result.messages)
+    # No new ordinal was consumed -- the failing edit is left exactly where the user put it,
+    # never promoted, never rewritten.
+    assert _ordinal_paths(store) == [store.session_dir / "001.scala"]
+    # Review round, patch-level fix: a rejected hand edit now DOES get a history.jsonl entry
+    # (matching every other rejection path's audit trail) -- the seed turn's accepted entry,
+    # plus one new rejected entry naming the violation via the synthetic hand-edit prompt.
+    entries = _history_entries(store)
+    assert len(entries) == 2
+    assert entries[-1]["outcome"] == "rejected"
+    assert entries[-1]["ordinal"] is None
+    assert entries[-1]["prompt"] == "<hand-edit>"
+    assert "TODO" in entries[-1]["reason"]
+    assert result.ordinal is None
+
+
+def test_check_hand_edit_current_scene_read_failure_is_reported_as_storage_failed_not_raised(
+    tmp_path, monkeypatch
+):
+    # Review round, patch-level fix: check_hand_edit()'s own store.current_scene() read was
+    # previously unguarded -- only the later store.accept() call's SceneStoreError was caught.
+    # A failure reading current_scene() itself (e.g. the session directory became
+    # inaccessible) must also be reported as "storage_failed", never an unhandled
+    # SceneStoreError escaping this never-raises function.
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+
+    def failing_current_scene(self):
+        raise SceneStoreError("session directory became inaccessible")
+
+    monkeypatch.setattr(SceneStore, "current_scene", failing_current_scene)
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result.tag == "storage_failed"
+    assert any("session directory became inaccessible" in m for m in result.messages)
+    assert result.ordinal is None
+
+
+def test_check_hand_edit_accepted_edit_becomes_prior_scene_for_the_next_turn(
+    tmp_path, monkeypatch
+):
+    # I/O & Edge-Case Matrix: "the real turn's run_turn() call uses the newly-accepted
+    # content as prior_scene, not the pre-edit value."
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    hand_edit_result = check_hand_edit(store, original_text)
+    assert hand_edit_result.tag == "accepted"
+
+    new_prior_scene = store.current_scene()
+    assert new_prior_scene == edited_text
+
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    run_turn(
+        "change it", new_prior_scene, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    # revise()'s user prompt carries the prior scene verbatim -- proving run_turn() was
+    # handed the newly-promoted hand-edited content, not the pre-edit value.
+    assert "object New" in adapter.requests[0].user_prompt
+
+
+def test_check_hand_edit_accept_failure_is_reported_as_storage_failed_not_raised(
+    tmp_path, monkeypatch
+):
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    def failing_accept(self, scene_text, prompt, readback_summary=None):
+        raise SceneStoreError("ordinal-claim retries exhausted")
+
+    monkeypatch.setattr(SceneStore, "accept", failing_accept)
+
+    result = check_hand_edit(store, original_text)
+
+    assert result.tag == "storage_failed"
+    assert any("ordinal-claim retries exhausted" in m for m in result.messages)
+    assert result.ordinal is None

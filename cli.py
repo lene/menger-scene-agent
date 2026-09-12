@@ -36,6 +36,19 @@ result exits with a clear message naming the stale artifact, before the model ad
 constructed or a session directory is created -- the same schema-version check
 `generate()`/`revise()` already ran on the first turn, just moved earlier so staleness is
 caught at startup instead of after the first prompt.
+
+spec-ai-scene-agent story 17 ("hand-edit fallback"): `core/turn.py`'s `check_hand_edit()` is
+called once per loop iteration, right after `input()` and before `/ask` routing or
+`run_turn()` dispatch. It compares the current on-disk scene against the loop's tracked
+`prior_scene` (no filesystem watch, just a fresh re-read each iteration); a mismatch means
+the user hand-edited the scene file directly. A clean edit is promoted to a new ordinal and
+treated exactly like any other accepted turn -- `prior_scene` advances and the render window
+refreshes via the same `_accept_and_refresh_render()` helper `run_turn()`'s own accepted
+path uses (factored out, story 17, rather than duplicated). A dirty edit is reported and
+changes nothing: `prior_scene` stays put and the render window is untouched. Either way, the
+loop still goes on to process the line the user actually typed this iteration -- an
+accepted hand edit and a "real" prompt can both be handled in the same iteration, the latter
+seeing the former's freshly-promoted content as its `prior_scene`.
 """
 
 from __future__ import annotations
@@ -54,7 +67,7 @@ from adapters.model_factory import get_model_adapter
 from adapters.render_window import refresh_render_window
 from adapters.scene_store import SceneStore
 from core.generation import validate_artifacts
-from core.turn import run_turn
+from core.turn import check_hand_edit, run_turn
 from core.types import RenderWindowOutcome, RenderWindowResult, TurnResult
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
@@ -100,7 +113,13 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             f"  {_RENDER_LAUNCHER_ENV}   required; path to the staged menger-app render "
             "window launcher binary (menger repo, AD-10).\n"
             f"  {_SESSIONS_DIR_ENV}  optional; sessions base directory (default: "
-            f"'{_DEFAULT_SESSIONS_DIR}')."
+            f"'{_DEFAULT_SESSIONS_DIR}').\n"
+            "\n"
+            "Hand-editing is supported: you may edit the current scene file on disk "
+            "directly between turns. Each loop iteration checks for such an edit (no model "
+            "call) and either promotes it to a new ordinal, reports the lint violation that "
+            "blocked it, or reports a storage failure if promoting a clean edit itself could "
+            "not be persisted."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -254,6 +273,70 @@ def _format_render_outcome(outcome: RenderWindowOutcome) -> str:
     return f"Render window: {outcome.kind} - {outcome.message}"
 
 
+def _format_hand_edit_result(result: TurnResult) -> str:
+    # Labeled distinctly from _format_turn_result -- this event isn't tied to a prompt the
+    # user typed this iteration the way a normal "Turn N" line is (story 17). Shape is
+    # "Hand edit: tag [(ordinal N)] [- messages]": the tag, then an "(ordinal N)" segment
+    # when the edit was promoted (never present on a non-accepted tag, since `ordinal` is
+    # None there), then any messages -- one extra segment `_format_turn_result` has no
+    # equivalent for, since a normal turn's ordinal is already folded into its own "Turn N:"
+    # prefix instead (review round, patch-level fix: previously documented as simply
+    # mirroring `_format_turn_result`'s "tag [- messages]" shape, which omitted this segment).
+    text = f"Hand edit: {result.tag}"
+    if result.ordinal is not None:
+        text += f" (ordinal {result.ordinal})"
+    if result.messages:
+        text += " - " + "; ".join(result.messages)
+    return text
+
+
+def _accept_and_refresh_render(
+    store: SceneStore,
+    render_launcher_path: str,
+    render_process: Optional[subprocess.Popen[str]],
+) -> Optional[subprocess.Popen[str]]:
+    """Shared post-acceptance helper (story 17 -- factored out of the inline block story 21
+    introduced, so the hand-edit-accepted path and the normal run_turn()-accepted path both
+    call it instead of duplicating the refresh_render_window()/render_process-update dance).
+    Called after ANY accepted TurnResult (from run_turn() or from check_hand_edit()); prints
+    the one-line render status and returns the render_process value the caller should track
+    from here on -- the new handle on success, `None` on failure (story 21: the adapter
+    terminates `previous_process` unconditionally before attempting the new launch, so the
+    old handle is invalid either way once this returns).
+
+    Guarded exactly like the call site it replaces: current_scene_path() does a fresh
+    filesystem scan (AD-13) and can theoretically raise SceneStoreError, and
+    refresh_render_window's own contract doesn't cover exceptions raised before it's even
+    called -- a single turn's post-processing must not be able to kill the whole REPL any
+    more than run_turn() itself can."""
+    try:
+        scene_path = store.current_scene_path()
+        if scene_path is None:
+            # Should never happen: an "accepted" tag is only ever returned after
+            # store.accept() has already written the ordinal this reads back -- but
+            # current_scene_path()'s own return type is Optional, so this is handled rather
+            # than silently trusted.
+            raise RuntimeError(
+                "accepted turn but current_scene_path() returned None -- this should be "
+                "impossible; SceneStore/run_turn's accept-then-report invariant may be "
+                "broken"
+            )
+        render_outcome = refresh_render_window(
+            scene_path,
+            render_launcher_path,
+            previous_process=render_process,
+        )
+        print(_format_render_outcome(render_outcome))
+        return (
+            render_outcome.process
+            if isinstance(render_outcome, RenderWindowResult)
+            else None
+        )
+    except Exception as e:  # noqa: BLE001 -- a render-refresh failure must not kill the REPL
+        print(f"Render window: error - {e}")
+        return None
+
+
 def _print_stage(stage: str) -> None:
     # spec-ai-scene-agent story 12 ("live status line"): a multi-second turn (a real model
     # call, later a sandboxed subprocess) prints nothing until fully done without this --
@@ -333,6 +416,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         except (EOFError, KeyboardInterrupt):
             break
 
+        # story 17: checked once per loop iteration, right after input() and before /ask
+        # routing or run_turn() dispatch -- detects a hand edit made directly to the current
+        # scene file since the last iteration. Guarded the same way run_turn() itself is: a
+        # single bad check must not kill the REPL.
+        try:
+            hand_edit_result = check_hand_edit(store, prior_scene)
+        except Exception as e:  # noqa: BLE001 -- a hand-edit check failure must not kill the REPL
+            print(f"Hand edit check error: {e}")
+            hand_edit_result = None
+
+        if hand_edit_result is not None:
+            print(_format_hand_edit_result(hand_edit_result))
+            if hand_edit_result.tag == "accepted":
+                # Treated exactly like a normal accepted turn -- prior_scene advances and
+                # the render window refreshes via the same shared helper (Boundaries &
+                # Constraints: "The render window only refreshes for a hand-edit that
+                # actually passed the gate, using the same call path a normal accepted turn
+                # already uses").
+                prior_scene = store.current_scene()
+                render_process = _accept_and_refresh_render(
+                    store, render_launcher_path, render_process
+                )
+            # On any other tag (hand_edit_rejected, storage_failed): prior_scene/
+            # render_process are left exactly as they were -- the loop still goes on to
+            # process the line the user actually typed this iteration below.
+
         if _is_consult_input(line):
             # Never reaches run_turn() -- Boundaries & Constraints: "a /ask/-question
             # prefix never reaches run_turn()".
@@ -366,38 +475,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             # launch, so the old handle is invalid either way once the call returns --
             # `render_process` is therefore always overwritten below, never conditionally
             # kept (Design Notes).
-            #
-            # Guarded the same way the run_turn() call above is: current_scene_path() does a
-            # fresh filesystem scan (AD-13) and can theoretically raise SceneStoreError on a
-            # filesystem-level failure, and refresh_render_window's own contract doesn't cover
-            # exceptions raised before it's even called -- a single turn's post-processing
-            # must not be able to kill the whole REPL any more than run_turn() itself can.
-            try:
-                scene_path = store.current_scene_path()
-                if scene_path is None:
-                    # Should never happen: an "accepted" tag is only ever returned after
-                    # store.accept() has already written the ordinal this reads back
-                    # (core/turn.py's run_turn()) -- but current_scene_path()'s own return
-                    # type is Optional, so this is handled rather than silently trusted.
-                    raise RuntimeError(
-                        "accepted turn but current_scene_path() returned None -- this "
-                        "should be impossible; SceneStore/run_turn's accept-then-report "
-                        "invariant may be broken"
-                    )
-                render_outcome = refresh_render_window(
-                    scene_path,
-                    render_launcher_path,
-                    previous_process=render_process,
-                )
-                render_process = (
-                    render_outcome.process
-                    if isinstance(render_outcome, RenderWindowResult)
-                    else None
-                )
-                print(_format_render_outcome(render_outcome))
-            except Exception as e:  # noqa: BLE001 -- a render-refresh failure must not kill the REPL
-                print(f"Render window: error - {e}")
-                render_process = None
+            render_process = _accept_and_refresh_render(
+                store, render_launcher_path, render_process
+            )
 
     return 0
 
