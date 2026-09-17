@@ -20,11 +20,11 @@ never modifies renderer code.
 
 ## Status
 
-All 9 stories are implemented (see each story's frontmatter under
-`../_bmad-output/specs/spec-ai-scene-agent/stories/`). The renderer-side
-stories (1, 3's renderer half, 5, 8) shipped in `menger` 0.9.0; the
-agent-side stories (2, 3's agent half, 4, 6, 7, 9) are on this repo's
-`feat/sprint-37` branch, PR #1.
+The CLI-agent epic (stories 10-22) is complete (see each story's frontmatter
+under `../_bmad-output/specs/spec-ai-scene-agent/stories/`) -- a persistent
+REPL, hand-edit fallback, live status line, timeout/clarification/consult
+turn handling, and `/retry` confirmation are all implemented. Stories 3, 4, 8
+predate this epic and track separately.
 
 ## Setup
 
@@ -54,6 +54,13 @@ individual adapter class directly. It picks a provider by, in order: an explicit
 (case-insensitive), else `anthropic` (the default, so existing zero-config usage is
 unaffected).
 
+**The default is Anthropic regardless of which keys you have set.** Having
+`GEMINI_API_KEY` set does *not* select Gemini — `cli.py` still tries to
+construct the Anthropic adapter unless you explicitly set
+`MENGER_AGENT_MODEL_PROVIDER=gemini` (or `deepseek`/`openai`/`kimi`). This is
+the single most common setup mistake: `ANTHROPIC_API_KEY is not set` while a
+different provider's key sits right there in the environment.
+
 | Provider | `MENGER_AGENT_MODEL_PROVIDER` value | Required env var | Extra needed |
 |---|---|---|---|
 | Anthropic Claude (default) | `anthropic` | `ANTHROPIC_API_KEY` | none (base install) |
@@ -71,6 +78,54 @@ completions API) costs one `_ProviderSpec` table entry in
 `adapters/openai_compatible_model.py` plus one factory-table entry in
 `adapters/model_factory.py` — no new adapter class. A genuinely different wire protocol
 needs a new adapter file mirroring `adapters/gemini_model.py`'s shape.
+
+## Running the agent
+
+Set `MENGER_AGENT_MODEL_PROVIDER` if you're not using the Anthropic default
+(see table above), and that provider's API key. Two more env vars are
+required regardless of provider, both pointing into the sibling `menger`
+repo -- unset either and `cli.py` exits with a clear error before any model
+call or session is created:
+
+| Env var | Points to |
+|---|---|
+| `MENGER_SCENE_VALIDATOR_SCRIPT` | the renderer-side scene validator script, e.g. `../menger/docker/scene-validator/run-sandboxed.sh` |
+| `MENGER_RENDER_LAUNCHER` | the staged `menger-app` render window launcher binary, e.g. `../menger/menger-app/target/universal/stage/bin/menger-app` (build it first with `sbt stage` in `menger/` if it doesn't exist yet) |
+
+Optional: `MENGER_AGENT_SESSIONS_DIR` (default `./sessions`).
+
+Anthropic (default):
+
+```bash
+export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
+export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
+export ANTHROPIC_API_KEY=...
+
+.venv/bin/python3 cli.py
+```
+
+Gemini (or any other provider — same shape, swap the two lines):
+
+```bash
+export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
+export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
+export MENGER_AGENT_MODEL_PROVIDER=gemini
+export GEMINI_API_KEY=...   # already installed: pip install -e ".[gemini]"
+
+.venv/bin/python3 cli.py
+```
+
+```bash
+.venv/bin/python3 cli.py --session <id>      # resume an existing session (id = its directory name under the sessions dir)
+```
+
+In the REPL:
+- Plain text -> a generate/revise turn: prints `Turn N: <outcome>`, refreshes the render window on acceptance.
+- `/ask <question>` or `/question <question>` -> a consult turn: prose answer grounded in the DSL manifest/corpus and current scene; never edits the scene, never consumes an ordinal.
+- `/retry` -> resends the prompt that most recently failed with a `generation_timeout`. Nothing pending -> reports nothing to retry. Scene changed since the failure (hand edit or another accepted turn) -> resends immediately. Unchanged -> first `/retry` explains nothing has changed and arms a confirmation gate; a second `/retry` (still unchanged) resends. Never auto-retried (PRD FR7).
+- Hand-editing: edit the current scene file on disk directly between turns. Each loop iteration checks for such an edit and either promotes it to a new ordinal, reports the lint violation that blocked it, or reports a storage failure.
+
+`cli.py --help` prints this same reference.
 
 ## Running the tests
 

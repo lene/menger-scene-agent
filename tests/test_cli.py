@@ -1768,3 +1768,126 @@ def test_double_retry_after_a_successful_resend_reports_nothing_to_retry(
     assert call_log == ["timeout prompt", "timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines[-1] == "Retry: nothing to retry -- no prior generation_timeout to resend."
+
+
+def test_clarification_answer_is_threaded_into_the_original_request(
+    monkeypatch, tmp_path, capsys
+):
+    # Reproduces the reported bug: a needs_clarification followed by a terse answer must
+    # not send that answer to the model alone -- it must be merged with the original
+    # request and the model's own stated reason.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(
+                tag="needs_clarification",
+                messages=["unspecified rotation axis (X, Y, or Z)"],
+            )
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["rotate the cube by 90 degrees", "z"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert call_log[0] == "rotate the cube by 90 degrees"
+    merged = call_log[1]
+    # The merged prompt must contain the original request, the model's stated reason, and
+    # the user's terse answer -- not just "z" alone.
+    assert "rotate the cube by 90 degrees" in merged
+    assert "unspecified rotation axis (X, Y, or Z)" in merged
+    assert merged.endswith("User's answer: z")
+    out_lines = capsys.readouterr().out.splitlines()
+    assert out_lines == [
+        "Turn None: needs_clarification - unspecified rotation axis (X, Y, or Z)",
+        "Turn 1: accepted",
+        "Render window: refreshed",
+    ]
+
+
+def test_two_consecutive_clarification_rounds_compound_both_reasons(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        idx = len(call_log)
+        if idx == 1:
+            return TurnResult(tag="needs_clarification", messages=["which axis?"])
+        if idx == 2:
+            return TurnResult(tag="needs_clarification", messages=["which direction?"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["rotate it", "z", "clockwise"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    third_prompt = call_log[2]
+    # The third call must carry the ENTIRE compounded history -- original request, both
+    # clarification rounds' reasons, and both of the user's answers -- not just the latest.
+    assert "rotate it" in third_prompt
+    assert "which axis?" in third_prompt
+    assert "z" in third_prompt
+    assert "which direction?" in third_prompt
+    assert third_prompt.endswith("User's answer: clockwise")
+
+
+def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sent_raw(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        idx = len(call_log)
+        if idx == 1:
+            return TurnResult(tag="needs_clarification", messages=["which axis?"])
+        if idx == 2:
+            # Resolves the clarification, but NOT via acceptance -- a different rejection
+            # tag entirely. clarification_state must still clear.
+            return TurnResult(
+                tag="compile_errors", messages=["Compilation of '.candidate.scala' failed"]
+            )
+        # Third call: a brand-new, unrelated prompt -- must be sent completely raw, with
+        # no trace of the earlier (now-resolved) clarification round.
+        store_arg.accept("object B:\n  val x = 2\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input",
+        _scripted_input(["rotate it", "z", "a completely unrelated new prompt"]),
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert call_log[2] == "a completely unrelated new prompt"

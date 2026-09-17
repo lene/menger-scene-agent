@@ -120,6 +120,12 @@ class GeminiModelAdapter:
                 config=types.GenerateContentConfig(
                     system_instruction=request.system_prompt,
                     max_output_tokens=_MAX_TOKENS,
+                    # No tools are ever passed, so automatic function calling never
+                    # triggers -- disabling it explicitly just silences the SDK's
+                    # log-once AFC advisory (google/genai/models.py) on every process.
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True
+                    ),
                 ),
             )
         except (TimeoutError, httpx.TimeoutException) as e:

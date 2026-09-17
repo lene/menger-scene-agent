@@ -75,6 +75,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import readline  # noqa: F401 -- side-effect only: wires GNU readline into input() (arrow
+                  # keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -147,7 +149,13 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "changed since the failure (a hand edit or another accepted turn), resends "
             "immediately. If unchanged, the first /retry explains nothing has changed and "
             "requires a second /retry (still unchanged) before actually resending -- never "
-            "auto-retried, per PRD FR7."
+            "auto-retried, per PRD FR7.\n"
+            "\n"
+            "needs_clarification: when a turn is rejected for being too ambiguous, your "
+            "next line is automatically threaded back into the original request (not sent "
+            "alone) -- answer the question directly, e.g. just \"z\" for \"which axis?\". "
+            "Compounds across repeated rounds; cleared as soon as a turn resolves any other "
+            "way."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -418,6 +426,50 @@ def _next_retry_state(
     return None
 
 
+@dataclass(frozen=True)
+class _ClarificationState:
+    """Tracks a pending `needs_clarification` (story 18) so the user's next plain-text line
+    is threaded back into the original request instead of being sent to the model as a
+    lone, context-free fragment -- mirrors `_RetryState`'s shape/lifecycle, scoped to
+    `needs_clarification` instead of `generation_timeout`.
+
+    `pending_prompt` is the full text that produced this clarification -- the user's raw
+    line the first time, or a previously merged prompt if this is a second-or-later round
+    (see `_next_clarification_state`). `reason` is the model's stated clarification message
+    (`"; ".join(result.messages)`, matching `_format_turn_result`'s own join)."""
+
+    pending_prompt: str
+    reason: str
+
+
+def _build_clarification_prompt(state: _ClarificationState, answer: str) -> str:
+    """Composes the merged prompt sent to `run_turn()` when a `needs_clarification` is
+    pending -- folds the original request, the model's own stated reason, and the user's
+    answer into one string. `core/generation.py`'s `prompt` parameter stays a single string
+    throughout (Approach: no core/ signature changes), so this composition happens entirely
+    here in the CLI."""
+    return (
+        f"{state.pending_prompt}\n\n"
+        f"(The system asked for clarification: {state.reason})\n"
+        f"User's answer: {answer}"
+    )
+
+
+def _next_clarification_state(
+    result: TurnResult, pending_prompt: str
+) -> Optional[_ClarificationState]:
+    """`None` clears the pending clarification (any tag other than `needs_clarification`
+    resolves it, accepted or otherwise-rejected alike). A fresh `needs_clarification` --
+    including one produced by an already-merged prompt -- re-arms with `pending_prompt` set
+    to the just-sent (possibly already-merged) text, so a second or third clarification
+    round keeps compounding the whole history rather than only the latest answer."""
+    if result.tag == "needs_clarification":
+        return _ClarificationState(
+            pending_prompt=pending_prompt, reason="; ".join(result.messages)
+        )
+    return None
+
+
 def _execute_turn(
     prompt: str,
     prior_scene: Optional[str],
@@ -647,6 +699,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # way `prior_scene`/`render_process` are.
     retry_state: Optional[_RetryState] = None
 
+    # `None` until a `needs_clarification` occurs, then the pending prompt/reason so the
+    # user's next plain-text line is threaded back into the original request instead of
+    # being sent alone -- threaded the same way `retry_state` is.
+    clarification_state: Optional[_ClarificationState] = None
+
     while True:
         try:
             line = input("> ")
@@ -721,13 +778,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not line.strip():
             continue
 
+        # A pending needs_clarification (story 18 gap fix): thread the user's answer back
+        # into the original request instead of sending it alone -- see
+        # `_build_clarification_prompt`'s docstring.
+        #
+        # Documented, not solved (same proportionality call story 22 made for /retry's own
+        # analogous edge case, cli.py's "already-armed gate" comment above): there is no way
+        # to tell "this line answers the pending clarification" apart from "this is an
+        # unrelated fresh request typed instead" -- the former is assumed, always. A user who
+        # abandons the clarification and types something new gets it incorrectly merged with
+        # the stale pending prompt on this one turn.
+        dispatched_prompt = (
+            _build_clarification_prompt(clarification_state, line)
+            if clarification_state is not None
+            else line
+        )
+
         # story 22: the pre-story-22 inline "run_turn() -> print -> on-accept refresh"
         # block is now `_execute_turn()`, shared with `/retry`'s own resend above -- see its
         # docstring for the exact contract (including the run_turn()-exception guard this
         # replaces verbatim).
         scene_before_turn = prior_scene
         result, prior_scene, render_process = _execute_turn(
-            line,
+            dispatched_prompt,
             prior_scene,
             manifest,
             corpus,
@@ -738,6 +811,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             render_process,
             on_stage=_print_stage,
         )
+        if result is not None:
+            clarification_state = _next_clarification_state(result, dispatched_prompt)
         if result is not None and result.tag == "generation_timeout":
             # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
             # the gate from scratch. Any other tag -- including a run_turn() exception
@@ -756,7 +831,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             # scene-content equality, not turn history, is what "unchanged" means throughout
             # this story), but is flagged here in case a future spec revision wants an
             # intervening turn of any kind to also reset an already-armed confirmation.
-            retry_state = _next_retry_state(result, line, scene_before_turn)
+            retry_state = _next_retry_state(result, dispatched_prompt, scene_before_turn)
 
     return 0
 
