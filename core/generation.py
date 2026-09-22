@@ -53,10 +53,15 @@ _RULES = (
     "chrome?\", \"I thought it was brighter\") rather than an explicit instruction for a "
     "new state -- do not silently guess what change, if any, is wanted. Respond with "
     "NEEDS_CLARIFICATION: this reads as a question about the current scene, not a change "
-    "request -- use /ask or /question for an explanation, or say what to change. Only "
-    "compose a scene when the request clearly directs a change (imperative phrasing like "
-    "\"make it...\"/\"change the...\", or a question that is itself the directive, e.g. "
-    "\"could you make it less shiny?\", still counts as a change request).\n"
+    "request -- use /ask or /question for an explanation, or say what to change. This "
+    "category is narrow: it applies ONLY when the request contains no directive at all -- "
+    "never to an ordinary change request just because more than one DSL field could satisfy "
+    "it. \"make it darker\", \"make it slower\", \"make it bigger\" ARE directives (note the "
+    "imperative \"make it...\" phrasing), not ambiguous requests -- even though \"darker\" "
+    "could mean light intensity, background, or material color, pick the single most direct, "
+    "conventional lever for the term used and compose the scene; do not ask which one was "
+    "meant. Reserve NEEDS_CLARIFICATION for a genuinely undefined term, a direct "
+    "contradiction, or input with no actionable instruction in it at all.\n"
 )
 
 
