@@ -40,6 +40,15 @@ _RULES = (
     "respond with exactly one plain line, NEEDS_CLARIFICATION: <reason naming the specific "
     "term or contradiction>, instead of a scene code block. Do not wrap this line in "
     "backticks or a code fence -- it must be plain text, not formatted as code.\n"
+    "- The same applies if the request reads as a question or observation about the "
+    "CURRENT scene (\"are you sure the texture is silver?\", \"why does it look like "
+    "chrome?\", \"I thought it was brighter\") rather than an explicit instruction for a "
+    "new state -- do not silently guess what change, if any, is wanted. Respond with "
+    "NEEDS_CLARIFICATION: this reads as a question about the current scene, not a change "
+    "request -- use /ask or /question for an explanation, or say what to change. Only "
+    "compose a scene when the request clearly directs a change (imperative phrasing like "
+    "\"make it...\"/\"change the...\", or a question that is itself the directive, e.g. "
+    "\"could you make it less shiny?\", still counts as a change request).\n"
 )
 
 
