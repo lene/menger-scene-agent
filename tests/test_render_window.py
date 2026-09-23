@@ -7,18 +7,29 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, List, Optional
 
 import pytest
 
-from adapters.render_window import refresh_render_window
+from adapters.render_window import log_paths, refresh_render_window
 from core.types import RenderWindowError, RenderWindowResult
 
 _LAUNCHER_PATH = "/fake/menger-app/target/universal/stage/bin/menger-app"
-_SCENE_FILE = "/fake/scene-workspace/session/001.scala"
+# A real directory: the adapter writes the window's stdout/stderr logs next to the scene file.
+_SESSION_DIR = Path(tempfile.mkdtemp(prefix="render-window-test-"))
+_SCENE_FILE = str(_SESSION_DIR / "001.scala")
 _GRACE_PERIOD = 0.01
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _remove_session_dir():
+    yield
+    shutil.rmtree(_SESSION_DIR, ignore_errors=True)
 
 
 class FakePopen:
@@ -27,7 +38,8 @@ class FakePopen:
     `still_running=True` simulates a launch that survives the grace period: `wait()` raises
     `subprocess.TimeoutExpired` until `terminate()`/`kill()` has been called (mirroring a real
     process that only exits once asked to). `still_running=False` simulates a fast exit:
-    `wait()` returns `returncode` immediately, with `stdout`/`stderr` available to read.
+    `wait()` returns `returncode` immediately. `_patch_popen` writes the scripted
+    `stdout`/`stderr` into the files the adapter hands to `Popen`, as a real process would.
     """
 
     def __init__(
@@ -40,7 +52,6 @@ class FakePopen:
         self.terminated = False
         self.killed = False
         self.wait_calls: List[Optional[float]] = []
-        self.communicate_calls: List[Optional[float]] = []
 
     def poll(self) -> Optional[int]:
         return None if self._still_running else self.returncode
@@ -51,13 +62,6 @@ class FakePopen:
             raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
         self._still_running = False
         return self.returncode
-
-    def communicate(self, timeout: Optional[float] = None):
-        self.communicate_calls.append(timeout)
-        if self._still_running and not (self.terminated or self.killed):
-            raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
-        self._still_running = False
-        return self.stdout.read(), self.stderr.read()
 
     def terminate(self) -> None:
         self.terminated = True
@@ -76,6 +80,8 @@ def _patch_popen(monkeypatch, fake_popen: FakePopen) -> List[Any]:
         calls.append(cmd)
         if isinstance(fake_popen, BaseException):
             raise fake_popen
+        kwargs["stdout"].write(fake_popen.stdout.getvalue())
+        kwargs["stderr"].write(fake_popen.stderr.getvalue())
         return fake_popen
 
     import adapters.render_window as render_window
@@ -99,8 +105,8 @@ def test_no_prior_process_launch_succeeds_returns_running_handle(monkeypatch):
     assert result.process is fake
     assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
     # The caller-supplied grace_period must be the exact value passed through to the
-    # underlying communicate() call, not e.g. a default or a mangled value.
-    assert fake.communicate_calls == [_GRACE_PERIOD]
+    # underlying wait() call, not e.g. a default or a mangled value.
+    assert fake.wait_calls == [_GRACE_PERIOD]
 
 
 def test_no_prior_process_accepts_path_objects_for_scene_file_and_launcher_path(monkeypatch):
@@ -391,3 +397,41 @@ def test_grace_period_not_positive_raises_value_error(monkeypatch, grace_period)
 
     # The precondition check must happen before anything is launched or terminated.
     assert result_calls == []
+
+
+# --- A long-running window's output must never block it ----------------------------------------
+
+
+def test_running_window_writing_past_grace_period_never_blocks_on_its_output(tmp_path):
+    # Real process, not FakePopen: the deadlock only exists with a real OS pipe. The child
+    # sleeps past the grace period, then writes 200 KB to stderr (well over the 64 KB pipe
+    # buffer) and only then touches its marker. If its output went to a pipe nobody drains
+    # after the grace period, the write blocks forever and the marker never appears.
+    marker = tmp_path / "wrote-everything"
+    launcher = tmp_path / "fake-launcher"
+    launcher.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        "time.sleep(0.5)\n"
+        "sys.stderr.write('x' * 200_000)\n"
+        "sys.stderr.flush()\n"
+        f"open({str(marker)!r}, 'w').close()\n"
+        "time.sleep(30)\n"
+    )
+    launcher.chmod(0o755)
+    scene_file = tmp_path / "001.scala"
+    scene_file.write_text("object Scene")
+
+    result = refresh_render_window(scene_file, launcher, grace_period=0.2)
+
+    assert isinstance(result, RenderWindowResult)
+    try:
+        deadline = time.monotonic() + 5.0
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert marker.exists(), "window process blocked writing its output"
+        _, stderr_log = log_paths(scene_file)
+        assert stderr_log.stat().st_size == 200_000
+    finally:
+        result.process.kill()
+        result.process.wait(timeout=5)

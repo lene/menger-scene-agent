@@ -123,6 +123,7 @@ In the REPL:
 - Plain text -> a generate/revise turn: prints `Turn N: <outcome>`, refreshes the render window on acceptance.
 - `/ask <question>` or `/question <question>` -> a consult turn: prose answer grounded in the DSL manifest/corpus and current scene; never edits the scene, never consumes an ordinal.
 - `/retry` -> resends the prompt that most recently failed with a `generation_timeout`. Nothing pending -> reports nothing to retry. Scene changed since the failure (hand edit or another accepted turn) -> resends immediately. Unchanged -> first `/retry` explains nothing has changed and arms a confirmation gate; a second `/retry` (still unchanged) resends. Never auto-retried (PRD FR7).
+- The render window's own output (including render errors) goes to `render.stdout.log` / `render.stderr.log` in the session directory, overwritten on each refresh -- check there if the window shows nothing or stops responding.
 - Hand-editing: edit the current scene file on disk directly between turns. Each loop iteration checks for such an edit and either promotes it to a new ordinal, reports the lint violation that blocked it, or reports a storage failure.
 
 `cli.py --help` prints this same reference.

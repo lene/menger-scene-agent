@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
@@ -89,10 +89,14 @@ def refresh_render_window(
     if render_lock_path is not None:
         cmd += ["--render-lock-path", str(render_lock_path)]
 
+    # The window's output goes to log files next to the scene, never to pipes: a window runs
+    # for as long as the user keeps it open, and nothing reads a pipe after the grace period,
+    # so once it had written ~64 KB (e.g. a per-frame error with a stack trace) its next write
+    # blocked forever -- a hung window, and a hidden error.
+    stdout_log, stderr_log = log_paths(scene_file)
     try:
-        process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
+        with open(stdout_log, "w") as out, open(stderr_log, "w") as err:
+            process = subprocess.Popen(cmd, stdout=out, stderr=err, text=True)
     except OSError as e:
         return RenderWindowError(
             kind="launch_failed",
@@ -101,20 +105,24 @@ def refresh_render_window(
         )
 
     try:
-        # `communicate()`, not `wait()`: both streams are opened as `subprocess.PIPE`, and a
-        # process that writes enough to either before exiting/timing out would block on a full
-        # OS pipe buffer -- a deadlock `wait()` alone can't detect (it would misclassify a
-        # stuck process as "still running = success"). `communicate()` drains both streams
-        # concurrently while waiting, and still raises `subprocess.TimeoutExpired` exactly like
-        # `wait()` when the process is still running past `grace_period` -- the normal,
-        # expected "success" case here.
-        stdout, stderr = process.communicate(timeout=grace_period)
+        process.wait(timeout=grace_period)
     except subprocess.TimeoutExpired:
         # Still running past the grace period -- a successful launch (Design Notes: no other
         # "ready" signal exists for a render window).
         return RenderWindowResult(process=process)
 
-    return _parse_fast_exit(stdout or "", stderr or "", process.returncode)
+    return _parse_fast_exit(
+        stdout_log.read_text(errors="replace"),
+        stderr_log.read_text(errors="replace"),
+        process.returncode,
+    )
+
+
+def log_paths(scene_file: Union[str, Path]) -> Tuple[Path, Path]:
+    """Where a render window launched for `scene_file` writes its stdout and stderr: next to
+    the scene, in its session directory. Overwritten by each launch."""
+    session_dir = Path(scene_file).parent
+    return session_dir / "render.stdout.log", session_dir / "render.stderr.log"
 
 
 def _terminate(process: subprocess.Popen[str], grace_period: float) -> None:
