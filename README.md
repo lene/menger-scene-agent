@@ -14,17 +14,29 @@ architecture spine at
 `../_bmad-output/planning-artifacts/architecture/architecture-ai-scene-agent-2026-08-30/ARCHITECTURE-SPINE.md`.
 Story breakdown: `../_bmad-output/specs/spec-ai-scene-agent/stories.yaml`.
 
-Its only coupling to `menger` is the CLI contract (`--scene`,
-`--texture-dir`, `--optix`) — it never depends on `menger` as a library and
-never modifies renderer code.
+In the workspace architecture docs this is arc42 decision AD-36
+(`../docs/arc42/09-architectural-decisions.md`); the spine's own decisions are cited there as
+SA-AD-n, while this repo's code and docstrings call them plain "AD-n".
+
+Its only coupling to `menger` (0.9.0 or later) is through processes and files — it never
+depends on `menger` as a library and never modifies renderer code:
+
+- `menger-app --scene <file.scala> --display <:N> --render-lock-path <path>` — the render window
+- `docker/scene-validator/run-sandboxed.sh` — sandboxed restricted-classpath compile +
+  geometric checks, verdict JSON on stdout
+- `reference/dsl-manifest.json`, `reference/dsl-corpus.json` — committed copies of the output
+  of menger's `ManifestGenerator` and `CorpusExporter` (see "Refreshing the reference
+  artifacts" below)
 
 ## Status
 
-The CLI-agent epic (stories 10-22) is complete (see each story's frontmatter
-under `../_bmad-output/specs/spec-ai-scene-agent/stories/`) -- a persistent
-REPL, hand-edit fallback, live status line, timeout/clarification/consult
-turn handling, and `/retry` confirmation are all implemented. Stories 3, 4, 8
-predate this epic and track separately.
+All 22 stories in `stories.yaml` are implemented (see each story's frontmatter under
+`../_bmad-output/specs/spec-ai-scene-agent/stories/`): the original slate 1-9 (manifest,
+harness spike, generate/revise, both gauntlets, semantic readback, history, render window,
+ticket escalation) and the CLI-agent epic 10-22 (persistent REPL, hand-edit fallback, live
+status line, timeout/clarification/consult turn handling, `/retry` confirmation). Sprint 37
+remains open for the MVP acceptance run. All of this lives on `feat/sprint-37`; `main` is not
+yet merged.
 
 ## Setup
 
@@ -127,6 +139,19 @@ In the REPL:
 - Hand-editing: edit the current scene file on disk directly between turns. Each loop iteration checks for such an edit and either promotes it to a new ordinal, reports the lint violation that blocked it, or reports a storage failure.
 
 `cli.py --help` prints this same reference.
+
+## Refreshing the reference artifacts
+
+`reference/dsl-manifest.json` and `reference/dsl-corpus.json` describe the DSL the model may
+use. At startup `cli.py` checks their schema version and exits with a message naming the stale
+artifact — before any model call — if they don't match what this agent expects. After a menger
+DSL change, regenerate them from the sibling `menger` checkout and commit the result:
+
+```bash
+cd ../menger
+sbt "mengerApp/runMain menger.tools.ManifestGenerator ../menger-scene-agent/reference/dsl-manifest.json"
+sbt "mengerApp/runMain menger.tools.CorpusExporter ../menger-scene-agent/reference/dsl-corpus.json"
+```
 
 ## Running the tests
 
