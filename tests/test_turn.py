@@ -19,10 +19,18 @@ import core.turn as turn_module
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.turn import check_hand_edit, run_turn
-from core.types import TurnResult, ValidationError, ValidationResult
+from core.types import (
+    EXPECTED_MANIFEST_SCHEMA_VERSION,
+    TurnResult,
+    ValidationError,
+    ValidationResult,
+)
 from tests.fakes import FakeModelAdapter
 
-VALID_MANIFEST = {"schemaVersion": "1.0.0", "objects": [{"name": "Sphere", "fields": []}]}
+VALID_MANIFEST = {
+    "schemaVersion": EXPECTED_MANIFEST_SCHEMA_VERSION,
+    "objects": [{"name": "Sphere", "fields": []}],
+}
 VALID_CORPUS = {"schemaVersion": "1.0.0", "scenes": []}
 
 # Trips no local gauntlet check (gauntlet/allowlist.py, resource_bounds.py, clean_code.py,

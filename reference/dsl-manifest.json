@@ -1,8 +1,18 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.3.3",
   "minDriverVersion": "580.65",
+  "conventions": [
+    "Units: positions and sizes are world units; `pos` is an object's centre; all angles (`rotation`, 4D rotations) are radians.",
+    "Axes: +y is up. The rendered image is currently mirrored horizontally: with the camera on +z looking toward -z, +x appears on the LEFT of the image.",
+    "Directional light: `direction` is the direction the light TRAVELS. (0f, -1f, 0f) shines straight down; (1f, -1f, -1f) comes from above. Point and area lights are placed by `position`.",
+    "Planes: `Y at -2f` is an infinite plane that faces the origin, so a floor below the scene is lit from above and receives shadows. Shadows are on by default.",
+    "Colour and transparency: alpha 0 is fully transparent, 1 fully opaque. An object's explicit `color` replaces its material's colour INCLUDING alpha, so an opaque `color` turns glass or film opaque -- omit `color` or give it a low alpha to keep transparency.",
+    "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
+    "Animation: `def scene(t: Float): Scene` plus `val duration = <seconds>f` in the same object; t is seconds in [0, duration]. The window plays it in real time, looping, and the validator checks the scene at t = 0 and at t = duration.",
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The volume-filling TesseractSponge currently ignores `size`."
+  ],
   "objects": [
     {
       "name": "Sphere",
@@ -20,12 +30,14 @@
         {
           "name": "color",
           "type": "scala.Option<menger.dsl.Color>",
-          "default": "None"
+          "default": "None",
+          "description": "Replaces the material colour including alpha."
         },
         {
           "name": "size",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Radius in world units."
         },
         {
           "name": "ior",
@@ -150,7 +162,8 @@
         {
           "name": "level",
           "type": "float",
-          "default": null
+          "default": null,
+          "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. Cost grows ~20x per level."
         },
         {
           "name": "material",
@@ -160,7 +173,8 @@
         {
           "name": "color",
           "type": "scala.Option<menger.dsl.Color>",
-          "default": "None"
+          "default": "None",
+          "description": "Replaces the material colour including alpha (see conventions)."
         },
         {
           "name": "size",
@@ -205,7 +219,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "Euler angles in radians around x, y, z."
         }
       ]
     },
@@ -225,7 +240,8 @@
         {
           "name": "color",
           "type": "scala.Option<menger.dsl.Color>",
-          "default": "None"
+          "default": "None",
+          "description": "Replaces the material colour including alpha."
         },
         {
           "name": "size",
@@ -275,7 +291,8 @@
         {
           "name": "edgeRadius",
           "type": "scala.Option<java.lang.Object>",
-          "default": "None"
+          "default": "None",
+          "description": "Draws the edges as tubes of this radius."
         },
         {
           "name": "edgeMaterial",
@@ -285,7 +302,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`."
         }
       ]
     },
@@ -305,7 +323,8 @@
         {
           "name": "level",
           "type": "float",
-          "default": null
+          "default": null,
+          "description": "Recursion depth; fractional levels blend between integer levels. Cost grows ~48x per level."
         },
         {
           "name": "material",
@@ -315,12 +334,14 @@
         {
           "name": "color",
           "type": "scala.Option<menger.dsl.Color>",
-          "default": "None"
+          "default": "None",
+          "description": "Replaces the material colour including alpha."
         },
         {
           "name": "size",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Currently ignored for VolumeRemoving (known issue)."
         },
         {
           "name": "ior",
@@ -365,7 +386,8 @@
         {
           "name": "edgeRadius",
           "type": "scala.Option<java.lang.Object>",
-          "default": "None"
+          "default": "None",
+          "description": "Draws the edges as tubes of this radius."
         },
         {
           "name": "edgeMaterial",
@@ -375,7 +397,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`."
         }
       ]
     },
@@ -798,12 +821,14 @@
         {
           "name": "position",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,3.0)"
+          "default": "Vec3(0.0,0.0,3.0)",
+          "description": "Eye position in world units."
         },
         {
           "name": "lookAt",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "Point the camera looks at; frame a scene by aiming here at the centre of all objects and moving `position` away until they fit."
         },
         {
           "name": "up",
@@ -1142,7 +1167,8 @@
         {
           "name": "direction",
           "type": "menger.dsl.Vec3",
-          "default": null
+          "default": null,
+          "description": "Direction the light travels: (0f, -1f, 0f) shines straight down."
         },
         {
           "name": "intensity",
@@ -1336,7 +1362,8 @@
       {
         "name": "axisPosition",
         "type": "menger.dsl.AxisPosition",
-        "default": null
+        "default": null,
+        "description": "`Y at -2f` = floor at y = -2 facing up (planes face the origin)."
       },
       {
         "name": "color",

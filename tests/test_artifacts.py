@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
+from core.types import EXPECTED_MANIFEST_SCHEMA_VERSION
 
 REFERENCE_MANIFEST = "reference/dsl-manifest.json"
 REFERENCE_CORPUS = "reference/dsl-corpus.json"
@@ -51,8 +52,9 @@ def test_load_manifest_rejects_malformed_json(tmp_path):
 def test_load_manifest_reads_the_real_reference_artifact():
     manifest = load_manifest(REFERENCE_MANIFEST)
 
-    assert manifest["schemaVersion"] == "1.0.0"
+    assert manifest["schemaVersion"] == EXPECTED_MANIFEST_SCHEMA_VERSION
     assert "objects" in manifest
+    assert manifest["conventions"], "the manifest must carry the DSL's conventions (F28)"
 
 
 def test_load_corpus_reads_the_real_reference_artifact():

@@ -26,7 +26,8 @@ from gauntlet.types import Finding
 # produce them (`ManifestGenerator`, `CorpusExporter`). This is the version this core knows
 # how to consume; a mismatch is a real failure mode (a stale artifact silently missing new
 # DSL vocabulary), not a style nit -- see the I/O & Edge-Case Matrix.
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.0.0"
+# 1.1.0 adds `conventions` and per-field `description`s (usability review 2026-09, F28).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.1.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

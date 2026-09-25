@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from adapters.model import ModelError
 from core.generation import generate, revise
-from core.types import GenerationError
+from core.types import EXPECTED_MANIFEST_SCHEMA_VERSION, GenerationError
 from tests.fakes import FakeModelAdapter
 
-VALID_MANIFEST = {"schemaVersion": "1.0.0", "objects": [{"name": "Sphere", "fields": []}]}
+VALID_MANIFEST = {
+    "schemaVersion": EXPECTED_MANIFEST_SCHEMA_VERSION,
+    "objects": [{"name": "Sphere", "fields": []}],
+}
 VALID_CORPUS = {
     "schemaVersion": "1.0.0",
     "scenes": [

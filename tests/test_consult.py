@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from adapters.model import ModelError
 from core.consult import answer_consult
-from core.types import ConsultError
+from core.types import EXPECTED_MANIFEST_SCHEMA_VERSION, ConsultError
 from tests.fakes import FakeModelAdapter
 
-MANIFEST = {"schemaVersion": "1.0.0", "types": ["MengerSponge"]}
+MANIFEST = {"schemaVersion": EXPECTED_MANIFEST_SCHEMA_VERSION, "types": ["MengerSponge"]}
 CORPUS = {
     "schemaVersion": "1.0.0",
     "scenes": [{"path": "examples/glass.scala", "source": "object GlassSponge: ..."}],
