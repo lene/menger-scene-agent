@@ -155,7 +155,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "next line is automatically threaded back into the original request (not sent "
             "alone) -- answer the question directly, e.g. just \"z\" for \"which axis?\". "
             "Compounds across repeated rounds; cleared as soon as a turn resolves any other "
-            "way."
+            "way. The same applies after a rejected scene (compile_errors, lint_findings, "
+            "local_finding, readback_failed): your next line is treated as a change to the "
+            "rejected request, e.g. \"start at level 0 instead\", not as a new request."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -459,18 +461,39 @@ class _ClarificationState:
 
     pending_prompt: str
     reason: str
+    # False for a rejected attempt (usability review 2026-09, F4) rather than a question the
+    # model asked -- only the framing of the merged prompt differs.
+    asked_for_clarification: bool = True
+
+
+# Rejections the user typically answers by adjusting the same request ("start at level 0
+# instead"). Their next line is threaded back into the rejected request like a clarification
+# answer; sent alone it lost everything the request had asked for (usability review 2026-09,
+# F4: tesseract, glass, dark background and rotation all silently dropped).
+# `generation_timeout` has /retry instead; infrastructure failures (refused, timeout,
+# subprocess_failed, storage_failed, ...) say nothing about the request itself.
+_REJECTIONS_THREADED_INTO_FOLLOW_UP = frozenset(
+    {"compile_errors", "lint_findings", "local_finding", "readback_failed"}
+)
 
 
 def _build_clarification_prompt(state: _ClarificationState, answer: str) -> str:
-    """Composes the merged prompt sent to `run_turn()` when a `needs_clarification` is
-    pending -- folds the original request, the model's own stated reason, and the user's
-    answer into one string. `core/generation.py`'s `prompt` parameter stays a single string
-    throughout (Approach: no core/ signature changes), so this composition happens entirely
-    here in the CLI."""
+    """Composes the merged prompt sent to `run_turn()` when a `needs_clarification` (or a
+    threaded rejection) is pending -- folds the original request, the stated reason, and the
+    user's answer into one string. `core/generation.py`'s `prompt` parameter stays a single
+    string throughout (Approach: no core/ signature changes), so this composition happens
+    entirely here in the CLI."""
+    if state.asked_for_clarification:
+        return (
+            f"{state.pending_prompt}\n\n"
+            f"(The system asked for clarification: {state.reason})\n"
+            f"User's answer: {answer}"
+        )
     return (
         f"{state.pending_prompt}\n\n"
-        f"(The system asked for clarification: {state.reason})\n"
-        f"User's answer: {answer}"
+        f"(The previous attempt at this request was rejected: {state.reason})\n"
+        f"User's follow-up, to be applied to the request above -- keep everything else it "
+        f"asked for: {answer}"
     )
 
 
@@ -485,6 +508,12 @@ def _next_clarification_state(
     if result.tag == "needs_clarification":
         return _ClarificationState(
             pending_prompt=pending_prompt, reason="; ".join(result.messages)
+        )
+    if result.tag in _REJECTIONS_THREADED_INTO_FOLLOW_UP:
+        return _ClarificationState(
+            pending_prompt=pending_prompt,
+            reason=f"{result.tag}: " + "; ".join(result.messages),
+            asked_for_clarification=False,
         )
     return None
 

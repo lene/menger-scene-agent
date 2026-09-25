@@ -1871,10 +1871,12 @@ def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sen
         if idx == 1:
             return TurnResult(tag="needs_clarification", messages=["which axis?"])
         if idx == 2:
-            # Resolves the clarification, but NOT via acceptance -- a different rejection
-            # tag entirely. clarification_state must still clear.
+            # Resolves the clarification, but NOT via acceptance -- an infrastructure
+            # failure, which says nothing about the request. clarification_state must clear.
+            # (Was compile_errors; since usability review F4 a gauntlet rejection threads
+            # the next line into the rejected request instead -- see the tests below.)
             return TurnResult(
-                tag="compile_errors", messages=["Compilation of '.candidate.scala' failed"]
+                tag="subprocess_failed", messages=["validator process exited unexpectedly"]
             )
         # Third call: a brand-new, unrelated prompt -- must be sent completely raw, with
         # no trace of the earlier (now-resolved) clarification round.
@@ -1891,6 +1893,52 @@ def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sen
 
     assert exit_code == 0
     assert call_log[2] == "a completely unrelated new prompt"
+
+
+# --- usability review 2026-09 (F4): a follow-up to a rejected turn keeps the request ---------
+
+
+def _run_rejection_then_follow_up(monkeypatch, tmp_path, rejection_tag):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag=rejection_tag, messages=["common-sphere: vertices not on a sphere"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input",
+        _scripted_input(
+            ["a glass tesseract sponge, dark background", "start at level 0 and grow from there"]
+        ),
+    )
+    assert cli.main([]) == 0
+    return call_log
+
+
+def test_follow_up_to_a_rejected_turn_is_threaded_into_the_rejected_request(
+    monkeypatch, tmp_path
+):
+    call_log = _run_rejection_then_follow_up(monkeypatch, tmp_path, "lint_findings")
+
+    merged = call_log[1]
+    assert merged.startswith("a glass tesseract sponge, dark background")
+    assert "rejected: lint_findings: common-sphere: vertices not on a sphere" in merged
+    assert merged.endswith("keep everything else it asked for: start at level 0 and grow from there")
+
+
+def test_follow_up_to_an_infrastructure_failure_is_sent_alone(monkeypatch, tmp_path):
+    call_log = _run_rejection_then_follow_up(monkeypatch, tmp_path, "subprocess_failed")
+
+    assert call_log[1] == "start at level 0 and grow from there"
 
 
 # --- usability review 2026-09: the window never outlives the REPL (W4) and a crashed ----------
