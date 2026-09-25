@@ -53,6 +53,18 @@ def test_generate_composes_manifest_and_corpus_into_the_system_prompt():
     assert "GlassSphere" in system_prompt
 
 
+def test_generate_system_prompt_requires_a_duration_in_seconds_for_animated_scenes():
+    # Usability review 2026-09 (F3): menger's window plays an animated scene only when the
+    # scene declares `val duration` (t in seconds); without it the user saw a still image.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("a sponge that turns for ten seconds", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "val duration = <seconds>f" in system_prompt
+    assert "t / duration" in system_prompt
+
+
 def test_generate_system_prompt_warns_against_examples_dsl_cross_imports():
     # gauntlet/allowlist.py (story 4, review round 1) correctly rejects
     # `import examples.dsl.common.Lighting._` -- it resolves only inside the renderer's
