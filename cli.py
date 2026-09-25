@@ -86,7 +86,7 @@ from typing import List, Optional, Tuple
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
-from adapters.render_window import refresh_render_window
+from adapters.render_window import close_render_window, crash_report, refresh_render_window
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.consult import answer_consult
 from core.generation import validate_artifacts
@@ -333,6 +333,25 @@ def _format_hand_edit_result(result: TurnResult) -> str:
     if result.messages:
         text += " - " + "; ".join(result.messages)
     return text
+
+
+def _report_render_crash(
+    store: SceneStore, render_process: Optional[subprocess.Popen[str]]
+) -> Optional[subprocess.Popen[str]]:
+    """Prints a crashed render window's cause once and stops tracking it (usability review
+    2026-09, F12: a crash used to be visible only in render.stderr.log). A window the user
+    closed cleanly just stops being tracked. Must not kill the REPL."""
+    if render_process is None:
+        return None
+    try:
+        scene_path = store.current_scene_path()
+        report = crash_report(render_process, scene_path) if scene_path is not None else None
+        if report is not None:
+            print(f"Render window: crashed - {report}")
+            return None
+        return None if render_process.poll() is not None else render_process
+    except Exception:  # noqa: BLE001 -- a crash check must not kill the REPL
+        return render_process
 
 
 def _accept_and_refresh_render(
@@ -704,65 +723,110 @@ def main(argv: Optional[List[str]] = None) -> int:
     # being sent alone -- threaded the same way `retry_state` is.
     clarification_state: Optional[_ClarificationState] = None
 
-    while True:
-        try:
-            line = input("> ")
-        except (EOFError, KeyboardInterrupt):
-            break
+    # The window must not outlive the REPL, however the loop ends -- Ctrl-D, or a Ctrl-C
+    # that escapes mid-turn (usability review 2026-09, W4).
+    try:
+        while True:
+            render_process = _report_render_crash(store, render_process)
+            try:
+                line = input("> ")
+            except (EOFError, KeyboardInterrupt):
+                break
 
-        # story 17: checked once per loop iteration, right after input() and before /ask
-        # routing or run_turn() dispatch -- detects a hand edit made directly to the current
-        # scene file since the last iteration. Guarded the same way run_turn() itself is: a
-        # single bad check must not kill the REPL.
-        try:
-            hand_edit_result = check_hand_edit(store, prior_scene)
-        except Exception as e:  # noqa: BLE001 -- a hand-edit check failure must not kill the REPL
-            print(f"Hand edit check error: {e}")
-            hand_edit_result = None
+            # story 17: checked once per loop iteration, right after input() and before /ask
+            # routing or run_turn() dispatch -- detects a hand edit made directly to the
+            # current scene file since the last iteration. Guarded the same way run_turn()
+            # itself is: a single bad check must not kill the REPL.
+            try:
+                hand_edit_result = check_hand_edit(store, prior_scene)
+            except Exception as e:  # noqa: BLE001 -- a hand-edit check failure must not kill the REPL
+                print(f"Hand edit check error: {e}")
+                hand_edit_result = None
 
-        if hand_edit_result is not None:
-            print(_format_hand_edit_result(hand_edit_result))
-            if hand_edit_result.tag == "accepted":
-                # Treated exactly like a normal accepted turn -- prior_scene advances and
-                # the render window refreshes via the same shared helper (Boundaries &
-                # Constraints: "The render window only refreshes for a hand-edit that
-                # actually passed the gate, using the same call path a normal accepted turn
-                # already uses").
-                prior_scene = store.current_scene()
-                render_process = _accept_and_refresh_render(
-                    store, render_launcher_path, render_process
-                )
-            # On any other tag (hand_edit_rejected, storage_failed): prior_scene/
-            # render_process are left exactly as they were -- the loop still goes on to
-            # process the line the user actually typed this iteration below.
+            if hand_edit_result is not None:
+                print(_format_hand_edit_result(hand_edit_result))
+                if hand_edit_result.tag == "accepted":
+                    # Treated exactly like a normal accepted turn -- prior_scene advances and
+                    # the render window refreshes via the same shared helper (Boundaries &
+                    # Constraints: "The render window only refreshes for a hand-edit that
+                    # actually passed the gate, using the same call path a normal accepted
+                    # turn already uses").
+                    prior_scene = store.current_scene()
+                    render_process = _accept_and_refresh_render(
+                        store, render_launcher_path, render_process
+                    )
+                # On any other tag (hand_edit_rejected, storage_failed): prior_scene/
+                # render_process are left exactly as they were -- the loop still goes on to
+                # process the line the user actually typed this iteration below.
 
-        if _is_consult_input(line):
-            # Never reaches run_turn() -- Boundaries & Constraints: "a /ask/-question
-            # prefix never reaches run_turn()", "never calls generate()/revise(), never
-            # runs any gauntlet check, and never consumes a turn ordinal" (story 19).
-            question = _consult_question(line)
-            if not question:
-                # Review-round patch: a bare "/ask" or "/ask   " has no question text -- fail
-                # fast with a clear message rather than sending an empty Question: to the
-                # model, which would waste a real, paid model call on nothing.
-                print("Consult error: empty question -- type a question after /ask or /question")
+            if _is_consult_input(line):
+                # Never reaches run_turn() -- Boundaries & Constraints: "a /ask/-question
+                # prefix never reaches run_turn()", "never calls generate()/revise(), never
+                # runs any gauntlet check, and never consumes a turn ordinal" (story 19).
+                question = _consult_question(line)
+                if not question:
+                    # Review-round patch: a bare "/ask" or "/ask   " has no question text --
+                    # fail fast with a clear message rather than sending an empty Question: to
+                    # the model, which would waste a real, paid model call on nothing.
+                    print(
+                        "Consult error: empty question -- type a question after /ask or "
+                        "/question"
+                    )
+                    continue
+                consult_result = answer_consult(question, manifest, corpus, adapter, prior_scene)
+                if isinstance(consult_result, ConsultError):
+                    print(f"Consult error: {consult_result.kind} - {consult_result.message}")
+                    _record_consult_safely(store, question, error=consult_result.message)
+                else:
+                    print(consult_result)
+                    _record_consult_safely(store, question, answer=consult_result)
                 continue
-            consult_result = answer_consult(question, manifest, corpus, adapter, prior_scene)
-            if isinstance(consult_result, ConsultError):
-                print(f"Consult error: {consult_result.kind} - {consult_result.message}")
-                _record_consult_safely(store, question, error=consult_result.message)
-            else:
-                print(consult_result)
-                _record_consult_safely(store, question, answer=consult_result)
-            continue
 
-        # story 22: recognized alongside the /ask/-question check above, before blank-line/
-        # run_turn() dispatch. Exact stripped line, no arguments -- `_handle_retry()` owns
-        # the whole confirmation-gate decision tree (Boundaries & Constraints, I/O &
-        # Edge-Case Matrix).
-        if line.strip() == "/retry":
-            _, retry_state, prior_scene, render_process = _handle_retry(
-                retry_state,
+            # story 22: recognized alongside the /ask/-question check above, before
+            # blank-line/run_turn() dispatch. Exact stripped line, no arguments --
+            # `_handle_retry()` owns the whole confirmation-gate decision tree (Boundaries &
+            # Constraints, I/O & Edge-Case Matrix).
+            if line.strip() == "/retry":
+                _, retry_state, prior_scene, render_process = _handle_retry(
+                    retry_state,
+                    prior_scene,
+                    manifest,
+                    corpus,
+                    adapter,
+                    store,
+                    script_path,
+                    render_launcher_path,
+                    render_process,
+                    on_stage=_print_stage,
+                )
+                continue
+
+            if not line.strip():
+                continue
+
+            # A pending needs_clarification (story 18 gap fix): thread the user's answer back
+            # into the original request instead of sending it alone -- see
+            # `_build_clarification_prompt`'s docstring.
+            #
+            # Documented, not solved (same proportionality call story 22 made for /retry's
+            # own analogous edge case, cli.py's "already-armed gate" comment above): there is
+            # no way to tell "this line answers the pending clarification" apart from "this is
+            # an unrelated fresh request typed instead" -- the former is assumed, always. A
+            # user who abandons the clarification and types something new gets it incorrectly
+            # merged with the stale pending prompt on this one turn.
+            dispatched_prompt = (
+                _build_clarification_prompt(clarification_state, line)
+                if clarification_state is not None
+                else line
+            )
+
+            # story 22: the pre-story-22 inline "run_turn() -> print -> on-accept refresh"
+            # block is now `_execute_turn()`, shared with `/retry`'s own resend above -- see
+            # its docstring for the exact contract (including the run_turn()-exception guard
+            # this replaces verbatim).
+            scene_before_turn = prior_scene
+            result, prior_scene, render_process = _execute_turn(
+                dispatched_prompt,
                 prior_scene,
                 manifest,
                 corpus,
@@ -773,65 +837,30 @@ def main(argv: Optional[List[str]] = None) -> int:
                 render_process,
                 on_stage=_print_stage,
             )
-            continue
-
-        if not line.strip():
-            continue
-
-        # A pending needs_clarification (story 18 gap fix): thread the user's answer back
-        # into the original request instead of sending it alone -- see
-        # `_build_clarification_prompt`'s docstring.
-        #
-        # Documented, not solved (same proportionality call story 22 made for /retry's own
-        # analogous edge case, cli.py's "already-armed gate" comment above): there is no way
-        # to tell "this line answers the pending clarification" apart from "this is an
-        # unrelated fresh request typed instead" -- the former is assumed, always. A user who
-        # abandons the clarification and types something new gets it incorrectly merged with
-        # the stale pending prompt on this one turn.
-        dispatched_prompt = (
-            _build_clarification_prompt(clarification_state, line)
-            if clarification_state is not None
-            else line
-        )
-
-        # story 22: the pre-story-22 inline "run_turn() -> print -> on-accept refresh"
-        # block is now `_execute_turn()`, shared with `/retry`'s own resend above -- see its
-        # docstring for the exact contract (including the run_turn()-exception guard this
-        # replaces verbatim).
-        scene_before_turn = prior_scene
-        result, prior_scene, render_process = _execute_turn(
-            dispatched_prompt,
-            prior_scene,
-            manifest,
-            corpus,
-            adapter,
-            store,
-            script_path,
-            render_launcher_path,
-            render_process,
-            on_stage=_print_stage,
-        )
-        if result is not None:
-            clarification_state = _next_clarification_state(result, dispatched_prompt)
-        if result is not None and result.tag == "generation_timeout":
-            # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
-            # the gate from scratch. Any other tag -- including a run_turn() exception
-            # (result is None) -- deliberately leaves an existing pending retry_state
-            # untouched: an intervening accepted/rejected turn must not erase the memory of
-            # an earlier generation_timeout, or the I/O & Edge-Case Matrix's "scene changed
-            # since the failure via another accepted turn" row could never be reached (see
-            # _next_retry_state's docstring).
-            #
-            # Review round (blind-hunter, not corroborated -- documented, not changed): an
-            # ALREADY-ARMED gate (confirmed=True) survives an intervening non-timeout,
-            # non-accepted rejection the same way -- retry_state is untouched here since the
-            # new tag isn't "generation_timeout". A later /retry would then resend without a
-            # fresh second confirmation, even though a turn happened in between. This is
-            # deliberate under the frozen contract as written (only a NEW timeout re-arms;
-            # scene-content equality, not turn history, is what "unchanged" means throughout
-            # this story), but is flagged here in case a future spec revision wants an
-            # intervening turn of any kind to also reset an already-armed confirmation.
-            retry_state = _next_retry_state(result, dispatched_prompt, scene_before_turn)
+            if result is not None:
+                clarification_state = _next_clarification_state(result, dispatched_prompt)
+            if result is not None and result.tag == "generation_timeout":
+                # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
+                # the gate from scratch. Any other tag -- including a run_turn() exception
+                # (result is None) -- deliberately leaves an existing pending retry_state
+                # untouched: an intervening accepted/rejected turn must not erase the memory
+                # of an earlier generation_timeout, or the I/O & Edge-Case Matrix's "scene
+                # changed since the failure via another accepted turn" row could never be
+                # reached (see _next_retry_state's docstring).
+                #
+                # Review round (blind-hunter, not corroborated -- documented, not changed): an
+                # ALREADY-ARMED gate (confirmed=True) survives an intervening non-timeout,
+                # non-accepted rejection the same way -- retry_state is untouched here since
+                # the new tag isn't "generation_timeout". A later /retry would then resend
+                # without a fresh second confirmation, even though a turn happened in between.
+                # This is deliberate under the frozen contract as written (only a NEW timeout
+                # re-arms; scene-content equality, not turn history, is what "unchanged" means
+                # throughout this story), but is flagged here in case a future spec revision
+                # wants an intervening turn of any kind to also reset an already-armed
+                # confirmation.
+                retry_state = _next_retry_state(result, dispatched_prompt, scene_before_turn)
+    finally:
+        close_render_window(render_process)
 
     return 0
 

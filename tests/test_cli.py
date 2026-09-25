@@ -1891,3 +1891,88 @@ def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sen
 
     assert exit_code == 0
     assert call_log[2] == "a completely unrelated new prompt"
+
+
+# --- usability review 2026-09: the window never outlives the REPL (W4) and a crashed ----------
+# --- window is reported in the REPL instead of only in render.stderr.log (F12) ----------------
+
+
+class _FakeWindow:
+    """A render-window process handle: running until `exit_code` is set or it is terminated."""
+
+    def __init__(self) -> None:
+        self.exit_code: Optional[int] = None
+        self.terminated = False
+
+    def poll(self) -> Optional[int]:
+        return self.exit_code
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.exit_code = -15
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        return self.exit_code if self.exit_code is not None else 0
+
+    def kill(self) -> None:
+        self.exit_code = -9
+
+
+def _accept_every_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+
+
+def test_repl_exit_closes_the_render_window(monkeypatch, tmp_path):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    window = _FakeWindow()
+    _stub_render_window(monkeypatch, RenderWindowResult(process=window))
+    _accept_every_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere"]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert window.terminated is True
+
+
+def test_crashed_render_window_is_reported_once(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    window = _FakeWindow()
+
+    def _crashing_refresh(scene_file, *args, **kwargs):
+        Path(scene_file).parent.joinpath("render.stderr.log").write_text(
+            "Error: OptiX rendering hit an unrecoverable CUDA error, restart required\n"
+        )
+        window.exit_code = 1
+        return RenderWindowResult(process=window)
+
+    monkeypatch.setattr(cli, "refresh_render_window", _crashing_refresh)
+    _accept_every_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a sphere", "", ""]))
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    crash_lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("Render window: crashed")
+    ]
+    assert crash_lines == [
+        "Render window: crashed - exit 1: Error: OptiX rendering hit an unrecoverable CUDA "
+        "error, restart required"
+    ]
+    # A crashed window is no longer tracked, so REPL exit doesn't try to close it again.
+    assert window.terminated is False

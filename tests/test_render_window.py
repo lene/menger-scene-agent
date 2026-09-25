@@ -16,7 +16,12 @@ from typing import Any, List, Optional
 
 import pytest
 
-from adapters.render_window import log_paths, refresh_render_window
+from adapters.render_window import (
+    close_render_window,
+    crash_report,
+    log_paths,
+    refresh_render_window,
+)
 from core.types import RenderWindowError, RenderWindowResult
 
 _LAUNCHER_PATH = "/fake/menger-app/target/universal/stage/bin/menger-app"
@@ -435,3 +440,48 @@ def test_running_window_writing_past_grace_period_never_blocks_on_its_output(tmp
     finally:
         result.process.kill()
         result.process.wait(timeout=5)
+
+
+# --- close_render_window / crash_report (usability review 2026-09: W4, F12) -------------------
+
+
+def test_close_render_window_terminates_and_reaps_a_running_window():
+    window = FakePopen(still_running=True)
+
+    close_render_window(window, grace_period=_GRACE_PERIOD)
+
+    assert window.terminated is True
+    assert window.wait_calls == [_GRACE_PERIOD]
+
+
+def test_close_render_window_with_no_window_is_a_no_op():
+    close_render_window(None, grace_period=_GRACE_PERIOD)
+
+
+def test_crash_report_is_none_while_the_window_runs(tmp_path):
+    assert crash_report(FakePopen(still_running=True), tmp_path / "001.scala") is None
+
+
+def test_crash_report_is_none_after_a_clean_close(tmp_path):
+    assert crash_report(FakePopen(returncode=0), tmp_path / "001.scala") is None
+
+
+def test_crash_report_names_the_error_line_not_the_stack_trace(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "Error: OptiX rendering hit an unrecoverable CUDA error, restart required\n"
+        "\tat Main$.main(Main.scala:56)\n"
+    )
+
+    report = crash_report(FakePopen(returncode=1), scene_file)
+
+    assert report == (
+        "exit 1: Error: OptiX rendering hit an unrecoverable CUDA error, restart required"
+    )
+
+
+def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_path):
+    report = crash_report(FakePopen(returncode=-11), tmp_path / "001.scala")
+
+    assert report == "exit -11: no output in render.stderr.log"

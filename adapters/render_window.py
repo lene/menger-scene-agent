@@ -125,6 +125,39 @@ def log_paths(scene_file: Union[str, Path]) -> Tuple[Path, Path]:
     return session_dir / "render.stdout.log", session_dir / "render.stderr.log"
 
 
+def close_render_window(
+    process: Optional[subprocess.Popen[str]], grace_period: float = 1.5
+) -> None:
+    """Closes and reaps the session's render window when the REPL exits. Without this the
+    window outlived the REPL, kept holding the GPU and the render lock, and lingered as a
+    zombie once closed (usability review 2026-09, W4). `None` is a no-op."""
+    if process is not None:
+        _terminate(process, grace_period)
+
+
+def crash_report(
+    process: Optional[subprocess.Popen[str]], scene_file: Union[str, Path]
+) -> Optional[str]:
+    """`None` while the tracked render window runs or after the user closed it cleanly;
+    otherwise its exit status plus the most telling line of `render.stderr.log`, so a crash
+    is reported in the REPL instead of only in the log (usability review 2026-09, F12)."""
+    try:
+        returncode = process.poll() if process is not None else None
+    except Exception:
+        return None
+    if returncode is None or returncode == 0:
+        return None
+    try:
+        text = log_paths(scene_file)[1].read_text(errors="replace")
+    except OSError:
+        text = ""
+    # Stack-frame lines ("at ...") never name the cause; prefer the last line that does.
+    lines = [s for s in (raw.strip() for raw in text.splitlines()) if s and not s.startswith("at ")]
+    errors = [s for s in lines if "error" in s.lower() or "exception" in s.lower()]
+    detail = (errors or lines or ["no output in render.stderr.log"])[-1]
+    return f"exit {returncode}: {detail[:_STDOUT_PREVIEW_LENGTH]}"
+
+
 def _terminate(process: subprocess.Popen[str], grace_period: float) -> None:
     """Terminates a caller-supplied `previous_process`, escalating to `kill()` if it doesn't
     exit promptly -- never left as an orphaned/zombie process (Boundaries & Constraints:
