@@ -40,23 +40,23 @@ yet merged.
 
 ## Setup
 
+Requires [`uv`](https://docs.astral.sh/uv/):
+
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt   # core dependencies: anthropic, pytest
+uv sync   # core dependencies: anthropic, pytest
 ```
 
-To use a model backend other than the default (Anthropic), install that
+To use a model backend other than the default (Anthropic), sync that
 provider's extra too:
 
 ```bash
-.venv/bin/pip install -e ".[gemini]"              # Gemini only
-.venv/bin/pip install -e ".[openai-compatible]"   # DeepSeek, OpenAI, Kimi/Moonshot
-.venv/bin/pip install -e ".[gemini,openai-compatible]"  # everything
+uv sync --extra gemini              # Gemini only
+uv sync --extra openai-compatible   # DeepSeek, OpenAI, Kimi/Moonshot
+uv sync --all-extras                # everything
 ```
 
-(`requirements.txt` mirrors only the hard `dependencies` in `pyproject.toml` — the
-per-provider extras are installed separately so a default-Anthropic setup never pulls in
-SDKs it won't use.)
+(Per-provider extras are separate so a default-Anthropic setup never pulls in SDKs it won't
+use.)
 
 ## Choosing a model backend
 
@@ -113,7 +113,7 @@ export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandbo
 export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
 export ANTHROPIC_API_KEY=...
 
-.venv/bin/python3 cli.py
+uv run menger-scene-agent
 ```
 
 Gemini (or any other provider — same shape, swap the two lines):
@@ -122,13 +122,13 @@ Gemini (or any other provider — same shape, swap the two lines):
 export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
 export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
 export MENGER_AGENT_MODEL_PROVIDER=gemini
-export GEMINI_API_KEY=...   # already installed: pip install -e ".[gemini]"
+export GEMINI_API_KEY=...   # already synced: uv sync --extra gemini
 
-.venv/bin/python3 cli.py
+uv run menger-scene-agent
 ```
 
 ```bash
-.venv/bin/python3 cli.py --session <id>      # resume an existing session (id = its directory name under the sessions dir)
+uv run menger-scene-agent --session <id>      # resume an existing session (id = its directory name under the sessions dir)
 ```
 
 In the REPL:
@@ -138,7 +138,7 @@ In the REPL:
 - The render window's own output (including render errors) goes to `render.stdout.log` / `render.stderr.log` in the session directory, overwritten on each refresh -- check there if the window shows nothing or stops responding.
 - Hand-editing: edit the current scene file on disk directly between turns. Each loop iteration checks for such an edit and either promotes it to a new ordinal, reports the lint violation that blocked it, or reports a storage failure.
 
-`cli.py --help` prints this same reference.
+`uv run menger-scene-agent --help` prints this same reference.
 
 ## Refreshing the reference artifacts
 
@@ -160,8 +160,8 @@ never a real network call — see below), so it needs every provider's SDK insta
 you only ever plan to *use* one:
 
 ```bash
-.venv/bin/pip install -e ".[dev,gemini,openai-compatible]"
-.venv/bin/python -m pytest
+uv sync --all-extras --dev
+uv run pytest
 ```
 
 Installing only the extra for the one provider you actually use (the "Setup" section above)

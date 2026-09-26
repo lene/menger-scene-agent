@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "menger-scene-agent"
 version = "0.1.0"
@@ -6,6 +10,9 @@ requires-python = ">=3.10"
 dependencies = [
     "anthropic>=1.0.0,<2.0.0",
 ]
+
+[project.scripts]
+menger-scene-agent = "cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,3 +49,6 @@ testpaths = ["tests"]
 # installed distribution, so this exists only to make the extras installable, not to change
 # how the code itself is normally run.
 packages = ["core", "adapters", "gauntlet"]
+# `cli.py` is a top-level script, not a package -- needed explicitly so the
+# `menger-scene-agent` console script (`cli:main`) resolves once installed.
+py-modules = ["cli"]

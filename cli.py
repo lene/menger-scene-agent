@@ -123,7 +123,7 @@ _CONSULT_PREFIXES = ("/ask", "/question")
 
 def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="cli.py",
+        prog="menger-scene-agent",
         description="Persistent REPL session for the Menger AI scene agent.",
         epilog=(
             "Environment variables:\n"
