@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.1.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.3.3",
+  "optixJniVersion": "0.3.4",
   "minDriverVersion": "580.65",
   "conventions": [
     "Units: positions and sizes are world units; `pos` is an object's centre; all angles (`rotation`, 4D rotations) are radians.",
@@ -11,7 +11,7 @@
     "Colour and transparency: alpha 0 is fully transparent, 1 fully opaque. An object's explicit `color` replaces its material's colour INCLUDING alpha, so an opaque `color` turns glass or film opaque -- omit `color` or give it a low alpha to keep transparency.",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val duration = <seconds>f` in the same object; t is seconds in [0, duration]. The window plays it in real time, looping, and the validator checks the scene at t = 0 and at t = duration.",
-    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The volume-filling TesseractSponge currently ignores `size`."
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). In one scene, all edge-rendered 4D objects must share the same `projection`."
   ],
   "objects": [
     {
@@ -308,6 +308,406 @@
       ]
     },
     {
+      "name": "Pentachoron",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Hexadecachoron",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Icositetrachoron",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Hexacosichoron",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
+      "name": "Hecatonicosachoron",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.Projection4DSpec>",
+          "default": "None"
+        },
+        {
+          "name": "edgeRadius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None"
+        },
+        {
+          "name": "edgeMaterial",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        }
+      ]
+    },
+    {
       "name": "TesseractSponge",
       "fields": [
         {
@@ -341,7 +741,7 @@
           "name": "size",
           "type": "float",
           "default": "1.0",
-          "description": "Currently ignored for VolumeRemoving (known issue)."
+          "description": "Scale; 1 matches a Tesseract of size 1."
         },
         {
           "name": "ior",
