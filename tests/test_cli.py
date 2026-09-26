@@ -880,7 +880,11 @@ def test_accepted_turn_calls_refresh_render_window_with_scene_path_and_no_prior_
     assert len(render_calls) == 1
     args, kwargs = render_calls[0]
     scene_file, launcher_path = args
-    assert Path(scene_file).name == "001.scala"
+    # F5: the launcher is invoked against the stable render-window path, synced from the
+    # just-accepted ordinal (001.scala) -- not the ordinal file itself (see
+    # sync_render_window_scene()/render_window_scene_path()).
+    assert Path(scene_file).name == "current.scala"
+    assert Path(scene_file).read_text() == "object A:\n  val x = 1\n"
     assert launcher_path == _FAKE_RENDER_LAUNCHER
     assert kwargs["previous_process"] is None
 
@@ -921,6 +925,56 @@ def test_second_accepted_turn_passes_the_tracked_render_process_as_previous(
     assert len(render_calls) == 2
     assert render_calls[0][1]["previous_process"] is None
     assert render_calls[1][1]["previous_process"] is first_handle
+
+
+class _FakeStillRunningProcess:
+    """A process handle whose `.poll()` reports "still running" (`None`), unlike the plain
+    `object()` sentinel most render-window tests use -- needed to exercise F5's skip-relaunch
+    path, which checks `previous_process.poll()` before deciding whether to call
+    `refresh_render_window()` at all."""
+
+    def poll(self) -> Optional[int]:
+        return None
+
+
+def test_second_accepted_turn_skips_relaunch_when_the_window_is_still_running(
+    monkeypatch, tmp_path
+):
+    """F5 (usability review 2026-09): once a render window is confirmed running, a later
+    accepted turn only needs to sync the stable scene path menger watches
+    (`sync_render_window_scene()`) -- it must not tear the window down and relaunch it, since
+    menger's own file watcher picks up the change in place."""
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+
+    handle = _FakeStillRunningProcess()
+    render_calls = _stub_render_window(monkeypatch, outcome=RenderWindowResult(process=handle))
+
+    def _fake_run_turn(
+        prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None
+    ):
+        store_arg.accept(f"object A:\n  val x = {len(render_calls)}\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=len(render_calls) + 1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["first prompt", "second prompt"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    # refresh_render_window() (terminate + relaunch) only fires once -- for the first turn,
+    # when there is no running window yet.
+    assert len(render_calls) == 1
+    args, _kwargs = render_calls[0]
+    scene_file, _launcher_path = args
+    window_path = Path(scene_file)
+    assert window_path.name == "current.scala"
+    # The second turn's content still reached the window's watched path via the sync alone.
+    assert window_path.read_text() == "object A:\n  val x = 1\n"
 
 
 def test_render_window_failure_resets_render_process_to_none_and_prints_status(

@@ -22,7 +22,10 @@ workspace root).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -116,6 +119,40 @@ def refresh_render_window(
         stderr_log.read_text(errors="replace"),
         process.returncode,
     )
+
+
+def render_window_scene_path(session_dir: Union[str, Path]) -> Path:
+    """The stable file menger's interactive window is launched against and watches for live
+    reload (usability review 2026-09, F5) -- distinct from `SceneStore`'s immutable,
+    ordinal-numbered turn history (`001.scala`, `002.scala`, ...), which never touches an
+    already-written file (AD-8/AD-14) and so can't itself be the thing a long-running window
+    watches across turns. Kept in sync with the latest ordinal's content by
+    `sync_render_window_scene()` after every accepted turn; the user's hand-editing workflow
+    (editing the current ordinal file directly, per `check_hand_edit()`) is unaffected -- this
+    path is purely the render window's own launch target, never read by the storage layer."""
+    return Path(session_dir) / "current.scala"
+
+
+def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[str, Path]) -> Path:
+    """Copies the just-accepted ordinal's content into `render_window_scene_path()`,
+    atomically (write-to-temp, flush, fsync, `os.replace()`). Unlike `SceneStore`'s own
+    writes (`os.link()`, exclusive-create-only -- AD-14), this file is a mutable pointer
+    that's meant to be overwritten every turn, so an atomic *replace* is the right primitive,
+    not an atomic *create*. Returns the stable path, ready to pass to
+    `refresh_render_window()`."""
+    target = render_window_scene_path(session_dir)
+    text = Path(scene_file).read_text(encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(dir=str(session_dir), prefix=".current.scala.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, target)
+    finally:
+        with suppress(OSError):
+            os.unlink(tmp_name)
+    return target
 
 
 def log_paths(scene_file: Union[str, Path]) -> Tuple[Path, Path]:

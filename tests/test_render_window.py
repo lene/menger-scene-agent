@@ -21,6 +21,8 @@ from adapters.render_window import (
     crash_report,
     log_paths,
     refresh_render_window,
+    render_window_scene_path,
+    sync_render_window_scene,
 )
 from core.types import RenderWindowError, RenderWindowResult
 
@@ -485,3 +487,42 @@ def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_pat
     report = crash_report(FakePopen(returncode=-11), tmp_path / "001.scala")
 
     assert report == "exit -11: no output in render.stderr.log"
+
+
+# --- F5 (usability review 2026-09): the stable path menger's window live-reloads from -------
+
+
+def test_render_window_scene_path_is_current_scala_under_the_session_dir(tmp_path):
+    assert render_window_scene_path(tmp_path) == tmp_path / "current.scala"
+
+
+def test_sync_render_window_scene_copies_the_ordinal_content_to_current_scala(tmp_path):
+    ordinal = tmp_path / "001.scala"
+    ordinal.write_text("object A:\n  val x = 1\n")
+
+    result = sync_render_window_scene(ordinal, tmp_path)
+
+    assert result == tmp_path / "current.scala"
+    assert result.read_text() == "object A:\n  val x = 1\n"
+
+
+def test_sync_render_window_scene_overwrites_a_previous_current_scala(tmp_path):
+    ordinal1 = tmp_path / "001.scala"
+    ordinal1.write_text("object A:\n  val x = 1\n")
+    sync_render_window_scene(ordinal1, tmp_path)
+
+    ordinal2 = tmp_path / "002.scala"
+    ordinal2.write_text("object A:\n  val x = 2\n")
+    result = sync_render_window_scene(ordinal2, tmp_path)
+
+    assert result.read_text() == "object A:\n  val x = 2\n"
+
+
+def test_sync_render_window_scene_leaves_no_temp_file_behind(tmp_path):
+    ordinal = tmp_path / "001.scala"
+    ordinal.write_text("object A:\n  val x = 1\n")
+
+    sync_render_window_scene(ordinal, tmp_path)
+
+    leftovers = [p for p in tmp_path.iterdir() if p.name not in {"001.scala", "current.scala"}]
+    assert leftovers == []

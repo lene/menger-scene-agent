@@ -86,7 +86,12 @@ from typing import List, Optional, Tuple
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
-from adapters.render_window import close_render_window, crash_report, refresh_render_window
+from adapters.render_window import (
+    close_render_window,
+    crash_report,
+    refresh_render_window,
+    sync_render_window_scene,
+)
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.consult import answer_consult
 from core.generation import validate_artifacts
@@ -369,9 +374,19 @@ def _accept_and_refresh_render(
     call it instead of duplicating the refresh_render_window()/render_process-update dance).
     Called after ANY accepted TurnResult (from run_turn() or from check_hand_edit()); prints
     the one-line render status and returns the render_process value the caller should track
-    from here on -- the new handle on success, `None` on failure (story 21: the adapter
-    terminates `previous_process` unconditionally before attempting the new launch, so the
-    old handle is invalid either way once this returns).
+    from here on.
+
+    F5 (usability review 2026-09): a render window launched against
+    `render_window_scene_path()` (a stable path, `sync_render_window_scene()`'d from the
+    just-accepted ordinal every turn) is watched and live-reloaded in place by menger itself
+    -- so once a window is confirmed running, subsequent turns only need the sync, never a
+    terminate-and-relaunch. `refresh_render_window()` (terminate the old process, launch a
+    new one) is still used for the session's first turn and to recover from a crashed/closed
+    window (`render_process` is `None` or has already exited) -- this coupling requires a
+    menger build with F5 support (this sprint's or later); there is no runtime capability
+    probe, so an older `menger-app` binary would simply never see its window update in
+    place (it would keep working, just showing the first turn's scene until the process is
+    replaced by some other path, e.g. a crash).
 
     Guarded exactly like the call site it replaces: current_scene_path() does a fresh
     filesystem scan (AD-13) and can theoretically raise SceneStoreError, and
@@ -390,8 +405,21 @@ def _accept_and_refresh_render(
                 "impossible; SceneStore/run_turn's accept-then-report invariant may be "
                 "broken"
             )
+        window_path = sync_render_window_scene(scene_path, store.session_dir)
+
+        try:
+            still_running = render_process is not None and render_process.poll() is None
+        except Exception:
+            # Best-effort, same convention as refresh_render_window()'s own previous_process
+            # check: a racy/unexpected poll() failure falls through to a fresh launch rather
+            # than risking a sync with no window to show it.
+            still_running = False
+        if still_running:
+            print(f"Render window: reloaded ({scene_path.name})")
+            return render_process
+
         render_outcome = refresh_render_window(
-            scene_path,
+            window_path,
             render_launcher_path,
             previous_process=render_process,
         )
