@@ -56,6 +56,18 @@ def test_answer_consult_composes_manifest_and_corpus_into_the_system_prompt():
     assert "examples/glass.scala" in system_prompt  # from the corpus
 
 
+def test_answer_consult_admits_it_cannot_see_the_render_window():
+    # Usability review 2026-09 (F5): asked about the window after an interactive 4D rotation,
+    # the agent answered from the file and contradicted the user.
+    adapter = FakeModelAdapter(result=ANSWER_TEXT)
+
+    answer_consult("what are the 4D parameters in the window now?", MANIFEST, CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "You cannot see the render window" in system_prompt
+    assert "Never contradict what the user reports about the window" in system_prompt
+
+
 def test_answer_consult_with_no_prior_scene_does_not_mention_a_scene_in_the_prompt():
     # I/O & Edge-Case Matrix: "Consult turn with no scene yet (fresh session)" -- grounded
     # in manifest/corpus only, no scene reference.

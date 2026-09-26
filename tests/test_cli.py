@@ -1935,6 +1935,27 @@ def test_follow_up_to_a_rejected_turn_is_threaded_into_the_rejected_request(
     assert merged.endswith("keep everything else it asked for: start at level 0 and grow from there")
 
 
+def test_accepted_turn_names_the_settings_it_removed(monkeypatch, tmp_path, capsys):
+    # Usability review 2026-09 (F29): a repair turn silently deleted the xyz colouring.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(
+            tag="accepted", messages=[], ordinal=1, removed_properties=["proceduralType"]
+        )
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["make it glass"]))
+
+    assert cli.main([]) == 0
+    assert "  Note: this turn removed proceduralType" in capsys.readouterr().out.splitlines()
+
+
 def test_follow_up_to_an_infrastructure_failure_is_sent_alone(monkeypatch, tmp_path):
     call_log = _run_rejection_then_follow_up(monkeypatch, tmp_path, "subprocess_failed")
 

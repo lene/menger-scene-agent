@@ -308,6 +308,9 @@ def _format_turn_result(result: TurnResult) -> str:
     text = f"Turn {result.ordinal}: {result.tag}"
     if result.messages:
         text += " - " + "; ".join(result.messages)
+    if result.removed_properties:
+        # F29: a turn that dropped earlier settings must say so, not do it silently.
+        text += "\n  Note: this turn removed " + ", ".join(result.removed_properties)
     return text
 
 

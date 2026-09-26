@@ -68,6 +68,40 @@ def test_generate_system_prompt_requires_a_duration_in_seconds_for_animated_scen
     assert "t / duration" in system_prompt
 
 
+def test_generate_system_prompt_treats_complaints_as_change_requests():
+    # Usability review 2026-09 (F10): "that's not glass, it looks like matte plastic" and
+    # "shouldn't there be shadows on the floor?" were bounced as questions.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "is a CHANGE REQUEST, not a question" in system_prompt
+    assert "that's not glass, it looks like matte plastic" in system_prompt
+
+
+def test_generate_system_prompt_names_impossible_effects_and_the_nearest_option():
+    # Usability review 2026-09 (F21, F25): "glow" silently became flat emission.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "do not silently approximate it" in system_prompt
+    assert "AND the nearest thing that is" in system_prompt
+
+
+def test_revise_forbids_removing_properties_the_request_does_not_mention():
+    # Usability review 2026-09 (F29): the glass repair deleted the xyz colouring.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    revise("make it glass", SCENE_TEXT, VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "Never remove a property the request does not ask to remove" in (
+        adapter.last_request.user_prompt
+    )
+
+
 def test_generate_system_prompt_warns_against_examples_dsl_cross_imports():
     # gauntlet/allowlist.py (story 4, review round 1) correctly rejects
     # `import examples.dsl.common.Lighting._` -- it resolves only inside the renderer's

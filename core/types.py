@@ -254,6 +254,10 @@ class TurnResult:
     findings: List[Finding] = field(default_factory=list)
     readback_summary: Optional[str] = None
     ordinal: Optional[int] = None
+    # Named arguments the previous scene set and the accepted one no longer does (usability
+    # review 2026-09, F29: a repair turn silently dropped the user's xyz colouring). Reported,
+    # not rejected -- the request may well have asked for the removal.
+    removed_properties: List[str] = field(default_factory=list)
 
 
 # `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):

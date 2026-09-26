@@ -18,7 +18,7 @@ import pytest
 import core.turn as turn_module
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.scene_store import SceneStore, SceneStoreError
-from core.turn import check_hand_edit, run_turn
+from core.turn import check_hand_edit, removed_properties, run_turn
 from core.types import (
     EXPECTED_MANIFEST_SCHEMA_VERSION,
     TurnResult,
@@ -1061,3 +1061,29 @@ def test_check_hand_edit_accept_failure_is_reported_as_storage_failed_not_raised
     assert result.tag == "storage_failed"
     assert any("ordinal-claim retries exhausted" in m for m in result.messages)
     assert result.ordinal is None
+
+
+# --- usability review 2026-09 (F29): report settings a turn dropped ---------------------------
+
+
+_COLOURED_SPONGE = (
+    "Sponge(level = 2f, color = Some(Color(\"#AAAAAA\")), proceduralType = 8, "
+    "proceduralScale = 0.399f)"
+)
+
+
+def test_removed_properties_names_what_the_new_scene_no_longer_sets():
+    assert removed_properties(_COLOURED_SPONGE, "Sponge(level = 2f, material = Some(Glass))") == [
+        "color",
+        "proceduralScale",
+        "proceduralType",
+    ]
+
+
+def test_removed_properties_is_empty_for_a_first_scene_or_an_unchanged_one():
+    assert removed_properties(None, _COLOURED_SPONGE) == []
+    assert removed_properties(_COLOURED_SPONGE, _COLOURED_SPONGE) == []
+
+
+def test_removed_properties_ignores_comparisons():
+    assert removed_properties("if level == 2 then x", "x") == []

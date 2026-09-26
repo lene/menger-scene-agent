@@ -15,6 +15,7 @@ already holds itself to.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable, List, Optional, Union
 
@@ -48,6 +49,21 @@ _STAGING_FILENAME = ".candidate.scala"
 # than short-circuiting on the first stage that finds something) so a rejected turn's
 # `TurnResult.messages`/`findings` report everything wrong with the candidate at once.
 _LOCAL_CHECKS = (check_allowlist, check_resource_bounds, check_clean_code, check_lint)
+
+# A named argument in a scene file: `proceduralType = 8`, `edgeRadius = Some(0.005f)`.
+# `==` is excluded so comparisons don't count.
+_NAMED_ARGUMENT = re.compile(r"\b([a-z][A-Za-z0-9]*)\s*=(?!=)")
+
+
+def removed_properties(prior_scene: Optional[str], new_scene: str) -> List[str]:
+    """Named arguments the prior scene set and the new one no longer does, sorted. Coarse by
+    design (names only, not per object), which is enough to tell the user "this turn also
+    removed proceduralType" -- usability review 2026-09, F29."""
+    if prior_scene is None:
+        return []
+    before = set(_NAMED_ARGUMENT.findall(prior_scene))
+    after = set(_NAMED_ARGUMENT.findall(new_scene))
+    return sorted(before - after)
 
 
 def _run_local_checks(scene_text: str) -> List[Finding]:
@@ -248,7 +264,11 @@ def run_turn(
             messages = _record_rejected_safely(store, prompt, reason, [reason])
             return TurnResult(tag="storage_failed", messages=messages)
         return TurnResult(
-            tag="accepted", messages=[], readback_summary=readback_result, ordinal=ordinal
+            tag="accepted",
+            messages=[],
+            readback_summary=readback_result,
+            ordinal=ordinal,
+            removed_properties=removed_properties(prior_scene, scene_text),
         )
     finally:
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted
