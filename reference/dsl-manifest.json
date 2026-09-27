@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.1.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.3.4",
+  "optixJniVersion": "0.4.0",
   "minDriverVersion": "580.65",
   "conventions": [
     "Units: positions and sizes are world units; `pos` is an object's centre; all angles (`rotation`, 4D rotations) are radians.",

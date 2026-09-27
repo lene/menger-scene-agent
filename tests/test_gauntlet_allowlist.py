@@ -186,7 +186,7 @@ def test_full_corpus_passes_except_the_documented_cross_import_case():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 32
+    assert len(scenes) == 33  # + PolytopeGallery (usability review 2026-09, F17)
 
     flagged = {s["name"]: check_allowlist(s["source"]) for s in scenes}
     flagged = {name: f for name, f in flagged.items() if f}

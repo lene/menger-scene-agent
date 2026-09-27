@@ -281,7 +281,7 @@ def test_full_corpus_has_no_lint_findings():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 32
+    assert len(scenes) == 33  # + PolytopeGallery (usability review 2026-09, F17)
 
     for scene in scenes:
         findings = check_lint(scene["source"])
