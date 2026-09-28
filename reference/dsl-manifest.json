@@ -818,7 +818,9 @@
         {
           "name": "level",
           "type": "float",
-          "default": null
+          "default": null,
+          "min": 0,
+          "max": 14
         },
         {
           "name": "material",
