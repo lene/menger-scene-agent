@@ -24,7 +24,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
-from core.scene_facts import extract_scene_facts, facts_diff
+from core.scene_facts import extract_scene_facts, facts_diff, occlusion_warnings
 from core.types import (
     GenerationError,
     ReadbackError,
@@ -239,14 +239,16 @@ def run_turn(
             )
             return TurnResult(tag=outcome.tag, messages=messages)
 
+        new_facts = extract_scene_facts(strip_comments_and_strings(scene_text))
         turn_warnings = (
-            facts_diff(
-                extract_scene_facts(strip_comments_and_strings(prior_scene)),
-                extract_scene_facts(strip_comments_and_strings(scene_text)),
-            )
+            facts_diff(extract_scene_facts(strip_comments_and_strings(prior_scene)), new_facts)
             if prior_scene is not None
             else []
         )
+        # F23: unlike facts_diff (a revise-only before/after comparison), an occlusion is a
+        # property of the current scene alone, so this runs on every accepted turn, generate()
+        # included.
+        turn_warnings = turn_warnings + occlusion_warnings(new_facts)
 
         _emit("reading back")
         readback_result = semantic_readback(scene_text, adapter, warnings=turn_warnings)

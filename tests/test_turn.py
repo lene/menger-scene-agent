@@ -1088,6 +1088,57 @@ def test_accepted_revise_turn_warns_about_a_moved_object_the_request_did_not_ask
     assert "Sphere" in result.warnings[0]
 
 
+def test_accepted_turn_warns_when_an_orb_is_hidden_inside_an_opaque_sponge(tmp_path, monkeypatch):
+    # Usability review 2026-09 (F23) -- runs on generate() too, not just revise(), since
+    # occlusion is a property of the current scene, not a before/after diff.
+    scene = (
+        "object Hidden:\n  val scene = Scene(objects = List(\n"
+        "    Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome)),\n"
+        "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "put a small orb in the sponge", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert len(result.warnings) == 1
+    assert "Sphere" in result.warnings[0] and "Sponge" in result.warnings[0]
+
+
+def test_no_occlusion_warning_when_the_containing_object_is_glass(tmp_path, monkeypatch):
+    scene = (
+        "object NotHidden:\n  val scene = Scene(objects = List(\n"
+        "    Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass)),\n"
+        "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "put a small orb in the glass sponge", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.warnings == []
+
+
 def test_accepted_first_turn_has_no_warnings_no_prior_scene_to_diff_against(tmp_path, monkeypatch):
     adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
     store = _make_store(tmp_path)

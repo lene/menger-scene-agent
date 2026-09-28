@@ -3,7 +3,7 @@ F7/F8/F20/F23 usability follow-ups. Pure string processing, no compiler, no netw
 
 from __future__ import annotations
 
-from core.scene_facts import extract_scene_facts, facts_diff, parse_color_rgb, parse_vec3
+from core.scene_facts import extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb, parse_vec3
 
 
 # --- parse_vec3 / parse_color_rgb -----------------------------------------------------------
@@ -189,6 +189,43 @@ def test_facts_diff_skips_objects_whose_type_changed_at_the_same_index():
     after = extract_scene_facts("Cube(pos = Vec3(5f, 0f, 0f))")
 
     assert facts_diff(before, after) == []
+
+
+# --- occlusion_warnings (F23) ------------------------------------------------------------------
+
+
+def test_occlusion_warning_for_a_small_orb_centered_inside_an_opaque_sponge():
+    scene = (
+        "Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome))\n"
+        "Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+    )
+    facts = extract_scene_facts(scene)
+
+    warnings = occlusion_warnings(facts)
+
+    assert len(warnings) == 1
+    assert "Sphere" in warnings[0]
+    assert "Sponge" in warnings[0]
+
+
+def test_no_occlusion_warning_when_the_containing_object_is_transparent():
+    scene = (
+        "Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass))\n"
+        "Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+    )
+    facts = extract_scene_facts(scene)
+
+    assert occlusion_warnings(facts) == []
+
+
+def test_no_occlusion_warning_for_two_separate_objects():
+    scene = (
+        "Sponge(pos = Vec3(-5f, 0f, 0f), size = 1f)\n"
+        "Sphere(pos = Vec3(5f, 0f, 0f), size = 1f)\n"
+    )
+    facts = extract_scene_facts(scene)
+
+    assert occlusion_warnings(facts) == []
 
 
 # --- garbage input never raises ----------------------------------------------------------------

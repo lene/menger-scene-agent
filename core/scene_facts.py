@@ -296,6 +296,34 @@ def facts_diff(before: SceneFacts, after: SceneFacts) -> list[str]:
     return warnings
 
 
+def occlusion_warnings(facts: SceneFacts) -> list[str]:
+    """F23: an object whose entire bounding sphere fits inside another, opaque object's
+    bounding sphere is never visible from any angle -- a size-aware extension of the
+    "distance from center < size" heuristic `gauntlet/lint.py`'s
+    `_check_light_inside_geometry` uses for a (point-like) light; checking full containment
+    (`distance + obj.size < occluder.size`), not just "center within occluder.size", matters
+    here because two same-sized or larger-inside-smaller objects sharing a center are not an
+    occlusion (review round: an unsized-heuristic version flagged a size-5 Sponge as "hidden
+    inside" a same-centered size-0.5 Sphere). Only counts an opaque occluder -- a transparent
+    one, e.g. Glass, doesn't hide anything. Coarse and conservative like the rest of this
+    module's heuristics: a compact, indeterminate-opacity occluder is treated as opaque
+    (`ObjectFact.is_opaque`), so this can under-warn on a thin/elongated occluder more
+    readily than it over-warns on a compact one."""
+    warnings: list[str] = []
+    for occluder in facts.objects:
+        if occluder.pos is None or occluder.size is None or not occluder.is_opaque:
+            continue
+        for obj in facts.objects:
+            if obj is occluder or obj.pos is None or obj.size is None:
+                continue
+            if _distance(obj.pos, occluder.pos) + obj.size < occluder.size:
+                warnings.append(
+                    f"the {obj.type_name} at {obj.pos} may be entirely hidden inside the "
+                    f"opaque {occluder.type_name} at {occluder.pos}"
+                )
+    return warnings
+
+
 def extract_scene_facts(stripped_text: str) -> SceneFacts:
     """Extracts every fact this module knows how to find from `stripped_text` -- comment/
     string-stripped scene source (`gauntlet._scala_text.strip_comments_and_strings`; callers
