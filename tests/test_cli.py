@@ -178,7 +178,7 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
 
     assert exit_code == 0
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines[0] == "Turn None: rejected - local_finding: bad thing"
+    assert out_lines[0] == "Rejected (rejected) - local_finding: bad thing"
     assert out_lines[1] == "Turn 1: accepted"
     assert out_lines[2] == "Consult: 'where should the light go?' -> upper-left, warm color"
     assert out_lines[3] == "Turn 2: accepted"
@@ -326,7 +326,7 @@ def test_plain_text_turn_rejected_prints_tag_and_reason(monkeypatch, tmp_path, c
 
     assert exit_code == 0
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines == ["Turn None: local_finding - allowlist: disallowed import"]
+    assert out_lines == ["Rejected (local_finding) - allowlist: disallowed import"]
 
 
 # --- /ask or /question input: real answer_consult() dispatch, run_turn() never called -----
@@ -726,7 +726,7 @@ def test_resume_with_malformed_history_line_skips_with_warning(monkeypatch, tmp_
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "Turn None: rejected - local_finding: bad thing" in captured.out
+    assert "Rejected (rejected) - local_finding: bad thing" in captured.out
     assert "malformed" in captured.err.lower()
 
 
@@ -1488,7 +1488,7 @@ def test_first_retry_after_timeout_with_unchanged_scene_arms_gate_without_resend
     assert call_log == ["timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines == [
-        "Turn None: generation_timeout - model hung",
+        "Rejected (generation_timeout) - model hung",
         "Retry: nothing has changed since the last generation_timeout. Type /retry "
         "again to resend the identical prompt.",
     ]
@@ -1525,7 +1525,7 @@ def test_second_retry_with_still_unchanged_scene_resends_exactly_once(
     assert call_log == ["timeout prompt", "timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines == [
-        "Turn None: generation_timeout - model hung",
+        "Rejected (generation_timeout) - model hung",
         "Retry: nothing has changed since the last generation_timeout. Type /retry "
         "again to resend the identical prompt.",
         "Turn 1: accepted",
@@ -1621,7 +1621,7 @@ def test_retry_with_scene_changed_since_failure_resends_immediately_no_gate(
     assert call_log == ["timeout prompt", "unrelated accepted prompt", "timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines == [
-        "Turn None: generation_timeout - model hung",
+        "Rejected (generation_timeout) - model hung",
         "Turn 1: accepted",
         "Render window: refreshed",
         "Turn 2: accepted",
@@ -1665,9 +1665,9 @@ def test_retry_resend_that_times_out_again_resets_an_unarmed_gate(
         "again to resend the identical prompt."
     )
     assert out_lines == [
-        "Turn None: generation_timeout - model hung again",
+        "Rejected (generation_timeout) - model hung again",
         arm_message,
-        "Turn None: generation_timeout - model hung again",
+        "Rejected (generation_timeout) - model hung again",
         arm_message,
     ]
 
@@ -1865,7 +1865,7 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     assert merged.endswith("User's answer: z")
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines == [
-        "Turn None: needs_clarification - unspecified rotation axis (X, Y, or Z)",
+        "Rejected (needs_clarification) - unspecified rotation axis (X, Y, or Z)",
         "Turn 1: accepted",
         "Render window: refreshed",
     ]

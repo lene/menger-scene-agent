@@ -272,7 +272,10 @@ def _format_history_entry(entry: dict) -> str:
         prompt = entry.get("prompt")
         detail = entry.get("answer") if "answer" in entry else entry.get("error")
         return f"Consult: {prompt!r} -> {detail}"
-    text = f"Turn {entry.get('ordinal')}: {entry.get('outcome')}"
+    ordinal = entry.get("ordinal")
+    # F2: mirrors _format_turn_result's "Rejected (<tag>)" shape for a replayed entry that
+    # was never assigned an ordinal -- never a numberless "Turn None: ..." line.
+    text = f"Turn {ordinal}: {entry.get('outcome')}" if ordinal is not None else f"Rejected ({entry.get('outcome')})"
     reason = entry.get("reason")
     if reason:
         text += f" - {reason}"
@@ -313,10 +316,16 @@ def _replay_history(store: SceneStore) -> None:
 
 def _format_turn_result(result: TurnResult) -> str:
     # Boundaries & Constraints: "Every run_turn() outcome prints its ordinal-or-none and
-    # tag, never silently" -- `result.ordinal` is `None` on any non-accepted tag, printed
-    # as-is. `result.messages` is always populated on a non-accepted tag (never empty on
-    # `accepted`, per TurnResult's own docstring), so it's safe to fold in unconditionally.
-    text = f"Turn {result.ordinal}: {result.tag}"
+    # tag, never silently". Usability review 2026-09 (F2): a non-accepted tag's `ordinal` is
+    # always `None` (nothing was ever persisted to reject), and printing that as the literal
+    # word "Turn None: ..." read as a bug -- a rejection now gets its own "Rejected (<tag>):
+    # ..." shape instead, never a numberless "Turn" line. `result.messages` is always
+    # populated on a non-accepted tag (never empty on `accepted`, per TurnResult's own
+    # docstring), so it's safe to fold in unconditionally either way.
+    if result.ordinal is not None:
+        text = f"Turn {result.ordinal}: {result.tag}"
+    else:
+        text = f"Rejected ({result.tag})"
     if result.messages:
         text += " - " + "; ".join(result.messages)
     if result.removed_properties:
