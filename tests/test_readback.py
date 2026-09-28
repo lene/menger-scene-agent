@@ -48,6 +48,57 @@ def test_semantic_readback_composes_the_style_and_rules_into_the_system_prompt()
     assert "warm area light upper-left" in system_prompt  # the style example
 
 
+# --- Usability review 2026-09 (F7): facts-grounded readback ------------------------------
+
+
+def test_semantic_readback_includes_a_facts_block_with_material_and_camera():
+    # Uses a real "Sponge(...)" call, not the module's shared SCENE_TEXT fixture (which uses
+    # the non-DSL placeholder name "MengerSponge" -- not one of scene_facts's known object
+    # types, so it yields no facts and would make this assertion vacuous).
+    scene_text = (
+        "object GlassSponge:\n"
+        "  val scene = Scene(\n"
+        "    camera = Camera(position = Vec3(0f, 0f, 5f), lookAt = Vec3(0f, 0f, 0f)),\n"
+        "    objects = List(Sponge(level = 3f, material = Some(Material.Glass)))\n"
+        "  )\n"
+    )
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(scene_text, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "<facts>" in user_prompt
+    assert "</facts>" in user_prompt
+    assert "material=Glass" in user_prompt
+    assert "transparent" in user_prompt
+    assert "Camera at" in user_prompt
+
+
+def test_semantic_readback_facts_block_states_directional_light_travel_phrase():
+    scene_text = (
+        "object LitFromBelow:\n"
+        "  val scene = Scene(\n"
+        "    lights = List(Directional(direction = Vec3(0f, 1f, 0f))),\n"
+        "    objects = List(Sphere())\n"
+        "  )\n"
+    )
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(scene_text, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "shines from below" in user_prompt
+
+
+def test_semantic_readback_system_prompt_declares_facts_authoritative():
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(SCENE_TEXT, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "authoritative" in system_prompt
+
+
 def test_semantic_readback_delimits_scene_text_with_scene_tags_not_a_code_fence():
     # Review round: a markdown code fence would prematurely close if scene_text itself
     # contained a triple-backtick sequence, splicing the remainder out of the quoted block.
