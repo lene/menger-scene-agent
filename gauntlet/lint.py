@@ -15,47 +15,22 @@ object/light, never guessed or failed.
 Each heuristic is intentionally simple and its threshold documented inline -- proportionate
 to a static pass over source text, not a substitute for stage 4's real geometric checks
 (story 5, renderer domain) which can actually evaluate the renderer's math.
+
+Usability review 2026-09 (Phase 3b): the extraction (`_extract_objects` et al.) that used to
+live here was promoted to `core/scene_facts.py`, shared with the F7/F8/F20/F23 follow-ups.
+This module is now a thin caller: `extract_scene_facts` for parsing, its own five checks for
+the actual lint rules. Behavior is unchanged; this file's own tests are the safety net.
 """
 
 from __future__ import annotations
 
 import math
-import re
-from typing import Optional
 
-from gauntlet._scala_text import (
-    as_float,
-    find_call_bodies,
-    line_of,
-    named_args,
-    scan_balanced,
-    split_top_level,
-    strip_comments_and_strings,
-)
+from core.scene_facts import ObjectFact, extract_scene_facts
+from gauntlet._scala_text import line_of, strip_comments_and_strings
 from gauntlet.types import Finding
 
 _STAGE = "lint"
-
-# The DSL's own documented defaults (reference/dsl-manifest.json: every object's `pos`
-# field defaults to `Vec3(0.0,0.0,0.0)`, `size` to `1.0`) -- used only when the field is
-# absent from a constructor call, never when it's present but non-literal.
-_DEFAULT_POS = (0.0, 0.0, 0.0)
-_DEFAULT_SIZE = 1.0
-
-_OBJECT_TYPES = (
-    "Sphere",
-    "Cube",
-    "Sponge",
-    "Tesseract",
-    "TesseractSponge",
-    "Sierpinski4D",
-    "ParametricSurface",
-    "Curve",
-    "LSystem",
-)
-# Lights with a `position` field can meaningfully be "inside" geometry; `Directional` has
-# only a `direction` (no location in space), so it is never checked for this.
-_POSITIONED_LIGHT_TYPES = ("Point", "AreaLight")
 
 # Heuristic thresholds, chosen to be simple and defensible over a static text pass:
 #  - degenerate scale: a `size` literal below this is visually indistinguishable from a
@@ -71,107 +46,11 @@ _NEAR_BLACK_EPSILON = 0.05
 _INSIDE_DISTANCE_THRESHOLD_IS_SIZE = True  # documents the rule above; not a tunable knob
 
 
-def _parse_vec3(value: str) -> Optional[tuple[float, float, float]]:
-    value = value.strip()
-    match = re.match(r"^Vec3\((.*)\)$", value, re.DOTALL)
-    if not match:
-        return None
-    parts = split_top_level(match.group(1))
-    if len(parts) != 3:
-        return None
-    nums = [as_float(p) for p in parts]
-    if any(n is None for n in nums):
-        return None
-    return (nums[0], nums[1], nums[2])
-
-
-def _parse_color_rgb(value: str) -> Optional[tuple[float, float, float]]:
-    value = value.strip()
-    match = re.match(r"^Color\((.*)\)$", value, re.DOTALL)
-    if not match:
-        return None
-    parts = split_top_level(match.group(1))
-    if len(parts) < 3:
-        return None
-    nums = [as_float(p) for p in parts[:3]]
-    if any(n is None for n in nums):
-        return None
-    return (nums[0], nums[1], nums[2])
-
-
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 
-class _Object:
-    def __init__(self, type_name: str, offset: int, args: dict[str, str]):
-        self.type_name = type_name
-        self.offset = offset
-        self.pos = _parse_vec3(args["pos"]) if "pos" in args else _DEFAULT_POS
-        self.size = as_float(args["size"]) if "size" in args else _DEFAULT_SIZE
-        color_arg = args.get("color")
-        self.color = _parse_color_literal_option(color_arg) if color_arg is not None else None
-
-
-class _Light:
-    def __init__(self, type_name: str, offset: int, args: dict[str, str]):
-        self.type_name = type_name
-        self.offset = offset
-        position_arg = args.get("position")
-        self.position = _parse_vec3(position_arg) if position_arg is not None else None
-
-
-def _parse_color_literal_option(value: str) -> Optional[tuple[float, float, float]]:
-    """Parses an object's `color` field, which is `Option[Color]` -- typically written as
-    `Some(Color(r, g, b[, a]))`. Returns `None` when absent or non-literal (no explicit
-    `Some(Color(...))`, e.g. a material preset supplies appearance instead)."""
-    stripped = value.strip()
-    match = re.match(r"^Some\((.*)\)$", stripped, re.DOTALL)
-    inner = match.group(1) if match else stripped
-    return _parse_color_rgb(inner)
-
-
-def _extract_objects(text: str) -> list[_Object]:
-    objects = []
-    for type_name in _OBJECT_TYPES:
-        for offset, inner in find_call_bodies(text, type_name):
-            objects.append(_Object(type_name, offset, named_args(inner)))
-    return objects
-
-
-def _extract_lights(text: str) -> list[_Light]:
-    lights = []
-    for type_name in _POSITIONED_LIGHT_TYPES:
-        for offset, inner in find_call_bodies(text, type_name):
-            lights.append(_Light(type_name, offset, named_args(inner)))
-    return lights
-
-
-def _extract_camera(text: str) -> Optional[tuple[tuple[float, float, float], tuple[float, float, float]]]:
-    calls = find_call_bodies(text, "Camera")
-    if not calls:
-        return None
-    _, inner = calls[0]  # a scene has exactly one camera; the first call is authoritative
-    args = named_args(inner)
-    if "position" not in args or "lookAt" not in args:
-        return None
-    position = _parse_vec3(args["position"])
-    look_at = _parse_vec3(args["lookAt"])
-    if position is None or look_at is None:
-        return None
-    return position, look_at
-
-
-def _extract_background(text: str) -> Optional[tuple[float, float, float]]:
-    match = re.search(r"\bbackground\s*=\s*Some\(", text)
-    if not match:
-        return None
-    open_idx = match.end() - 1
-    close_idx = scan_balanced(text, open_idx)
-    return _parse_color_rgb(text[open_idx + 1 : close_idx])
-
-
-def _check_camera_inside_object(camera, objects, text) -> list[Finding]:
+def _check_camera_inside_object(camera, objects: list[ObjectFact], text) -> list[Finding]:
     findings = []
     if camera is None:
         return findings
@@ -302,10 +181,8 @@ def check_lint(scene_text: str) -> list[Finding]:
     stripped text, which are aligned with the original since stripping only blanks
     content, never removes a newline."""
     text = strip_comments_and_strings(scene_text)
-    camera = _extract_camera(text)
-    objects = _extract_objects(text)
-    lights = _extract_lights(text)
-    background = _extract_background(text)
+    facts = extract_scene_facts(text)
+    camera, objects, lights, background = facts.camera, facts.objects, facts.lights, facts.background
 
     findings: list[Finding] = []
     findings.extend(_check_frustum(camera, objects, text))
