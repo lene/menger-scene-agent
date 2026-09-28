@@ -316,6 +316,11 @@ def _format_turn_result(result: TurnResult) -> str:
     if result.removed_properties:
         # F29: a turn that dropped earlier settings must say so, not do it silently.
         text += "\n  Note: this turn removed " + ", ".join(result.removed_properties)
+    if result.warnings:
+        # F8: a revise() turn that moved something or changed a material the request didn't
+        # ask for must say so, not do it silently -- same spirit as F29 above.
+        for warning in result.warnings:
+            text += f"\n  Warning: {warning}"
     return text
 
 

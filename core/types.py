@@ -27,7 +27,8 @@ from gauntlet.types import Finding
 # how to consume; a mismatch is a real failure mode (a stale artifact silently missing new
 # DSL vocabulary), not a style nit -- see the I/O & Edge-Case Matrix.
 # 1.1.0 adds `conventions` and per-field `description`s (usability review 2026-09, F28).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.1.0"
+# 1.2.0 adds per-field `min`/`max` resource-bound limits (usability review 2026-09, T1#3).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.2.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[
@@ -258,6 +259,10 @@ class TurnResult:
     # review 2026-09, F29: a repair turn silently dropped the user's xyz colouring). Reported,
     # not rejected -- the request may well have asked for the removal.
     removed_properties: List[str] = field(default_factory=list)
+    # Moved objects/camera or changed materials from `core.scene_facts.facts_diff` (usability
+    # review 2026-09, F8: a revise() turn silently moved something the user didn't ask to
+    # move). Reported, not rejected -- same spirit as `removed_properties`.
+    warnings: List[str] = field(default_factory=list)
 
 
 # `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):

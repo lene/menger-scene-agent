@@ -1063,6 +1063,48 @@ def test_check_hand_edit_accept_failure_is_reported_as_storage_failed_not_raised
     assert result.ordinal is None
 
 
+# --- usability review 2026-09 (F8): warn on an unrequested move/material change ---------------
+
+
+def test_accepted_revise_turn_warns_about_a_moved_object_the_request_did_not_ask_for(
+    tmp_path, monkeypatch
+):
+    old_scene = "object Old:\n  val scene = Scene(objects = List(Sphere(pos = Vec3(0f, 0f, 0f))))\n"
+    new_scene = "object Old:\n  val scene = Scene(objects = List(Sphere(pos = Vec3(3f, 0f, 0f))))\n"
+    adapter = FakeModelAdapter(result=new_scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make it red", old_scene, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert len(result.warnings) == 1
+    assert "Sphere" in result.warnings[0]
+
+
+def test_accepted_first_turn_has_no_warnings_no_prior_scene_to_diff_against(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert result.warnings == []
+
+
 # --- usability review 2026-09 (F29): report settings a turn dropped ---------------------------
 
 

@@ -24,6 +24,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
+from core.scene_facts import extract_scene_facts, facts_diff
 from core.types import (
     GenerationError,
     ReadbackError,
@@ -32,6 +33,7 @@ from core.types import (
     ValidationError,
     ValidationResult,
 )
+from gauntlet._scala_text import strip_comments_and_strings
 from gauntlet.allowlist import check_allowlist
 from gauntlet.clean_code import check_clean_code
 from gauntlet.lint import check_lint
@@ -237,8 +239,17 @@ def run_turn(
             )
             return TurnResult(tag=outcome.tag, messages=messages)
 
+        turn_warnings = (
+            facts_diff(
+                extract_scene_facts(strip_comments_and_strings(prior_scene)),
+                extract_scene_facts(strip_comments_and_strings(scene_text)),
+            )
+            if prior_scene is not None
+            else []
+        )
+
         _emit("reading back")
-        readback_result = semantic_readback(scene_text, adapter)
+        readback_result = semantic_readback(scene_text, adapter, warnings=turn_warnings)
         if isinstance(readback_result, ReadbackError):
             # I/O & Edge-Case Matrix: "turn is NOT accepted without its summary -- treated
             # as rejection, not a partial accept."
@@ -269,6 +280,7 @@ def run_turn(
             readback_summary=readback_result,
             ordinal=ordinal,
             removed_properties=removed_properties(prior_scene, scene_text),
+            warnings=turn_warnings,
         )
     finally:
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted

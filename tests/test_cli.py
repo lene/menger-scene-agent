@@ -2010,6 +2010,31 @@ def test_accepted_turn_names_the_settings_it_removed(monkeypatch, tmp_path, caps
     assert "  Note: this turn removed proceduralType" in capsys.readouterr().out.splitlines()
 
 
+def test_accepted_turn_warns_about_an_unrequested_change(monkeypatch, tmp_path, capsys):
+    # Usability review 2026-09 (F8): a revise turn silently moved the sponge.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(
+            tag="accepted",
+            messages=[],
+            ordinal=1,
+            warnings=["also moved the Sponge from (0.0, 0.0, 0.0) to (3.0, 0.0, 0.0)"],
+        )
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["make it glass"]))
+
+    assert cli.main([]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "  Warning: also moved the Sponge from (0.0, 0.0, 0.0) to (3.0, 0.0, 0.0)" in lines
+
+
 def test_follow_up_to_an_infrastructure_failure_is_sent_alone(monkeypatch, tmp_path):
     call_log = _run_rejection_then_follow_up(monkeypatch, tmp_path, "subprocess_failed")
 
