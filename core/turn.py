@@ -173,8 +173,14 @@ def run_turn(
         # spec-ai-scene-agent story 18: same reasoning for "needs_clarification" -- the model
         # itself judged the request too ambiguous or self-contradictory to compose (PRD FR5),
         # distinct from both "generation_failed" and "generation_timeout" end to end.
+        #
+        # usability review 2026-09 (F16, msa#3): same reasoning again for "unsupported" -- a
+        # request the DSL genuinely cannot satisfy at all, distinct from "needs_clarification"
+        # (see TurnTag's own docstring for why `cli.py` treats the two differently).
         if generation_result.kind == "needs_clarification":
             tag = "needs_clarification"
+        elif generation_result.kind == "unsupported":
+            tag = "unsupported"
         elif generation_result.kind == "model_call_timeout":
             tag = "generation_timeout"
         else:

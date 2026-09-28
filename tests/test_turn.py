@@ -364,6 +364,32 @@ def test_needs_clarification_via_revise_also_maps_to_the_distinct_turn_tag(tmp_p
     assert entries[-1]["outcome"] == "rejected"
 
 
+# --- usability review 2026-09 (F16, msa#3): unsupported outcome ----------------------------
+
+
+def test_unsupported_maps_to_its_own_distinct_turn_tag_not_needs_clarification(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="unsupported", message="no glow or halo exists -- nearest: an emissive surface"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "give it a glowing halo", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "unsupported"
+    assert result.tag != "needs_clarification"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["no glow or halo exists -- nearest: an emissive surface"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
 def test_generation_timeout_via_revise_maps_to_a_distinct_turn_tag_not_generation_failed(
     tmp_path, monkeypatch
 ):

@@ -414,3 +414,48 @@ def test_extract_scene_text_does_not_match_sentinel_split_across_two_lines():
 
     assert isinstance(result, ModelError)
     assert result.kind == "invalid_output"
+
+
+# --- usability review 2026-09 (F16, msa#3): unsupported sentinel detection ------------------
+# Mirrors the needs_clarification tests above -- same matching discipline, distinct kind.
+
+
+def test_extract_scene_text_detects_the_unsupported_sentinel():
+    result = extract_scene_text("UNSUPPORTED: no glow or halo exists -- nearest: an emissive surface")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "unsupported"
+    assert result.message == "no glow or halo exists -- nearest: an emissive surface"
+
+
+def test_extract_scene_text_strips_whitespace_around_the_unsupported_sentinel():
+    result = extract_scene_text("  \n UNSUPPORTED:   no distance falloff exists  \n  ")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "unsupported"
+    assert result.message == "no distance falloff exists"
+
+
+def test_extract_scene_text_unsupported_sentinel_match_is_case_sensitive():
+    result = extract_scene_text("unsupported: lowercase should not match")
+
+    assert isinstance(result, ModelError)
+    assert result.kind == "invalid_output"
+
+
+def test_extract_scene_text_does_not_match_the_unsupported_sentinel_mentioned_in_passing():
+    raw = "I could return UNSUPPORTED: but here's a scene instead.\n```scala\nobject Foo:\n  val scene = Scene()\n```"
+
+    result = extract_scene_text(raw)
+
+    assert result == "object Foo:\n  val scene = Scene()"
+
+
+def test_needs_clarification_and_unsupported_sentinels_are_distinct_kinds():
+    # The two sentinels must never be confused for one another -- distinct regexes, distinct
+    # ModelErrorKind values, checked independently.
+    clarification = extract_scene_text("NEEDS_CLARIFICATION: ambiguous term")
+    unsupported = extract_scene_text("UNSUPPORTED: no such effect -- nearest: X")
+
+    assert clarification.kind == "needs_clarification"
+    assert unsupported.kind == "unsupported"

@@ -115,6 +115,11 @@ def _model_error_to_generation_error(error: ModelError) -> GenerationError:
         # `extract_scene_text`) is its own distinct outcome end to end -- never folded into
         # "invalid_model_output" alongside every other malformed/rejected response shape.
         kind = "needs_clarification"
+    elif error.kind == "unsupported":
+        # usability review 2026-09 (F16, msa#3): the model's own second sentinel, for a
+        # request that's perfectly clear but asks for an effect this DSL cannot produce at
+        # all -- distinct from "needs_clarification" the same way, never folded into it.
+        kind = "unsupported"
     else:
         kind = "invalid_model_output"
     return GenerationError(kind=kind, message=error.message, cause=error.cause)

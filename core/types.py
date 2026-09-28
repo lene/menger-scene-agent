@@ -38,6 +38,10 @@ ErrorKind = Literal[
     "stale_corpus",
     "model_call_timeout",
     "needs_clarification",
+    # F16 / msa#3: a request the DSL genuinely cannot satisfy at all, distinct from
+    # "needs_clarification" (more information from the user could resolve that one; nothing
+    # can resolve this one, only a nearest approximation).
+    "unsupported",
 ]
 
 
@@ -213,7 +217,18 @@ StageName = Literal["generating", "validating", "reading back"]
 #     sentinel `extract_scene_text` detects before fence-parsing. Distinguished from
 #     "generation_failed" the same way "generation_timeout" is: a distinct, typed outcome
 #     end to end, never folded into the generic bucket every other `GenerationError` kind
-#     maps to.
+#     maps to. `cli.py` arms prompt-threading for this tag: a clarification's own follow-up
+#     answer genuinely resolves it, so the next line is threaded back into the original
+#     request. Contrast "unsupported" below, whose follow-up is deliberately NOT threaded.
+#   - "unsupported" -- usability review 2026-09 (F16, msa#3): a `GenerationError` whose kind
+#     is specifically "unsupported" -- the request was perfectly clear but asks for an effect
+#     this DSL has no way to produce at all (previously misreported as
+#     "needs_clarification", which wrongly implied more information from the user could
+#     resolve it), via the `UNSUPPORTED:` sentinel `extract_scene_text` detects the same way
+#     as `NEEDS_CLARIFICATION:`. Deliberately NOT armed for prompt-threading in `cli.py`:
+#     nothing about a follow-up line resolves "the DSL cannot do this" the way it resolves a
+#     genuine ambiguity, so the next line is sent as its own fresh turn, not threaded onto
+#     this one's rejected request.
 #   - "hand_edit_rejected" -- spec-ai-scene-agent story 17 (`core/turn.py`'s
 #     `check_hand_edit()`): an out-of-band hand edit to the current scene file tripped the
 #     local gauntlet aggregation -- unique to `check_hand_edit()`, never returned by
@@ -225,6 +240,7 @@ TurnTag = Literal[
     "generation_failed",
     "generation_timeout",
     "needs_clarification",
+    "unsupported",
     "local_finding",
     "compile_errors",
     "lint_findings",

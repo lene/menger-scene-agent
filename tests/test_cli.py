@@ -1871,6 +1871,42 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     ]
 
 
+def test_unsupported_rejection_does_not_thread_the_next_line_sent_raw(
+    monkeypatch, tmp_path, capsys
+):
+    # Usability review 2026-09 (F16, msa#3): unlike needs_clarification, an "unsupported"
+    # rejection's follow-up line must NOT be merged with the original request -- nothing
+    # about the next line resolves "the DSL cannot do this."
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(
+                tag="unsupported",
+                messages=["no glow or halo exists -- nearest: an emissive surface"],
+            )
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["give it a glowing halo", "make a red cube instead"])
+    )
+
+    exit_code = cli.main([])
+
+    assert exit_code == 0
+    assert call_log[0] == "give it a glowing halo"
+    assert call_log[1] == "make a red cube instead"
+
+
 def test_two_consecutive_clarification_rounds_compound_both_reasons(
     monkeypatch, tmp_path, capsys
 ):

@@ -23,7 +23,9 @@ import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Protocol, Union
 
-ModelErrorKind = Literal["call_failed", "invalid_output", "timeout", "needs_clarification"]
+ModelErrorKind = Literal[
+    "call_failed", "invalid_output", "timeout", "needs_clarification", "unsupported"
+]
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,13 @@ _FIRST_OBJECT_LINE_LIMIT = 60
 # without `re.DOTALL` already can't cross a newline, but the gap before the capture group
 # could.
 _NEEDS_CLARIFICATION = re.compile(r"^NEEDS_CLARIFICATION:[ \t]*(.+)$")
+
+# Usability review 2026-09 (F16, msa#3): a second, distinct sentinel for a request that is
+# perfectly clear but asks for an effect this DSL has no way to produce at all -- previously
+# folded into NEEDS_CLARIFICATION, which wrongly implied more information from the user could
+# resolve it (there's nothing to clarify; the DSL simply can't do it). Same single-line,
+# case-sensitive, whole-response-only matching discipline as NEEDS_CLARIFICATION above.
+_UNSUPPORTED = re.compile(r"^UNSUPPORTED:[ \t]*(.+)$")
 
 # Per the claude-api skill's current defaults: claude-opus-5 unless a caller names a
 # different model (constructor argument), and a non-streaming max_tokens of 16000 --
@@ -227,6 +236,10 @@ def extract_scene_text(raw_text: str) -> ModelResult:
     sentinel_match = _NEEDS_CLARIFICATION.match(raw_text.strip())
     if sentinel_match is not None:
         return ModelError(kind="needs_clarification", message=sentinel_match.group(1).strip())
+
+    unsupported_match = _UNSUPPORTED.match(raw_text.strip())
+    if unsupported_match is not None:
+        return ModelError(kind="unsupported", message=unsupported_match.group(1).strip())
 
     fences = _CODE_FENCE.findall(raw_text)
     if len(fences) > 1:

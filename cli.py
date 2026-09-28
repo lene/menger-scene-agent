@@ -162,7 +162,13 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "Compounds across repeated rounds; cleared as soon as a turn resolves any other "
             "way. The same applies after a rejected scene (compile_errors, lint_findings, "
             "local_finding, readback_failed): your next line is treated as a change to the "
-            "rejected request, e.g. \"start at level 0 instead\", not as a new request."
+            "rejected request, e.g. \"start at level 0 instead\", not as a new request.\n"
+            "\n"
+            "unsupported: when a turn is rejected because the DSL genuinely cannot produce "
+            "the requested effect at all (not just ambiguous), the rejection names the "
+            "nearest thing that IS possible, but your next line is NOT threaded back -- "
+            "nothing about a follow-up resolves \"this doesn't exist\", so it starts a fresh "
+            "request."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -507,7 +513,10 @@ class _ClarificationState:
 # answer; sent alone it lost everything the request had asked for (usability review 2026-09,
 # F4: tesseract, glass, dark background and rotation all silently dropped).
 # `generation_timeout` has /retry instead; infrastructure failures (refused, timeout,
-# subprocess_failed, storage_failed, ...) say nothing about the request itself.
+# subprocess_failed, storage_failed, ...) say nothing about the request itself. "unsupported"
+# (F16/msa#3) is deliberately excluded too, despite also being a request-shaped rejection: a
+# follow-up doesn't resolve "the DSL cannot do this" the way it resolves an ambiguity or a
+# fixable rejection, so it is never added here -- see TurnTag's own docstring in core/types.py.
 _REJECTIONS_THREADED_INTO_FOLLOW_UP = frozenset(
     {"compile_errors", "lint_findings", "local_finding", "readback_failed"}
 )
