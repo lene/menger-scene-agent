@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.0",
+  "optixJniVersion": "0.4.1",
   "minDriverVersion": "580.65",
   "conventions": [
     "Units: positions and sizes are world units; `pos` is an object's centre; all angles (`rotation`, 4D rotations) are radians.",
@@ -11,7 +11,8 @@
     "Colour and transparency: alpha 0 is fully transparent, 1 fully opaque. An object's explicit `color` tints only the material's RGB; the material's own alpha (its transparency) is preserved, so an opaque `color` on `Glass` or `Film` stays transparent (usability review 2026-09, F14).",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val duration = <seconds>f` in the same object; t is seconds in [0, duration]. The window plays it in real time, looping, and the validator checks the scene at t = 0 and at t = duration.",
-    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). In one scene, all edge-rendered 4D objects must share the same `projection`."
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). In one scene, all edge-rendered 4D objects must share the same `projection`.",
+    "Camera: the horizontal field of view is fixed at 45 degrees (not adjustable per scene). To frame or zoom to fit a scene, move `Camera.position` -- aim `lookAt` at the scene's centre and set the eye's distance from it to at least radius / sin(22.5deg), where radius is the scene's bounding-sphere radius, with a margin for comfortable framing."
   ],
   "objects": [
     {
@@ -163,7 +164,9 @@
           "name": "level",
           "type": "float",
           "default": null,
-          "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. Cost grows ~20x per level."
+          "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. Cost grows ~20x per level.",
+          "min": 0,
+          "max": 5
         },
         {
           "name": "material",
@@ -724,7 +727,9 @@
           "name": "level",
           "type": "float",
           "default": null,
-          "description": "Recursion depth; fractional levels blend between integer levels. Cost grows ~48x per level."
+          "description": "Recursion depth; fractional levels blend between integer levels. Cost grows ~48x per level.",
+          "min": 0,
+          "max": 4
         },
         {
           "name": "material",
@@ -908,12 +913,14 @@
         {
           "name": "uSteps",
           "type": "int",
-          "default": "64"
+          "default": "64",
+          "min": 1
         },
         {
           "name": "vSteps",
           "type": "int",
-          "default": "32"
+          "default": "32",
+          "min": 1
         },
         {
           "name": "closedU",
@@ -1088,7 +1095,9 @@
         {
           "name": "iterations",
           "type": "int",
-          "default": "4"
+          "default": "4",
+          "min": 0,
+          "max": 12
         },
         {
           "name": "angleDegrees",
