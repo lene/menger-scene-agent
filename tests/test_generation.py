@@ -160,6 +160,52 @@ def test_revise_composes_manifest_and_corpus_into_the_system_prompt_too():
     assert "GlassSphere" in system_prompt
 
 
+# --- Usability review 2026-09 (F20): scene-extent fact for "zoom to fit" -------------------
+
+
+def test_revise_prompt_includes_the_scene_extent_when_objects_are_positioned():
+    prior = (
+        "object Prior:\n  val scene = Scene(objects = List(\n"
+        "    Sphere(pos = Vec3(-2f, 0f, 0f), size = 1f),\n"
+        "    Sphere(pos = Vec3(2f, 0f, 0f), size = 1f)\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=prior)
+
+    revise("zoom out so everything fits", prior, VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "Current scene extent" in user_prompt
+    assert "(0.0, 0.0, 0.0)" in user_prompt  # center
+    assert "3.0" in user_prompt  # radius: 2 to each center + its own size 1
+
+
+def test_revise_prompt_omits_the_extent_fact_for_a_scene_with_no_positioned_objects():
+    adapter = FakeModelAdapter(result="object Prior:\n  val scene = Scene()\n")
+
+    revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "Current scene extent" not in adapter.last_request.user_prompt
+
+
+def test_system_prompt_carries_the_manifest_s_fixed_fov_framing_convention():
+    # The FOV/framing formula itself lives in the manifest's own `conventions` (DslSemantics,
+    # F20/T1#3) -- already flows into every generate()/revise() system prompt via the
+    # manifest JSON dump, so this pins that it's actually there for the model to use.
+    manifest_with_conventions = {
+        **VALID_MANIFEST,
+        "conventions": ["Camera: the horizontal field of view is fixed at 45 degrees."],
+    }
+    adapter = FakeModelAdapter(result="object Prior:\n  val scene = Scene()\n")
+
+    revise(
+        "zoom out", "object Prior:\n  val scene = Scene()\n", manifest_with_conventions,
+        VALID_CORPUS, adapter,
+    )
+
+    assert "45 degrees" in adapter.last_request.system_prompt
+
+
 # --- Edge-Case Matrix: model call fails/times out ----------------------------------------
 
 

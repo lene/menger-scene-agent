@@ -14,12 +14,14 @@ from pathlib import Path
 from typing import Optional
 
 from adapters.model import ModelAdapter, ModelError, ModelRequest, extract_scene_text
+from core.scene_facts import extract_scene_facts
 from core.types import (
     EXPECTED_CORPUS_SCHEMA_VERSION,
     EXPECTED_MANIFEST_SCHEMA_VERSION,
     GenerationError,
     GenerationResult,
 )
+from gauntlet._scala_text import strip_comments_and_strings
 
 # The generation system prompt's rules, kept as prose in its own file so they can be edited
 # without touching this module's code (usability review 2026-09 inbox item).
@@ -74,6 +76,28 @@ def _build_system_prompt(manifest: dict, corpus: dict) -> str:
         f"{_RULES}\n"
         f"## DSL capability manifest\n```json\n{manifest_json}\n```\n\n"
         f"## Example scene corpus\n{examples}\n"
+    )
+
+
+def _extent_fact(prior_scene: str) -> str:
+    """F20: the current scene's bounding-sphere extent as ready numbers, so a "zoom out"/
+    "frame everything" request doesn't require the model to sum up every object's `pos`/
+    `size` itself from the raw scene text -- error-prone arithmetic a static extraction
+    (`core.scene_facts`, AD-2) already does exactly once. Empty when there's nothing
+    positioned to frame (`extent_center` is `None`), so callers can splice it in
+    unconditionally."""
+    facts = extract_scene_facts(strip_comments_and_strings(prior_scene))
+    center = facts.extent_center
+    radius = facts.extent_radius
+    if center is None or radius is None:
+        return ""
+    return (
+        f"\nCurrent scene extent: center = {center}, bounding radius = {radius}. If the "
+        "request asks to zoom out, frame, or fit everything in view, aim `lookAt` at this "
+        "center and set the camera's distance from it to at least "
+        "radius / sin(22.5 degrees) (the manifest conventions give the exact formula), with "
+        "a margin for comfortable framing -- keep the current viewing direction unless the "
+        "request says otherwise.\n"
     )
 
 
@@ -149,7 +173,8 @@ def revise(
     system_prompt = _build_system_prompt(manifest, corpus)
     user_prompt = (
         "Here is the current scene file, verbatim:\n\n"
-        f"```scala\n{prior_scene}\n```\n\n"
+        f"```scala\n{prior_scene}\n```\n"
+        f"{_extent_fact(prior_scene)}\n"
         f"Change request: {prompt}\n\n"
         "Modify the scene above to satisfy the change request. Keep everything the request "
         "does not implicate unchanged -- camera, materials, lights, background and any "
