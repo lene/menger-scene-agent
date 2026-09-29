@@ -84,8 +84,13 @@ def _validation_messages(result: ValidationResult) -> List[str]:
     # Matrix: that row populates `findings`, not `messages`) -- folding both in keeps the
     # rejection reason and `TurnResult.messages` informative regardless of which
     # renderer-domain tag produced it.
+    # The validator also lists each finding in `messages` as "invariant: message" (F44 in
+    # usability review session 2 showed it twice), so only add findings not already there.
     messages = list(result.messages)
-    messages.extend(f"{finding.invariant}: {finding.message}" for finding in result.findings)
+    for finding in result.findings:
+        text = f"{finding.invariant}: {finding.message}"
+        if text not in messages:
+            messages.append(text)
     return messages
 
 

@@ -210,6 +210,29 @@ def test_lint_findings_with_no_messages_still_produces_an_informative_rejection(
     assert not _staging_path(store).exists()
 
 
+def test_a_finding_the_validator_also_lists_in_messages_is_reported_once(tmp_path, monkeypatch):
+    # Usability review session 2 (F44): the validator puts every finding both in `messages`
+    # ("invariant: message") and in `findings`; the 4.5 rejection printed it twice.
+    from core.types import ValidationFinding
+
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda *a, **kw: ValidationResult(
+            tag="lint_findings",
+            messages=["scene-build: 24-cell: Incompatible 4D projection"],
+            findings=[ValidationFinding(invariant="scene-build", message="24-cell: Incompatible 4D projection")],
+        ),
+    )
+
+    result = run_turn(
+        "add a 24-cell", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=CLEAN_SCENE_TEXT), _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert result.messages == ["scene-build: 24-cell: Incompatible 4D projection"]
+
+
 # --- validate_scene() returns a ValidationError: timeout/malformed/subprocess_failed -------
 
 
