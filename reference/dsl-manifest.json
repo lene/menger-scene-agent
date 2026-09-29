@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.2.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.1",
+  "optixJniVersion": "0.4.2",
   "minDriverVersion": "580.65",
   "conventions": [
     "Units: positions and sizes are world units; `pos` is an object's centre; all angles (`rotation`, 4D rotations) are radians.",
@@ -12,6 +12,7 @@
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val duration = <seconds>f` in the same object; t is seconds in [0, duration]. The window plays it in real time, looping, and the validator checks the scene at t = 0 and at t = duration. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46).",
     "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). In one scene, all edge-rendered 4D objects must share the same `projection`.",
+    "Glass on a TesseractSponge from level 2 up renders as chaotic, fragmented refraction: the projected sponge has thousands of overlapping refracting layers and a ray gets at most 5 bounces. Prefer an opaque or metal material there, or level 1 for glass, and say so if the user asks for glass (usability review 2026-09, session 2, F55).",
     "Camera: the horizontal field of view is fixed at 45 degrees (not adjustable per scene). To frame or zoom to fit a scene, move `Camera.position` -- aim `lookAt` at the scene's centre and set the eye's distance from it to at least radius / sin(22.5deg), where radius is the scene's bounding-sphere radius, with a margin for comfortable framing."
   ],
   "objects": [
