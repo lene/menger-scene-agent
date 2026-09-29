@@ -267,6 +267,85 @@ def test_ok_tag_but_readback_failure_is_rejected_not_partially_accepted(tmp_path
     assert "readback model down" in entries[-1]["reason"]
 
 
+# --- usability review session 2 (F32): a rejected candidate is kept for analysis ----------
+
+
+def _rejected_file(store: SceneStore) -> str:
+    return (store.session_dir / "rejected-001.scala").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("wire_tag", ["compile_errors", "lint_findings", "refused"])
+def test_renderer_rejection_keeps_the_candidate(tmp_path, monkeypatch, wire_tag):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda *a, **kw: ValidationResult(tag=wire_tag, messages=["no"], findings=[]),
+    )
+
+    run_turn("make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH)
+
+    assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
+    assert _rejected_file(store) == CLEAN_SCENE_TEXT
+    assert _ordinal_paths(store) == []
+    assert store.current_scene() is None
+
+
+def test_local_finding_keeps_the_candidate(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    store = _make_store(tmp_path)
+
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=SCENE_TEXT_WITH_TODO), store, _SCRIPT_PATH,
+    )
+
+    assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
+    assert _rejected_file(store) == SCENE_TEXT_WITH_TODO
+
+
+def test_validation_error_and_readback_failure_keep_the_candidate(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(
+        turn_module, "validate_scene", lambda *a, **kw: ValidationError(kind="timeout", message="t")
+    )
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=CLEAN_SCENE_TEXT), store, _SCRIPT_PATH,
+    )
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda scene_file, *a, **kw: ValidationResult(
+            tag="ok", messages=[], findings=[], scene=str(scene_file)
+        ),
+    )
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        _SequencedModelAdapter(results=[CLEAN_SCENE_TEXT, ModelError(kind="call_failed", message="x")]),
+        store, _SCRIPT_PATH,
+    )
+
+    assert [e["file"] for e in _history_entries(store)] == [
+        "rejected-001.scala",
+        "rejected-002.scala",
+    ]
+
+
+def test_generation_failure_has_no_candidate_to_keep(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    store = _make_store(tmp_path)
+
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=ModelError(kind="call_failed", message="down")), store, _SCRIPT_PATH,
+    )
+
+    assert _history_entries(store)[-1]["file"] is None
+    assert list(store.session_dir.glob("rejected-*.scala")) == []
+
+
 # --- Precondition: generate()/revise() itself fails --------------------------------------
 
 
@@ -560,7 +639,7 @@ def test_record_rejected_failure_is_folded_into_messages_not_raised(tmp_path, mo
     adapter = FakeModelAdapter(result=SCENE_TEXT_WITH_TODO)
     store = _make_store(tmp_path)
 
-    def failing_record_rejected(self, prompt, reason):
+    def failing_record_rejected(self, prompt, reason, scene_text=None):
         raise SceneStoreError("history.jsonl append failed: disk full")
 
     monkeypatch.setattr(SceneStore, "record_rejected", failing_record_rejected)

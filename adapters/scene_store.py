@@ -6,8 +6,9 @@ AD-15: session creation is exclusive -- a session ID is never a human-chosen slu
 primitive (`Path.mkdir(exist_ok=False)`), never a check-then-create race.
 
 AD-12/AD-13: a turn is one user request. Only an *accepted* attempt consumes the next
-zero-padded ordinal (`001.scala`, `002.scala`, ...); a *rejected* attempt writes no scene
-file and consumes no ordinal, though it still gets a `history.jsonl` entry. "The current
+zero-padded ordinal (`001.scala`, `002.scala`, ...); a *rejected* attempt consumes no
+ordinal, though it still gets a `history.jsonl` entry, and its candidate text (if any) is kept
+as `rejected-NNN.scala` outside the ordinal sequence (AD-12 amendment, F32). "The current
 scene" always means the highest ordinal file that actually exists on disk -- this module
 never caches that value in memory, it re-scans the session directory every time.
 
@@ -61,6 +62,9 @@ from typing import List, Optional, Union
 # past 999 turns still round-trips its own ordinals correctly instead of silently truncating.
 _ORDINAL_FILENAME = re.compile(r"^(\d{3,})\.scala$")
 _ORDINAL_WIDTH = 3
+# AD-12 amendment (F32): a rejected attempt's candidate, in its own sequence, which
+# `_ORDINAL_FILENAME` never matches, so it can never become the head (AD-13).
+_REJECTED_FILENAME = re.compile(r"^rejected-(\d{3,})\.scala$")
 
 _HISTORY_FILENAME = "history.jsonl"
 
@@ -320,18 +324,44 @@ class SceneStore:
             f"{self._MAX_ACCEPT_RETRIES} attempts -- persistent concurrent writers"
         )
 
-    def record_rejected(self, prompt: str, reason: str) -> None:
-        """Records a rejected/failed attempt: no scene file is written, no ordinal is
-        consumed (AD-12), but `history.jsonl` still grows by one entry (AD-7)."""
-        self._append_history(
-            {
-                "ordinal": None,
-                "prompt": prompt,
-                "file": None,
-                "outcome": "rejected",
-                "reason": reason,
-            }
-        )
+    def _keep_rejected_candidate(self, scene_text: str) -> str:
+        """Writes `scene_text` as the next `rejected-NNN.scala` (own sequence, same exclusive
+        write and collision retry as `accept()`) and returns its file name."""
+        for _ in range(self._MAX_ACCEPT_RETRIES):
+            taken = [
+                int(m.group(1))
+                for p in self.session_dir.iterdir()
+                if (m := _REJECTED_FILENAME.match(p.name)) is not None
+            ]
+            target = self.session_dir / f"rejected-{max(taken, default=0) + 1:0{_ORDINAL_WIDTH}d}.scala"
+            try:
+                self._write_new_file_exclusive(target, scene_text)
+            except FileExistsError:
+                continue
+            return target.name
+        raise SceneStoreError(f"Could not claim a rejected-candidate name in '{self.session_dir}'")
+
+    def record_rejected(
+        self, prompt: str, reason: str, scene_text: Optional[str] = None
+    ) -> None:
+        """Records a rejected/failed attempt: no ordinal is consumed (AD-12), but
+        `history.jsonl` still grows by one entry (AD-7). When the attempt produced candidate
+        text (`scene_text`), it's kept as `rejected-NNN.scala` and named in the entry's `file`
+        (AD-12 amendment, usability review session 2, F32) so the rejection can be analysed.
+        Failing to keep it never loses the history entry: the error goes into `file_error`."""
+        entry = {
+            "ordinal": None,
+            "prompt": prompt,
+            "file": None,
+            "outcome": "rejected",
+            "reason": reason,
+        }
+        if scene_text is not None:
+            try:
+                entry["file"] = self._keep_rejected_candidate(scene_text)
+            except (OSError, SceneStoreError) as e:
+                entry["file_error"] = str(e)
+        self._append_history(entry)
 
     def record_consult(
         self, prompt: str, answer: Optional[str] = None, error: Optional[str] = None

@@ -90,7 +90,11 @@ def _validation_messages(result: ValidationResult) -> List[str]:
 
 
 def _record_rejected_safely(
-    store: SceneStore, prompt: str, reason: str, messages: List[str]
+    store: SceneStore,
+    prompt: str,
+    reason: str,
+    messages: List[str],
+    scene_text: Optional[str] = None,
 ) -> List[str]:
     """Attempts `store.record_rejected(prompt, reason)` but never lets a failure there
     propagate (Boundaries & Constraints: `run_turn()` never raises for an expected
@@ -101,7 +105,7 @@ def _record_rejected_safely(
     original rejection `reason` and a storage-failure note appended, so the caller's
     `TurnResult` folds both in rather than the exception propagating."""
     try:
-        store.record_rejected(prompt, reason)
+        store.record_rejected(prompt, reason, scene_text=scene_text)
         return messages
     except SceneStoreError as e:
         return list(messages) + [reason, f"storage_failed: could not record rejection: {e}"]
@@ -205,6 +209,7 @@ def run_turn(
             prompt,
             _local_finding_reason(local_findings),
             [finding.message for finding in local_findings],
+            scene_text,
         )
         return TurnResult(tag="local_finding", messages=messages, findings=local_findings)
 
@@ -225,7 +230,7 @@ def run_turn(
 
         if isinstance(outcome, ValidationError):
             messages = _record_rejected_safely(
-                store, prompt, f"{outcome.kind}: {outcome.message}", [outcome.message]
+                store, prompt, f"{outcome.kind}: {outcome.message}", [outcome.message], scene_text
             )
             return TurnResult(tag=outcome.kind, messages=messages)
 
@@ -242,6 +247,7 @@ def run_turn(
                 prompt,
                 "; ".join(validation_messages) or outcome.tag,
                 validation_messages,
+                scene_text,
             )
             return TurnResult(tag=outcome.tag, messages=messages)
 
@@ -266,6 +272,7 @@ def run_turn(
                 prompt,
                 f"readback_failed: {readback_result.message}",
                 [readback_result.message],
+                scene_text,
             )
             return TurnResult(tag="readback_failed", messages=messages)
 

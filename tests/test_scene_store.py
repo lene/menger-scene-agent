@@ -220,6 +220,28 @@ def test_record_rejected_on_a_fresh_session_still_grows_history_by_one(tmp_path)
     assert store.current_scene() is None
 
 
+# --- usability review session 2 (F32): a rejected candidate is kept for analysis ----------
+
+
+def test_record_rejected_with_candidate_text_keeps_it_outside_the_ordinal_sequence(tmp_path):
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object First:\n  val scene = Scene()\n", "make a scene")
+
+    store.record_rejected("animate it", "compile_errors: boom", scene_text="object Bad:\n")
+    store.record_rejected("try again", "compile_errors: boom", scene_text="object Worse:\n")
+
+    lines = store.history_path.read_text(encoding="utf-8").splitlines()
+    entries = [json.loads(line) for line in lines[1:]]
+    assert [e["file"] for e in entries] == ["rejected-001.scala", "rejected-002.scala"]
+    assert all(e["ordinal"] is None for e in entries)
+    assert (store.session_dir / "rejected-002.scala").read_text(encoding="utf-8") == (
+        "object Worse:\n"
+    )
+    # AD-12/AD-13 amendment: a kept candidate never becomes the head or consumes an ordinal.
+    assert store.current_scene() == "object First:\n  val scene = Scene()\n"
+    assert store.accept("object Second:\n  val scene = Scene()\n", "retry") == 2
+
+
 # --- record_consult() (spec-ai-scene-agent story 19) ---------------------------------------
 
 
