@@ -1,5 +1,6 @@
 """Stage 3 clean-code check: "the file *is* the deliverable" (validation-gauntlet.md).
-Three independent checks over the scene's source text:
+Independent checks over the scene's source text (the fourth, no `SceneRegistry.register` in
+an animated scene, is documented at `_check_animated_scene_not_registered`):
 
   1. File length within a sane bound -- the 32-scene reference corpus (dsl-corpus.json)
      runs 26-248 lines (one deliberate multi-object outlier, `ParametricScenes.scala`) and
@@ -117,11 +118,39 @@ def _check_object_declaration_position(scene_text: str) -> list[Finding]:
     return []
 
 
+# Usability review session 2 (F46): `SceneRegistry.register(name: String, scene: Scene)` has no
+# overload for an animated scene, so keeping the corpus's register line after turning
+# `val scene` into `def scene(t: Float)` fails to compile with "Found: Float => Scene,
+# Required: Scene". Session scenes are loaded by path, so the line isn't needed there at all.
+_ANIMATED_SCENE_DEF = re.compile(r"\bdef[ \t]+scene[ \t]*\(")
+_SCENE_REGISTER_CALL = re.compile(r"\bSceneRegistry[ \t]*\.[ \t]*register[ \t]*\(")
+
+
+def _check_animated_scene_not_registered(scene_text: str) -> list[Finding]:
+    text = strip_comments_and_strings(scene_text)
+    if _ANIMATED_SCENE_DEF.search(text) is None:
+        return []
+    return [
+        Finding(
+            stage=_STAGE,
+            message=(
+                "SceneRegistry.register takes a static Scene, not an animated `def scene(t: "
+                "Float)` -- remove the register line (a scene file is loaded by path)"
+            ),
+            identifier="SceneRegistry.register",
+            line=line_of(scene_text, match.start()),
+        )
+        for match in _SCENE_REGISTER_CALL.finditer(text)
+    ]
+
+
 def check_clean_code(scene_text: str) -> list[Finding]:
-    """Stage 3: file-length bound, placeholder-text scan, and an independent re-check that
-    the top-level `object` declaration is the first one, within the first 60 lines."""
+    """Stage 3: file-length bound, placeholder-text scan, an independent re-check that the
+    top-level `object` declaration is the first one, within the first 60 lines, and no
+    `SceneRegistry.register` in an animated scene (F46)."""
     findings: list[Finding] = []
     findings.extend(_check_line_count(scene_text))
     findings.extend(_check_placeholders(scene_text))
     findings.extend(_check_object_declaration_position(scene_text))
+    findings.extend(_check_animated_scene_not_registered(scene_text))
     return findings

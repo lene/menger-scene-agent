@@ -126,6 +126,29 @@ def test_empty_input_never_raises():
     assert any("object" in f.message.lower() for f in findings)
 
 
+# --- Usability review session 2 (F46): an animated scene can't be registered ----------------
+
+ANIMATED_SCENE = (
+    "object Spin:\n"
+    "  val duration = 10f\n"
+    "  def scene(t: Float): Scene = Scene(objects = List(Sphere()))\n"
+)
+
+
+def test_animated_scene_that_registers_itself_is_flagged():
+    findings = check_clean_code(ANIMATED_SCENE + '  SceneRegistry.register("spin", scene)\n')
+
+    assert len(findings) == 1
+    assert "SceneRegistry.register" in findings[0].message
+    assert findings[0].line == 4
+
+
+def test_register_is_fine_in_a_static_scene_and_absent_from_an_animated_one():
+    assert check_clean_code(CLEAN_SCENE + '  SceneRegistry.register("glass", scene)\n') == []
+    assert check_clean_code(ANIMATED_SCENE) == []
+    assert check_clean_code(ANIMATED_SCENE + '  // SceneRegistry.register("spin", scene)\n') == []
+
+
 # --- Verification: story 2's real, already-compiling poc-run fixtures -----------------------
 
 
