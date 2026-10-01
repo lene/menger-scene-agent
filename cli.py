@@ -75,6 +75,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import readline  # noqa: F401 -- side-effect only: wires GNU readline into input() (arrow
                   # keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
 import subprocess
@@ -262,7 +263,21 @@ def _bootstrap_session(session_id: Optional[str]) -> SceneStore:
     return SceneStore(session_dir=session_dir)
 
 
-def _format_history_entry(entry: dict) -> str:
+# A rejection's history `reason` starts with its turn tag ("compile_errors: ..."), which
+# `_format_history_entry` recovers so a replayed rejection shows its real tag (F38).
+_REASON_TAG = re.compile(r"^([a-z_]+): (.*)$", re.DOTALL)
+
+
+def _tag_label(tag: str) -> str:
+    return tag.replace("_", " ")
+
+
+def _rejection_line(tag: Optional[str], message: str) -> str:
+    head = f"Rejected ({_tag_label(tag)})" if tag else "Rejected"
+    return f"{head}: {message}" if message else head
+
+
+def _format_history_entry(entry: dict, session_dir: Optional[Path] = None) -> str:
     # spec-ai-scene-agent story 19 (review round, patch-level fix): a "consult" entry has
     # neither a "reason" key (that's rejected/failed-attempt shaped) nor an ordinal -- without
     # this branch, replaying a resumed session's prior /ask/-question turns collapsed to the
@@ -272,13 +287,23 @@ def _format_history_entry(entry: dict) -> str:
         prompt = entry.get("prompt")
         detail = entry.get("answer") if "answer" in entry else entry.get("error")
         return f"Consult: {prompt!r} -> {detail}"
+    file_name = entry.get("file")
+    file_path = session_dir / file_name if session_dir is not None and file_name else file_name
     ordinal = entry.get("ordinal")
-    # F2: mirrors _format_turn_result's "Rejected (<tag>)" shape for a replayed entry that
-    # was never assigned an ordinal -- never a numberless "Turn None: ..." line.
-    text = f"Turn {ordinal}: {entry.get('outcome')}" if ordinal is not None else f"Rejected ({entry.get('outcome')})"
-    reason = entry.get("reason")
-    if reason:
-        text += f" - {reason}"
+    if ordinal is not None:
+        # Same shape as a live accepted turn (_format_turn_result), F50/F38.
+        text = f"Turn {ordinal}: {entry.get('outcome')}"
+        if file_path:
+            text += f" → {file_path}"
+        if entry.get("readback_summary"):
+            text += f"\n  Readback: {entry['readback_summary']}"
+        return text
+    # F2: never a numberless "Turn None: ..." line; F38: the real tag, not "(rejected)".
+    reason = entry.get("reason") or ""
+    match = _REASON_TAG.match(reason)
+    text = _rejection_line(*match.groups()) if match else _rejection_line(None, reason)
+    if file_path:
+        text += f"\n  Candidate kept: {file_path}"
     return text
 
 
@@ -311,23 +336,36 @@ def _replay_history(store: SceneStore) -> None:
                     file=sys.stderr,
                 )
                 continue
-            print(_format_history_entry(entry))
+            # F50: the replay shows what was asked, not only what came of it.
+            if entry.get("outcome") != "consult" and entry.get("prompt"):
+                print(f"> {entry['prompt']}")
+            print(_format_history_entry(entry, store.session_dir))
 
 
-def _format_turn_result(result: TurnResult) -> str:
+def _format_turn_result(
+    result: TurnResult,
+    scene_path: Optional[Path] = None,
+    candidate_path: Optional[Path] = None,
+) -> str:
     # Boundaries & Constraints: "Every run_turn() outcome prints its ordinal-or-none and
     # tag, never silently". Usability review 2026-09 (F2): a non-accepted tag's `ordinal` is
     # always `None` (nothing was ever persisted to reject), and printing that as the literal
     # word "Turn None: ..." read as a bug -- a rejection now gets its own "Rejected (<tag>):
     # ..." shape instead, never a numberless "Turn" line. `result.messages` is always
     # populated on a non-accepted tag (never empty on `accepted`, per TurnResult's own
-    # docstring), so it's safe to fold in unconditionally either way.
+    # docstring), so it's safe to fold in unconditionally either way. Usability review 2026-09
+    # (F50/F38, tester-approved layout): the accepted file, the readback and a kept rejected
+    # candidate are shown on their own indented lines.
     if result.ordinal is not None:
         text = f"Turn {result.ordinal}: {result.tag}"
+        if scene_path is not None:
+            text += f" → {scene_path}"
+        if result.messages:
+            text += " - " + "; ".join(result.messages)
     else:
-        text = f"Rejected ({result.tag})"
-    if result.messages:
-        text += " - " + "; ".join(result.messages)
+        text = _rejection_line(result.tag, "; ".join(result.messages))
+    if result.readback_summary:
+        text += f"\n  Readback: {result.readback_summary}"
     if result.removed_properties:
         # F29: a turn that dropped earlier settings must say so, not do it silently.
         text += "\n  Note: this turn removed " + ", ".join(result.removed_properties)
@@ -336,7 +374,29 @@ def _format_turn_result(result: TurnResult) -> str:
         # ask for must say so, not do it silently -- same spirit as F29 above.
         for warning in result.warnings:
             text += f"\n  Warning: {warning}"
+    if candidate_path is not None:
+        text += f"\n  Candidate kept: {candidate_path}"
     return text
+
+
+def _turn_paths(
+    store: SceneStore, result: TurnResult, prompt: str
+) -> Tuple[Optional[Path], Optional[Path]]:
+    """(accepted scene file, kept rejected candidate) for the turn just run. The candidate is
+    named only in the history entry `record_rejected()` just appended for this prompt (F32);
+    a rejection that recorded nothing must not pick up an older entry's candidate. Best
+    effort: a failed lookup only drops the path from the output, never the turn."""
+    try:
+        if result.ordinal is not None:
+            return store.current_scene_path(), None
+        lines = store.history_path.read_text(encoding="utf-8").splitlines()
+        last = json.loads(lines[-1]) if lines else {}
+        if (isinstance(last, dict) and last.get("outcome") == "rejected"
+                and last.get("prompt") == prompt and last.get("file")):
+            return None, store.session_dir / last["file"]
+    except Exception:  # noqa: BLE001 -- output detail only, must not kill the REPL
+        pass
+    return None, None
 
 
 def _format_render_outcome(outcome: RenderWindowOutcome) -> str:
@@ -435,7 +495,7 @@ def _accept_and_refresh_render(
             # than risking a sync with no window to show it.
             still_running = False
         if still_running:
-            print(f"Render window: reloaded ({scene_path.name})")
+            print("Render window: reloaded")  # the file is already on the "Turn N" line
             return render_process
 
         render_outcome = refresh_render_window(
@@ -615,8 +675,14 @@ def _execute_turn(
     except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
         print(f"Turn error: {e}")
         return None, prior_scene, render_process
+    except KeyboardInterrupt:
+        # F51: Ctrl-C during a (slow, model-bound) turn abandons the turn, not the REPL, and
+        # never prints a traceback. The scene is re-read in case the turn got as far as
+        # accepting before the interrupt.
+        print("Turn interrupted (Ctrl-C).")
+        return None, store.current_scene(), render_process
 
-    print(_format_turn_result(result))
+    print(_format_turn_result(result, *_turn_paths(store, result, prompt)))
     if result.tag == "accepted":
         prior_scene = store.current_scene()
         render_process = _accept_and_refresh_render(
@@ -783,6 +849,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # this point, so a session directory is never created only to be orphaned -- never
     # cleaned up, never reused -- by a later startup failure.
     store = _bootstrap_session(args.session_id)
+    # F50: where this session's files are, fresh or resumed. On stderr with the other status
+    # lines ("... <stage>"); stdout carries the turn results.
+    print(f"Session: {store.session_dir}", file=sys.stderr)
 
     if args.session_id is not None:
         _replay_history(store)
@@ -812,7 +881,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         while True:
             render_process = _report_render_crash(store, render_process)
             try:
-                line = input("> ")
+                # F48: a visible marker while the next line is threaded onto a pending request.
+                line = input("> " if clarification_state is None else "(continuing) > ")
             except (EOFError, KeyboardInterrupt):
                 break
 
@@ -856,7 +926,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                         "/question"
                     )
                     continue
-                consult_result = answer_consult(question, manifest, corpus, adapter, prior_scene)
+                try:
+                    consult_result = answer_consult(
+                        question, manifest, corpus, adapter, prior_scene
+                    )
+                except KeyboardInterrupt:  # F51: abandons the question, not the REPL
+                    print("Consult interrupted (Ctrl-C).")
+                    continue
                 if isinstance(consult_result, ConsultError):
                     print(f"Consult error: {consult_result.kind} - {consult_result.message}")
                     _record_consult_safely(store, question, error=consult_result.message)
@@ -884,6 +960,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
                 continue
 
+            # F48: abandon a pending clarification/threaded rejection, so the next line starts
+            # a fresh request instead of being merged into the old one.
+            if line.strip() == "/drop":
+                if clarification_state is None:
+                    print("Drop: no pending request.")
+                else:
+                    clarification_state = None
+                    print("Dropped the pending request; your next line starts a new one.")
+                continue
+
             if not line.strip():
                 continue
 
@@ -895,8 +981,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             # own analogous edge case, cli.py's "already-armed gate" comment above): there is
             # no way to tell "this line answers the pending clarification" apart from "this is
             # an unrelated fresh request typed instead" -- the former is assumed, always. A
-            # user who abandons the clarification and types something new gets it incorrectly
-            # merged with the stale pending prompt on this one turn.
+            # user who wants to abandon it types /drop first (F48); the "(continuing) >"
+            # prompt and the hint after the rejection say so.
             dispatched_prompt = (
                 _build_clarification_prompt(clarification_state, line)
                 if clarification_state is not None
@@ -922,6 +1008,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             if result is not None:
                 clarification_state = _next_clarification_state(result, dispatched_prompt)
+                if clarification_state is not None:
+                    print("  Your next line continues this request; /drop abandons it.")
             if result is not None and result.tag == "generation_timeout":
                 # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
                 # the gate from scratch. Any other tag -- including a run_turn() exception

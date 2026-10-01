@@ -14,6 +14,7 @@ occurs but the render-window call itself isn't under test, so no test shells out
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -46,6 +47,13 @@ def _scripted_input(lines: List[str]) -> Callable[..., str]:
             raise EOFError
 
     return _fake_input
+
+
+def _file_names(lines: List[str]) -> List[str]:
+    """Shortens the session-file paths the REPL prints ("Turn 1: accepted → /tmp/.../001.scala",
+    "Candidate kept: /tmp/.../rejected-001.scala") to the file name, so tests can compare
+    whole output lines without the random session directory."""
+    return [re.sub(r"(→ |kept: )\S*/", r"\1", line) for line in lines]
 
 
 def _refuse_run_turn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,11 +185,16 @@ def test_resume_replays_history_then_accepts_new_input(monkeypatch, tmp_path, ca
     exit_code = cli.main(["--session", "resume-test"])
 
     assert exit_code == 0
-    out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines[0] == "Rejected (rejected) - local_finding: bad thing"
-    assert out_lines[1] == "Turn 1: accepted"
-    assert out_lines[2] == "Consult: 'where should the light go?' -> upper-left, warm color"
-    assert out_lines[3] == "Turn 2: accepted"
+    captured = capsys.readouterr()
+    out_lines = captured.out.splitlines()
+    # F50/F38: the replay shows each prompt and a rejection's real tag, not "(rejected)".
+    assert out_lines[0] == "> first prompt"
+    assert out_lines[1] == "Rejected (local finding): bad thing"
+    assert out_lines[2] == "> second prompt"
+    assert out_lines[3] == f"Turn 1: accepted → {store.session_dir / '001.scala'}"
+    assert out_lines[4] == "Consult: 'where should the light go?' -> upper-left, warm color"
+    assert out_lines[5].startswith("Turn 2: accepted")
+    assert f"Session: {store.session_dir}" in captured.err.splitlines()
 
     # The turn issued after replay must see the resumed session's real current scene, not
     # None -- proves resume threads prior_scene through, not just replaying text.
@@ -258,8 +271,8 @@ def test_plain_text_turn_accepted_prints_ordinal_and_tag(monkeypatch, tmp_path, 
     assert exit_code == 0
     # story 21: an accepted turn also prints the render-refresh status line, right after
     # the turn result line.
-    assert capsys.readouterr().out.splitlines() == [
-        "Turn 5: accepted",
+    assert _file_names(capsys.readouterr().out.splitlines()) == [
+        "Turn 5: accepted → 001.scala",
         "Render window: refreshed",
     ]
 
@@ -294,13 +307,17 @@ def test_stage_callback_output_appears_before_final_turn_result_line(
     # Patch-level fix (post-review): stage lines are ephemeral progress output and go to
     # stderr (with an explicit flush), never stdout -- stdout stays clean for the actual
     # "Turn N: tag" result line.
-    assert captured.err.splitlines() == [
+    # F50: the session line opens the session, on stderr with the other status lines.
+    assert captured.err.splitlines()[1:] == [
         "... generating",
         "... validating",
         "... reading back",
     ]
+    assert captured.err.splitlines()[0].startswith("Session: ")
     # story 21: the render-refresh status line follows the turn result line on stdout.
-    assert captured.out.splitlines() == ["Turn 1: accepted", "Render window: refreshed"]
+    assert _file_names(captured.out.splitlines()) == [
+        "Turn 1: accepted → 001.scala", "Render window: refreshed"
+    ]
 
 
 # --- Plain-text input, turn rejected: "Turn N: <tag>" printed with the tag/reason ----------
@@ -326,7 +343,11 @@ def test_plain_text_turn_rejected_prints_tag_and_reason(monkeypatch, tmp_path, c
 
     assert exit_code == 0
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines == ["Rejected (local_finding) - allowlist: disallowed import"]
+    # F50: a threaded rejection says what the next line does and how to abandon it.
+    assert out_lines == [
+        "Rejected (local finding): allowlist: disallowed import",
+        "  Your next line continues this request; /drop abandons it.",
+    ]
 
 
 # --- /ask or /question input: real answer_consult() dispatch, run_turn() never called -----
@@ -726,7 +747,7 @@ def test_resume_with_malformed_history_line_skips_with_warning(monkeypatch, tmp_
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "Rejected (rejected) - local_finding: bad thing" in captured.out
+    assert "Rejected (local finding): bad thing" in captured.out
     assert "malformed" in captured.err.lower()
 
 
@@ -1110,8 +1131,8 @@ def test_render_refresh_exception_prints_error_and_repl_continues(
     out_lines = capsys.readouterr().out.splitlines()
     # Both turns still ran to completion (the REPL survived the first render-refresh
     # exception) -- proving one bad render refresh doesn't abort the session.
-    assert "Turn 1: accepted" in out_lines
-    assert "Turn 2: accepted" in out_lines
+    assert "Turn 1: accepted → 001.scala" in _file_names(out_lines)
+    assert "Turn 2: accepted → 002.scala" in _file_names(out_lines)
     assert any(line.startswith("Render window: error - ") for line in out_lines)
 
 
@@ -1221,7 +1242,7 @@ def test_no_hand_edit_detected_produces_no_output_and_normal_turn_proceeds(
     # No hand-edit-related output at all -- just the normal turn result and render refresh,
     # exactly as story 21 left it (no behavior change when no external edit occurred).
     assert not any("hand edit" in line.lower() for line in out_lines)
-    assert out_lines == ["Turn 1: accepted", "Render window: refreshed"]
+    assert _file_names(out_lines) == ["Turn 1: accepted → 001.scala", "Render window: refreshed"]
 
 
 def test_check_hand_edit_is_called_every_loop_iteration(monkeypatch, tmp_path):
@@ -1283,7 +1304,7 @@ def test_hand_edit_check_exception_prints_error_and_repl_continues(
     out_lines = capsys.readouterr().out.splitlines()
     assert "Hand edit check error: session directory vanished" in out_lines
     # The REPL survived the exception and still ran the real turn.
-    assert "Turn 1: accepted" in out_lines
+    assert "Turn 1: accepted → 001.scala" in _file_names(out_lines)
 
 
 # --- Patch-level fixes (post-review, story 17) ---------------------------------------------
@@ -1375,7 +1396,7 @@ def test_hand_edit_render_refresh_exception_prints_error_and_repl_continues(
     assert any(line.startswith("Render window: error - ") for line in out_lines)
     assert any("Hand edit: accepted" in line for line in out_lines)
     # The real prompt this same iteration still ran to completion afterward.
-    assert "Turn 2: accepted" in out_lines
+    assert "Turn 2: accepted → 002.scala" in _file_names(out_lines)
 
 
 def test_hand_edit_accepted_and_same_iterations_real_prompt_see_it_as_prior_scene_end_to_end(
@@ -1488,7 +1509,7 @@ def test_first_retry_after_timeout_with_unchanged_scene_arms_gate_without_resend
     assert call_log == ["timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert out_lines == [
-        "Rejected (generation_timeout) - model hung",
+        "Rejected (generation timeout): model hung",
         "Retry: nothing has changed since the last generation_timeout. Type /retry "
         "again to resend the identical prompt.",
     ]
@@ -1523,12 +1544,12 @@ def test_second_retry_with_still_unchanged_scene_resends_exactly_once(
     # The resend must reuse the exact same remembered prompt -- not the literal "/retry"
     # text -- and must happen only once (on the SECOND /retry, not the first).
     assert call_log == ["timeout prompt", "timeout prompt"]
-    out_lines = capsys.readouterr().out.splitlines()
+    out_lines = _file_names(capsys.readouterr().out.splitlines())
     assert out_lines == [
-        "Rejected (generation_timeout) - model hung",
+        "Rejected (generation timeout): model hung",
         "Retry: nothing has changed since the last generation_timeout. Type /retry "
         "again to resend the identical prompt.",
-        "Turn 1: accepted",
+        "Turn 1: accepted → 001.scala",
         "Render window: refreshed",
     ]
 
@@ -1581,7 +1602,7 @@ def test_retry_with_scene_changed_via_hand_edit_resends_immediately_no_gate(
     assert run_turn_calls == ["timeout prompt", "timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
     assert not any("nothing has changed" in line for line in out_lines)
-    assert "Turn 2: accepted" in out_lines
+    assert "Turn 2: accepted → 002.scala" in _file_names(out_lines)
 
 
 def test_retry_with_scene_changed_since_failure_resends_immediately_no_gate(
@@ -1619,12 +1640,12 @@ def test_retry_with_scene_changed_since_failure_resends_immediately_no_gate(
     # An intervening accepted turn changed the scene -- the single /retry resends the
     # ORIGINAL failed prompt right away, no confirmation-gate message in between.
     assert call_log == ["timeout prompt", "unrelated accepted prompt", "timeout prompt"]
-    out_lines = capsys.readouterr().out.splitlines()
+    out_lines = _file_names(capsys.readouterr().out.splitlines())
     assert out_lines == [
-        "Rejected (generation_timeout) - model hung",
-        "Turn 1: accepted",
+        "Rejected (generation timeout): model hung",
+        "Turn 1: accepted → 001.scala",
         "Render window: refreshed",
-        "Turn 2: accepted",
+        "Turn 2: accepted → 002.scala",
         "Render window: refreshed",
     ]
     assert not any("nothing has changed" in line for line in out_lines)
@@ -1665,9 +1686,9 @@ def test_retry_resend_that_times_out_again_resets_an_unarmed_gate(
         "again to resend the identical prompt."
     )
     assert out_lines == [
-        "Rejected (generation_timeout) - model hung again",
+        "Rejected (generation timeout): model hung again",
         arm_message,
-        "Rejected (generation_timeout) - model hung again",
+        "Rejected (generation timeout): model hung again",
         arm_message,
     ]
 
@@ -1863,10 +1884,11 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     assert "rotate the cube by 90 degrees" in merged
     assert "unspecified rotation axis (X, Y, or Z)" in merged
     assert merged.endswith("User's answer: z")
-    out_lines = capsys.readouterr().out.splitlines()
+    out_lines = _file_names(capsys.readouterr().out.splitlines())
     assert out_lines == [
-        "Rejected (needs_clarification) - unspecified rotation axis (X, Y, or Z)",
-        "Turn 1: accepted",
+        "Rejected (needs clarification): unspecified rotation axis (X, Y, or Z)",
+        "  Your next line continues this request; /drop abandons it.",
+        "Turn 1: accepted → 001.scala",
         "Render window: refreshed",
     ]
 
@@ -2160,3 +2182,156 @@ def test_crashed_render_window_is_reported_once(monkeypatch, tmp_path, capsys):
     ]
     # A crashed window is no longer tracked, so REPL exit doesn't try to close it again.
     assert window.terminated is False
+
+
+# --- Usability review 2026-09, session 2: REPL output layout (F50/F38), /drop (F48), Ctrl-C (F51)
+
+
+def _repl_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+
+def test_accepted_turn_shows_file_readback_and_warnings_on_own_lines(
+    monkeypatch, tmp_path, capsys
+):
+    _repl_env(monkeypatch, tmp_path)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(
+            tag="accepted", messages=[], ordinal=1,
+            readback_summary="A wooden cube at the origin.",
+            warnings=["camera moved"],
+        )
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["make it from wood"]))
+
+    assert cli.main([]) == 0
+    assert _file_names(capsys.readouterr().out.splitlines()) == [
+        "Turn 1: accepted → 001.scala",
+        "  Readback: A wooden cube at the origin.",
+        "  Warning: camera moved",
+        "Render window: refreshed",
+    ]
+
+
+def test_rejected_turn_names_the_kept_candidate(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        store_arg.record_rejected(prompt, "compile_errors: boom", scene_text="object Bad\n")
+        return TurnResult(tag="compile_errors", messages=["boom"])
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["add a broken thing"]))
+
+    assert cli.main([]) == 0
+    assert _file_names(capsys.readouterr().out.splitlines()) == [
+        "Rejected (compile errors): boom",
+        "  Candidate kept: rejected-001.scala",
+        "  Your next line continues this request; /drop abandons it.",
+    ]
+
+
+def test_rejection_without_a_candidate_does_not_name_an_older_one(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    calls = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        calls.append(prompt)
+        if len(calls) == 1:
+            store_arg.record_rejected(prompt, "compile_errors: boom", scene_text="object Bad\n")
+            return TurnResult(tag="compile_errors", messages=["boom"])
+        return TurnResult(tag="generation_timeout", messages=["model hung"])
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["first", "/drop", "second"]))
+
+    assert cli.main([]) == 0
+    out = _file_names(capsys.readouterr().out.splitlines())
+    assert out.count("  Candidate kept: rejected-001.scala") == 1
+    assert out[-1] == "Rejected (generation timeout): model hung"
+
+
+def test_drop_abandons_the_pending_request(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    sent = []
+    prompts = []
+    lines = iter(["rotate the cube", "/drop", "add a sphere"])
+
+    def _fake_input(prompt=""):
+        prompts.append(prompt)
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        sent.append(prompt)
+        if len(sent) == 1:
+            return TurnResult(tag="needs_clarification", messages=["which axis?"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    assert cli.main([]) == 0
+    # The line after /drop is sent alone, not merged into the abandoned request.
+    assert sent == ["rotate the cube", "add a sphere"]
+    # The prompt shows the threading while a request is pending, and not after /drop.
+    assert prompts[:3] == ["> ", "(continuing) > ", "> "]
+    assert "Dropped the pending request; your next line starts a new one." in (
+        capsys.readouterr().out.splitlines()
+    )
+
+
+def test_drop_with_nothing_pending_says_so(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    _refuse_run_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/drop"]))
+
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out.splitlines() == ["Drop: no pending request."]
+
+
+def test_ctrl_c_during_a_turn_abandons_the_turn_not_the_repl(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    sent = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        sent.append(prompt)
+        if len(sent) == 1:
+            raise KeyboardInterrupt
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["slow request", "next request"]))
+
+    assert cli.main([]) == 0
+    assert sent == ["slow request", "next request"]
+    assert _file_names(capsys.readouterr().out.splitlines()) == [
+        "Turn interrupted (Ctrl-C).",
+        "Turn 1: accepted → 001.scala",
+        "Render window: refreshed",
+    ]
+
+
+def test_ctrl_c_during_a_consult_abandons_the_question(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    _refuse_run_turn(monkeypatch)
+
+    def _interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "answer_consult", _interrupted)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/ask where is the light?"]))
+
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out.splitlines() == ["Consult interrupted (Ctrl-C)."]
