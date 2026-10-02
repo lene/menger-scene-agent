@@ -90,6 +90,7 @@ from adapters.model_factory import get_model_adapter
 from adapters.render_window import (
     close_render_window,
     crash_report,
+    frame_build_failures,
     refresh_render_window,
     sync_render_window_scene,
 )
@@ -443,6 +444,23 @@ def _report_render_crash(
         return None if render_process.poll() is not None else render_process
     except Exception:  # noqa: BLE001 -- a crash check must not kill the REPL
         return render_process
+
+
+def _report_frame_build_failures(store: SceneStore, reported: int) -> int:
+    """Prints each frame the render window failed to build since the last check (usability
+    review 2026-09, F44: menger keeps the last good frame on screen, which looked frozen) and
+    returns how many are reported now. A relaunch overwrites render.stderr.log, so a shorter
+    list than `reported` starts the count over. Must not kill the REPL."""
+    try:
+        scene_path = store.current_scene_path()
+        failures = frame_build_failures(scene_path) if scene_path is not None else []
+    except Exception:  # noqa: BLE001 -- a failure check must not kill the REPL
+        return reported
+    if len(failures) < reported:
+        reported = 0
+    for failure in failures[reported:]:
+        print(f"Render window: frame failed to build - {failure}")
+    return len(failures)
 
 
 def _accept_and_refresh_render(
@@ -893,12 +911,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # user's next plain-text line is threaded back into the original request instead of
     # being sent alone -- threaded the same way `retry_state` is.
     clarification_state: Optional[_ClarificationState] = None
+    frame_failures_reported = 0
 
     # The window must not outlive the REPL, however the loop ends -- Ctrl-D, or a Ctrl-C
     # that escapes mid-turn (usability review 2026-09, W4).
     try:
         while True:
             render_process = _report_render_crash(store, render_process)
+            frame_failures_reported = _report_frame_build_failures(store, frame_failures_reported)
             try:
                 # F48: a visible marker while the next line is threaded onto a pending request.
                 line = input("> " if clarification_state is None else "(continuing) > ")

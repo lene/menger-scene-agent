@@ -2184,6 +2184,48 @@ def test_crashed_render_window_is_reported_once(monkeypatch, tmp_path, capsys):
     assert window.terminated is False
 
 
+def test_frame_build_failures_are_reported_once_each(monkeypatch, tmp_path, capsys):
+    # Usability review 2026-09, F44 (menger#54): a frame that fails to build leaves the last
+    # good frame on screen; the REPL now says so instead of the window looking frozen.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    window = _FakeWindow()
+    logs = []
+
+    def _failing_refresh(scene_file, *args, **kwargs):
+        log = Path(scene_file).parent / "render.stderr.log"
+        log.write_text("12:00:00.000 ERROR menger.engines.WithPreview - FRAME-BUILD-FAILED t=0.5: boom\n")
+        logs.append(log)
+        return RenderWindowResult(process=window)
+
+    lines = iter(["add a sphere", "", ""])
+
+    def _input(prompt=""):
+        line = next(lines, None)
+        if line is None:
+            raise EOFError
+        if logs and line == "" and "rotation" not in logs[0].read_text():
+            with logs[0].open("a") as f:
+                f.write("12:00:01.000 ERROR x - FRAME-BUILD-FAILED rebuild after 4D rotation: bad\n")
+        return line
+
+    monkeypatch.setattr(cli, "refresh_render_window", _failing_refresh)
+    _accept_every_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _input)
+
+    assert cli.main([]) == 0
+
+    reported = [
+        line for line in capsys.readouterr().out.splitlines() if "failed to build" in line
+    ]
+    assert reported == [
+        "Render window: frame failed to build - t=0.5: boom",
+        "Render window: frame failed to build - rebuild after 4D rotation: bad",
+    ]
+
+
 # --- Usability review 2026-09, session 2: REPL output layout (F50/F38), /drop (F48), Ctrl-C (F51)
 
 

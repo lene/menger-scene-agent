@@ -195,6 +195,26 @@ def crash_report(
     return f"exit {returncode}: {detail[:_STDOUT_PREVIEW_LENGTH]}"
 
 
+_FRAME_BUILD_FAILED = "FRAME-BUILD-FAILED "
+
+
+def frame_build_failures(scene_file: Union[str, Path]) -> List[str]:
+    """The frames the running window failed to build, oldest first: menger prints one
+    `FRAME-BUILD-FAILED <context>: <cause>` line on stderr per failure and keeps the last good
+    frame on screen (menger#54), so without this a failure looked like a frozen window
+    (usability review 2026-09, F44). Each entry is the text after the marker; the marker sits
+    behind the logback prefix ("12:00:00.000 ERROR menger... - "), not at the line start."""
+    try:
+        text = log_paths(scene_file)[1].read_text(errors="replace")
+    except OSError:
+        return []
+    return [
+        line.split(_FRAME_BUILD_FAILED, 1)[1].strip()[:_STDOUT_PREVIEW_LENGTH]
+        for line in text.splitlines()
+        if _FRAME_BUILD_FAILED in line
+    ]
+
+
 def _terminate(process: subprocess.Popen[str], grace_period: float) -> None:
     """Terminates a caller-supplied `previous_process`, escalating to `kill()` if it doesn't
     exit promptly -- never left as an orphaned/zombie process (Boundaries & Constraints:

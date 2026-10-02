@@ -19,6 +19,7 @@ import pytest
 from adapters.render_window import (
     close_render_window,
     crash_report,
+    frame_build_failures,
     log_paths,
     refresh_render_window,
     render_window_scene_path,
@@ -487,6 +488,30 @@ def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_pat
     report = crash_report(FakePopen(returncode=-11), tmp_path / "001.scala")
 
     assert report == "exit -11: no output in render.stderr.log"
+
+
+# --- frame_build_failures (usability review 2026-09, F44: menger#54's stderr marker) ----------
+
+
+def test_frame_build_failures_lists_the_marker_lines_without_the_marker(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "12:00:01.250 ERROR menger.engines.WithPreview - FRAME-BUILD-FAILED t=0.25: "
+        "at least 27648 instances needed\n"
+        "\tat Main$.main(Main.scala:56)\n"
+        "12:00:02.000 ERROR menger.engines.InteractiveEngine - FRAME-BUILD-FAILED "
+        "rebuild after 4D rotation: boom\n"
+    )
+
+    assert frame_build_failures(scene_file) == [
+        "t=0.25: at least 27648 instances needed",
+        "rebuild after 4D rotation: boom",
+    ]
+
+
+def test_frame_build_failures_without_a_stderr_log_is_empty(tmp_path):
+    assert frame_build_failures(tmp_path / "001.scala") == []
 
 
 # --- F5 (usability review 2026-09): the stable path menger's window live-reloads from -------
