@@ -295,3 +295,40 @@ def test_manifest_warn_levels_reads_field_warn_at():
         {"name": "level", "warnAt": 3.0}, {"name": "size"}
     ]}]}
     assert manifest_warn_levels(manifest) == {("Sponge", "level"): 3.0}
+
+
+# --- usability review 2026-09, session 2: F8 recurrence + F39 (msa#7) -----------------------
+
+
+def test_facts_diff_matches_objects_within_their_type_when_another_type_is_added():
+    # Comparing by overall index paired the moved Sponge with the new Sphere and skipped it.
+    before = extract_scene_facts("Sponge(pos = Vec3(0f, 0f, 0f))")
+    after = extract_scene_facts("Sphere(pos = Vec3(0f, 3f, 0f))\nSponge(pos = Vec3(1f, 1f, 1f))")
+
+    assert any("moved the Sponge" in w for w in facts_diff(before, after))
+
+
+def test_facts_diff_reports_a_change_of_a_non_literal_pos():
+    # Session 2, task 3.5: the sponge moved via `SpongeSize / 2`-style expressions, unreported.
+    before = extract_scene_facts("Sponge(pos = Vec3(0f, 0f, 0f))")
+    after = extract_scene_facts("Sponge(pos = Vec3(s / 2, s / 2, s / 2))")
+
+    warnings = facts_diff(before, after)
+
+    assert any("moved the Sponge" in w and "s / 2" in w for w in warnings)
+
+
+def test_facts_diff_reports_a_changed_4d_projection():
+    before = extract_scene_facts("Tesseract(size = 1f)")
+    after = extract_scene_facts("Tesseract(size = 1f, projection = Some(Projection4DSpec(rotXW = 30f)))")
+
+    assert any("4D projection" in w for w in facts_diff(before, after))
+
+
+def test_facts_diff_does_not_report_what_the_request_asked_for():
+    # F39: "also changed the Sponge's material from Gold to metal" after "make it aluminium".
+    before = extract_scene_facts("Sponge(material = Some(Material.Gold))")
+    after = extract_scene_facts("Sponge(material = Some(Material.Chrome))")
+
+    assert facts_diff(before, after, prompt="make it aluminium") == []
+    assert facts_diff(before, after, prompt="make it bigger") != []

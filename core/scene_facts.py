@@ -133,6 +133,10 @@ class ObjectFact:
     # Highest `level` the object reaches: a literal, or an animated expression evaluated at
     # t = 0 and t = duration (F36). `None` when absent or not evaluable.
     level: Optional[float] = None
+    # Raw argument text, whitespace-normalized, for changes a literal parse can't see: a `pos`
+    # built from expressions (F8 recurrence) and the 4D `projection` (F45).
+    pos_text: Optional[str] = None
+    projection_text: Optional[str] = None
 
     @property
     def is_opaque(self) -> bool:
@@ -286,9 +290,11 @@ def _extract_objects(text: str) -> list[ObjectFact]:
                 opacity = alpha if alpha is not None else 1.0
             rotation = parse_vec3(args["rotation"]) if "rotation" in args else None
             level = _level_upper_bound(args["level"], local_vals) if "level" in args else None
-            objects.append(
-                ObjectFact(type_name, offset, pos, size, color, rotation, material, opacity, level)
-            )
+            objects.append(ObjectFact(
+                type_name, offset, pos, size, color, rotation, material, opacity, level,
+                pos_text=_normalized(args.get("pos")),
+                projection_text=_normalized(args.get("projection")),
+            ))
     return objects
 
 
@@ -332,26 +338,66 @@ def _extract_background(text: str) -> Optional[Vec3]:
     return parse_color_rgb(text[open_idx + 1 : close_idx])
 
 
-def facts_diff(before: SceneFacts, after: SceneFacts) -> list[str]:
-    """Coarse before/after diff (F8): flags a moved object/camera or a changed material that
-    a revise() request may not have asked for. Objects are matched positionally -- same index,
-    same `type_name`, in the two facts' `objects` lists -- since the DSL source carries no
-    stable per-object identity to match by; a reordered or added/removed object among same-type
-    siblings is simply not compared, same "coarse by design, good enough to tell the user
-    something changed" spirit as `core.turn.removed_properties` (F29)."""
+def _normalized(text: Optional[str]) -> Optional[str]:
+    return " ".join(text.split()) if text is not None else None
+
+
+# Words that show the request asked for a kind of change, so facts_diff doesn't report it back
+# as a side effect (F39). Coarse on purpose: a false silence costs less than a warning that
+# tells the user their own request was an unrequested change.
+_ASKED_FOR = {
+    "pos": ("move", "position", "place", "put", "shift", "above", "below", "left", "right",
+            "next to", "beside", "closer", "further", "higher", "lower", "centre", "center"),
+    "material": ("material", "made of", "made from", "glass", "gold", "chrome", "copper",
+                 "metal", "aluminium", "aluminum", "silver", "steel", "wood", "stone", "marble",
+                 "plastic", "matte", "diamond", "water", "film", "transparent", "opaque"),
+    "camera": ("camera", "view", "zoom", "frame", "angle", "closer", "further"),
+    "projection": ("rotate", "rotation", "turn", "spin", "tilt", "4d", "projection"),
+}
+
+
+def _asked_for(kind: str, prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(word in lowered for word in _ASKED_FOR[kind])
+
+
+def facts_diff(before: SceneFacts, after: SceneFacts, prompt: str = "") -> list[str]:
+    """Coarse before/after diff (F8): flags a moved object/camera, a changed material or 4D
+    projection that a revise() request didn't ask for (`prompt`; F39: a change the request
+    names is not reported back). Objects are matched by occurrence within their type -- the
+    DSL source carries no stable per-object identity -- so an object added or removed of
+    another type doesn't shift the comparison (F8 recurrence); same "coarse by design, good
+    enough to tell the user something changed" spirit as `core.turn.removed_properties`
+    (F29)."""
     warnings: list[str] = []
-    if before.camera is not None and after.camera is not None and before.camera != after.camera:
+    if (before.camera is not None and after.camera is not None and before.camera != after.camera
+            and not _asked_for("camera", prompt)):
         warnings.append(f"also moved the camera from {before.camera[0]} to {after.camera[0]}")
-    for b, a in zip(before.objects, after.objects):
-        if b.type_name != a.type_name:
-            continue
-        if b.pos is not None and a.pos is not None and b.pos != a.pos:
-            warnings.append(f"also moved the {a.type_name} from {b.pos} to {a.pos}")
-        if b.material != a.material:
-            warnings.append(
-                f"also changed the {a.type_name}'s material from "
-                f"{b.material or 'none'} to {a.material or 'none'}"
-            )
+    for type_name in OBJECT_TYPES:
+        pairs = zip(
+            (o for o in before.objects if o.type_name == type_name),
+            (o for o in after.objects if o.type_name == type_name),
+        )
+        for b, a in pairs:
+            if not _asked_for("pos", prompt):
+                if b.pos is not None and a.pos is not None:
+                    if b.pos != a.pos:
+                        warnings.append(f"also moved the {type_name} from {b.pos} to {a.pos}")
+                elif b.pos_text != a.pos_text:
+                    warnings.append(
+                        f"also moved the {type_name} from {b.pos_text or 'the origin'} to "
+                        f"{a.pos_text or 'the origin'}"
+                    )
+            if b.material != a.material and not _asked_for("material", prompt):
+                warnings.append(
+                    f"also changed the {type_name}'s material from "
+                    f"{b.material or 'none'} to {a.material or 'none'}"
+                )
+            if b.projection_text != a.projection_text and not _asked_for("projection", prompt):
+                warnings.append(
+                    f"also changed the {type_name}'s 4D projection to "
+                    f"{a.projection_text or 'the default'}"
+                )
     return warnings
 
 

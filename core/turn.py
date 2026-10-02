@@ -264,7 +264,9 @@ def run_turn(
 
         new_facts = extract_scene_facts(strip_comments_and_strings(scene_text))
         turn_warnings = (
-            facts_diff(extract_scene_facts(strip_comments_and_strings(prior_scene)), new_facts)
+            facts_diff(
+                extract_scene_facts(strip_comments_and_strings(prior_scene)), new_facts, prompt
+            )
             if prior_scene is not None
             else []
         )
