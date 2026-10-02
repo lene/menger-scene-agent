@@ -59,6 +59,40 @@ _SYSTEM_PROMPT = (
 )
 
 
+_MAX_OBJECTS_FOR_PLACEMENTS = 6
+_AXES = ("x", "y", "z")
+
+
+def _relative_placements(facts: SceneFacts) -> list[str]:
+    """Where each object sits relative to the ones before it in the source, along the dominant
+    axis of their offset, +y being up (F45: "a 24-cell above the sponge" was placed along +x
+    and read back as "above"; positions alone didn't stop that). Skipped for larger scenes,
+    where the pairs would drown the other facts."""
+    objects = sorted((o for o in facts.objects if o.pos is not None), key=lambda o: o.offset)
+    if len(objects) > _MAX_OBJECTS_FOR_PLACEMENTS:
+        return []
+    lines = []
+    for i, later in enumerate(objects):
+        for earlier in objects[:i]:
+            delta = [a - b for a, b in zip(later.pos, earlier.pos)]
+            axis = max(range(3), key=lambda k: abs(delta[k]))
+            d = delta[axis]
+            if abs(d) < 1e-6:
+                continue
+            if axis == 1:
+                relation = "above" if d > 0 else "below"
+            elif axis == 0:
+                relation = "beside"
+            else:
+                relation = "in front of" if d > 0 else "behind"
+            note = "" if axis == 1 else ", not above it"
+            lines.append(
+                f"- the {later.type_name} is {relation} the {earlier.type_name} "
+                f"({d:+.1f} along {_AXES[axis]}){note}"
+            )
+    return lines
+
+
 def _format_facts(facts: SceneFacts) -> str:
     """Ground-truth facts as short bullet lines for the prompt -- not prose (that's the
     model's job), just the values it must not contradict."""
@@ -73,8 +107,13 @@ def _format_facts(facts: SceneFacts) -> str:
             parts.append(f"material={obj.material}")
         if obj.color is not None:
             parts.append(f"color={obj.color}")
+        if obj.rotation is not None:
+            parts.append(f"rotation={obj.rotation}")
+        if obj.projection_text is not None:
+            parts.append(f"4D projection={obj.projection_text}")
         parts.append("opaque" if obj.is_opaque else "transparent")
         lines.append("- " + ", ".join(parts))
+    lines += _relative_placements(facts)
     for light in facts.lights:
         if light.type_name == "Directional":
             phrase = light.direction_phrase

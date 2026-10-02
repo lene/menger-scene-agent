@@ -40,6 +40,12 @@ OBJECT_TYPES = (
     "ParametricSurface",
     "Curve",
     "LSystem",
+    # The regular 4D polytopes (menger F17); missing here, session 2's 24-cell had no facts.
+    "Pentachoron",
+    "Hexadecachoron",
+    "Icositetrachoron",
+    "Hexacosichoron",
+    "Hecatonicosachoron",
 )
 POSITIONED_LIGHT_TYPES = ("Point", "AreaLight")
 DEFAULT_POS: Vec3 = (0.0, 0.0, 0.0)

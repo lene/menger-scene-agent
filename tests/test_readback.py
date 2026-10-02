@@ -178,3 +178,42 @@ def test_model_invalid_output_error_maps_to_typed_readback_error():
     assert isinstance(result, ReadbackError)
     assert result.kind == "invalid_model_output"
     assert result.message == "model refused"
+
+
+# --- Usability review 2026-09, session 2 (F45, msa#2) -------------------------------------
+
+
+def test_semantic_readback_facts_state_where_objects_are_relative_to_each_other():
+    # Session 2, task 4.5: "a 24-cell above the sponge" was placed along +x and the readback
+    # still said "above" -- the facts had positions, but nothing relating them.
+    scene_text = (
+        "object Beside:\n"
+        "  val scene = Scene(objects = List(\n"
+        "    TesseractSponge(pos = Vec3(0f, 0f, 0f)),\n"
+        "    Icositetrachoron(pos = Vec3(2.5f, 0f, 0f), projection = Some(Projection4DSpec(rotXW = 30f)))\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(scene_text, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "Icositetrachoron is beside the TesseractSponge (+2.5 along x), not above it" in user_prompt
+    assert "4D projection=Some(Projection4DSpec(rotXW = 30f))" in user_prompt
+
+
+def test_semantic_readback_facts_call_a_plus_y_offset_above():
+    scene_text = (
+        "object Above:\n"
+        "  val scene = Scene(objects = List(\n"
+        "    Sponge(pos = Vec3(0f, 0f, 0f)),\n"
+        "    Sphere(pos = Vec3(0f, 2f, 0f), rotation = Vec3(0f, 0.5f, 0f))\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(scene_text, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "Sphere is above the Sponge (+2.0 along y)" in user_prompt
+    assert "rotation=(0.0, 0.5, 0.0)" in user_prompt
