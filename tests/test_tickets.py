@@ -216,3 +216,14 @@ def test_capability_with_embedded_slash_never_escapes_drafts_dir(tmp_path):
     path = Path(result)
     assert path.parent == drafts_dir
     assert list(tmp_path.iterdir()) == [drafts_dir]
+
+
+def test_draft_names_the_nearest_possible_alternative_when_given(tmp_path):
+    # Usability review 2026-09, session 2 (F49, msa#17): the decline's "nearest" belongs in
+    # the ticket, so whoever files it sees what the user was offered instead.
+    path = write_draft("glow around objects", "give it a glowing halo", tmp_path,
+                       nearest="an emissive surface")
+
+    text = Path(path).read_text(encoding="utf-8")
+    assert "## Nearest possible today" in text
+    assert "an emissive surface" in text

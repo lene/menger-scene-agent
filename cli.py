@@ -94,6 +94,7 @@ from adapters.render_window import (
     sync_render_window_scene,
 )
 from adapters.scene_store import SceneStore, SceneStoreError
+from adapters.tickets import write_draft
 from core.consult import answer_consult
 from core.generation import validate_artifacts
 from core.turn import check_hand_edit, run_turn
@@ -632,6 +633,22 @@ def _next_clarification_state(
     return None
 
 
+def _write_ticket_draft(store: SceneStore, result: TurnResult, prompt: str) -> None:
+    """F49 (msa#17): an "unsupported" decline leaves a ticket draft in the session's
+    `tickets/` directory, for the filing script outside the agent (AD-1: the agent never files
+    anything itself). A failure to write it never disturbs the REPL."""
+    message = result.messages[0] if result.messages else ""
+    missing, _, nearest = message.partition(" -- nearest: ")
+    drafts_dir = store.session_dir / "tickets"
+    try:
+        drafts_dir.mkdir(exist_ok=True)
+    except OSError:
+        return
+    draft = write_draft(missing or prompt, prompt, drafts_dir, nearest=nearest)
+    if isinstance(draft, str):
+        print(f"  Ticket draft: {draft}")
+
+
 def _execute_turn(
     prompt: str,
     prior_scene: Optional[str],
@@ -683,6 +700,8 @@ def _execute_turn(
         return None, store.current_scene(), render_process
 
     print(_format_turn_result(result, *_turn_paths(store, result, prompt)))
+    if result.tag == "unsupported":
+        _write_ticket_draft(store, result, prompt)
     if result.tag == "accepted":
         prior_scene = store.current_scene()
         render_process = _accept_and_refresh_render(

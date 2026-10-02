@@ -2335,3 +2335,34 @@ def test_ctrl_c_during_a_consult_abandons_the_question(monkeypatch, tmp_path, ca
 
     assert cli.main([]) == 0
     assert capsys.readouterr().out.splitlines() == ["Consult interrupted (Ctrl-C)."]
+
+
+def test_unsupported_rejection_writes_a_ticket_draft_and_says_where(
+    monkeypatch, tmp_path, capsys
+):
+    # Usability review 2026-09, session 2 (F49, msa#17): adapters/tickets.py existed but was
+    # never used; an "unsupported" decline now leaves a draft for the separate filing script.
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        return TurnResult(
+            tag="unsupported",
+            messages=["no glow or halo exists -- nearest: an emissive surface"],
+        )
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["give it a glowing halo"]))
+
+    assert cli.main([]) == 0
+
+    draft_lines = [l for l in capsys.readouterr().out.splitlines() if "Ticket draft:" in l]
+    assert len(draft_lines) == 1
+    draft = draft_lines[0].split("Ticket draft: ", 1)[1]
+    text = open(draft, encoding="utf-8").read()
+    assert "no glow or halo exists" in text
+    assert "an emissive surface" in text
+    assert "give it a glowing halo" in text

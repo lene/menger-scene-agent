@@ -72,14 +72,17 @@ def _draft_filename(missing_capability: str) -> str:
     return f"{stem}-{digest}.md"
 
 
-def _draft_text(missing_capability: str, prompt: str) -> str:
+def _draft_text(missing_capability: str, prompt: str, nearest: str = "") -> str:
     timestamp = datetime.now(timezone.utc).isoformat()
-    return (
+    text = (
         f"# Missing capability: {missing_capability}\n\n"
         f"**Requested:** {timestamp}\n\n"
         "## Triggering prompt\n\n"
         f"{prompt}\n"
     )
+    if nearest.strip():
+        text += f"\n## Nearest possible today\n\n{nearest.strip()}\n"
+    return text
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -94,6 +97,7 @@ def write_draft(
     missing_capability: str,
     prompt: str,
     drafts_dir: Union[str, Path],
+    nearest: str = "",
 ) -> TicketResult:
     """Writes a ticket draft naming `missing_capability` and the `prompt` that surfaced it,
     under `drafts_dir` (always an injected parameter -- AD-10). Returns the written file's
@@ -125,7 +129,7 @@ def write_draft(
     tmp_name = None
     try:
         target = resolved_dir / _draft_filename(missing_capability)
-        text = _draft_text(missing_capability, prompt)
+        text = _draft_text(missing_capability, prompt, nearest)
 
         fd, tmp_name = tempfile.mkstemp(
             dir=resolved_dir, prefix=f".{target.name}.", suffix=".tmp"
