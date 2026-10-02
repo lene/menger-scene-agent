@@ -104,7 +104,8 @@ def test_local_finding_short_circuits_before_any_renderer_call(tmp_path, monkeyp
     store = _make_store(tmp_path)
 
     result = run_turn(
-        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=0,
     )
 
     assert isinstance(result, TurnResult)
@@ -307,7 +308,10 @@ def test_renderer_rejection_keeps_the_candidate(tmp_path, monkeypatch, wire_tag)
         lambda *a, **kw: ValidationResult(tag=wire_tag, messages=["no"], findings=[]),
     )
 
-    run_turn("make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH)
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=0,
+    )
 
     assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
     assert _rejected_file(store) == CLEAN_SCENE_TEXT
@@ -321,7 +325,7 @@ def test_local_finding_keeps_the_candidate(tmp_path, monkeypatch):
 
     run_turn(
         "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
-        FakeModelAdapter(result=SCENE_TEXT_WITH_TODO), store, _SCRIPT_PATH,
+        FakeModelAdapter(result=SCENE_TEXT_WITH_TODO), store, _SCRIPT_PATH, repair_rounds=0,
     )
 
     assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
@@ -839,6 +843,7 @@ def test_on_stage_never_fires_reading_back_on_local_finding(tmp_path, monkeypatc
         store,
         _SCRIPT_PATH,
         on_stage=stages.append,
+        repair_rounds=0,
     )
 
     assert result.tag == "local_finding"
@@ -864,6 +869,7 @@ def test_on_stage_never_fires_reading_back_on_renderer_rejection(tmp_path, monke
         store,
         _SCRIPT_PATH,
         on_stage=stages.append,
+        repair_rounds=0,
     )
 
     assert result.tag == "compile_errors"
@@ -1334,3 +1340,96 @@ def test_accepted_turn_warns_about_glass_on_a_level_2_tesseract_sponge(tmp_path,
 
     assert result.tag == "accepted"
     assert any("chaotic" in w for w in result.warnings)
+
+
+# --- Usability review 2026-09, session 2 (F47, msa#16): bounded, visible self-repair -----
+# PRD FR-7 amendment 2026-10-02: at most 2 repair rounds on a compile/lint failure.
+
+
+@dataclass
+class _SequenceAdapter:
+    """Returns its scripted results in order (the last one repeats)."""
+
+    results: List[ModelResult]
+    requests: List[ModelRequest] = None  # type: ignore[assignment]
+
+    def complete(self, request: ModelRequest) -> ModelResult:
+        if self.requests is None:
+            self.requests = []
+        self.requests.append(request)
+        return self.results[min(len(self.requests) - 1, len(self.results) - 1)]
+
+
+def _validator_sequence(monkeypatch, tags: List[str]) -> None:
+    calls = []
+
+    def fake(*a, **kw):
+        calls.append(1)
+        tag = tags[min(len(calls) - 1, len(tags) - 1)]
+        return ValidationResult(tag=tag, messages=[] if tag == "ok" else ["missing ')'"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake)
+    monkeypatch.setattr(turn_module, "semantic_readback", lambda *a, **kw: "a simple scene")
+
+
+def test_a_compile_error_is_repaired_with_the_error_fed_back(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+    stages: List[str] = []
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        on_stage=stages.append, repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+    assert "missing ')'" in adapter.requests[1].user_prompt
+    assert "repairing (compile errors)" in stages
+    assert (store.session_dir / "rejected-001.scala").exists()
+
+
+def test_repair_stops_after_the_bound_and_keeps_every_candidate(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "compile_errors"
+    assert len(adapter.requests) == 3
+    assert [p.name for p in sorted(store.session_dir.glob("rejected-*.scala"))] == [
+        "rejected-001.scala", "rejected-002.scala", "rejected-003.scala",
+    ]
+
+
+def test_a_local_finding_is_repaired_too(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["ok"])
+    adapter = _SequenceAdapter([SCENE_TEXT_WITH_TODO, CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+
+
+def test_a_refusal_is_never_repaired(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["refused"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "refused"
+    assert len(adapter.requests) == 1

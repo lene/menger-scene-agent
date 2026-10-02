@@ -53,6 +53,19 @@ from gauntlet.types import Finding
 # artifact `store.accept()` produces.
 _STAGING_FILENAME = ".candidate.scala"
 
+# F47: bounded self-repair of the agent's own compile/lint failures (PRD FR-7 amendment,
+# decided by user 2026-10-02: "Approve, max 2 rounds").
+MAX_REPAIR_ROUNDS = 2
+
+# Rejections of the agent's own candidate that a revision with the failure fed back can fix
+# (F47), and the stage shown while it tries. A refusal, a validator crash or a readback
+# failure is never repaired automatically (PRD FR-7 amendment 2026-10-02).
+_REPAIRABLE_TAGS: dict[str, StageName] = {
+    "local_finding": "repairing (local finding)",
+    "compile_errors": "repairing (compile errors)",
+    "lint_findings": "repairing (lint findings)",
+}
+
 # The four gauntlet stages (Code Map), run in a fixed order -- aggregated together (rather
 # than short-circuiting on the first stage that finds something) so a rejected turn's
 # `TurnResult.messages`/`findings` report everything wrong with the candidate at once.
@@ -134,6 +147,7 @@ def run_turn(
     timeout: Optional[float] = None,
     *,
     on_stage: Optional[Callable[[StageName], None]] = None,
+    repair_rounds: int = MAX_REPAIR_ROUNDS,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -210,57 +224,71 @@ def run_turn(
 
     scene_text = generation_result
 
-    _emit("validating")
-    local_findings = _run_local_checks(scene_text)
-    if local_findings:
-        # Always: "a renderer request is never made when a local finding exists" -- no
-        # staging file is written on this path at all.
-        messages = _record_rejected_safely(
-            store,
-            prompt,
-            _local_finding_reason(local_findings),
-            [finding.message for finding in local_findings],
-            scene_text,
-        )
-        return TurnResult(tag="local_finding", messages=messages, findings=local_findings)
-
     staging_path = store.session_dir / _STAGING_FILENAME
     try:
-        try:
-            # Moved inside the try (review round, patch-level fix): a write failure here
-            # (disk full, permission error) is exactly as real a failure mode as any other
-            # storage failure this function guards against, and must become a typed
-            # `TurnResult` rather than an unhandled `OSError` escaping to the caller.
-            staging_path.write_text(scene_text, encoding="utf-8")
-        except OSError as e:
-            reason = f"storage_failed: could not write staging file: {e}"
-            messages = _record_rejected_safely(store, prompt, reason, [reason])
-            return TurnResult(tag="storage_failed", messages=messages)
+        # F47 (PRD FR-7 amendment 2026-10-02): a compile/lint failure of the agent's own
+        # candidate gets up to `repair_rounds` revisions with the failure fed back; each round
+        # is a visible stage and each failed candidate is kept by `_record_rejected_safely`.
+        rounds_done = 0
+        while True:
+            _emit("validating")
+            local_findings = _run_local_checks(scene_text)
+            if local_findings:
+                # Always: "a renderer request is never made when a local finding exists" --
+                # no staging file is written on this path at all.
+                feedback = [finding.message for finding in local_findings]
+                messages = _record_rejected_safely(
+                    store, prompt, _local_finding_reason(local_findings), feedback, scene_text
+                )
+                rejection = TurnResult(
+                    tag="local_finding", messages=messages, findings=local_findings
+                )
+            else:
+                try:
+                    # Moved inside the try (review round, patch-level fix): a write failure
+                    # here (disk full, permission error) is exactly as real a failure mode as
+                    # any other storage failure this function guards against, and must become
+                    # a typed `TurnResult` rather than an unhandled `OSError` escaping.
+                    staging_path.write_text(scene_text, encoding="utf-8")
+                except OSError as e:
+                    reason = f"storage_failed: could not write staging file: {e}"
+                    messages = _record_rejected_safely(store, prompt, reason, [reason])
+                    return TurnResult(tag="storage_failed", messages=messages)
 
-        outcome = validate_scene(staging_path, script_path, image=image, timeout=timeout)
+                outcome = validate_scene(staging_path, script_path, image=image, timeout=timeout)
 
-        if isinstance(outcome, ValidationError):
-            messages = _record_rejected_safely(
-                store, prompt, f"{outcome.kind}: {outcome.message}", [outcome.message], scene_text
+                if isinstance(outcome, ValidationError):
+                    messages = _record_rejected_safely(
+                        store, prompt, f"{outcome.kind}: {outcome.message}", [outcome.message],
+                        scene_text,
+                    )
+                    return TurnResult(tag=outcome.kind, messages=messages)
+
+                if outcome.tag == "ok":
+                    break
+                # `_validation_messages(outcome)` can itself be empty (a bare non-"ok" tag
+                # with neither `messages` nor `findings` populated, e.g. a bare "refused") --
+                # fall back to the tag itself so `TurnResult.messages` is never empty on a
+                # non-accepted tag (review round, patch-level fix; mirrors the fallback used
+                # for the `record_rejected()` reason string on this same branch).
+                feedback = _validation_messages(outcome) or [outcome.tag]
+                messages = _record_rejected_safely(
+                    store, prompt, "; ".join(feedback) or outcome.tag, feedback, scene_text
+                )
+                rejection = TurnResult(tag=outcome.tag, messages=messages)
+
+            if rejection.tag not in _REPAIRABLE_TAGS or rounds_done >= repair_rounds:
+                return rejection
+            _emit(_REPAIRABLE_TAGS[rejection.tag])
+            repaired = revise(
+                f"{prompt}\n\nThe scene below is your previous attempt at this request; it was "
+                f"rejected with: {'; '.join(feedback)}. Fix exactly that and change nothing else.",
+                scene_text, manifest, corpus, adapter,
             )
-            return TurnResult(tag=outcome.kind, messages=messages)
-
-        if outcome.tag != "ok":
-            # `_validation_messages(outcome)` can itself be empty (a bare non-"ok" tag with
-            # neither `messages` nor `findings` populated, e.g. a bare "refused") -- fall
-            # back to the tag itself so `TurnResult.messages` is never empty on a
-            # non-accepted tag, matching this module's own documented contract (review
-            # round, patch-level fix; mirrors the fallback already used for the
-            # `record_rejected()` reason string on this same branch).
-            validation_messages = _validation_messages(outcome) or [outcome.tag]
-            messages = _record_rejected_safely(
-                store,
-                prompt,
-                "; ".join(validation_messages) or outcome.tag,
-                validation_messages,
-                scene_text,
-            )
-            return TurnResult(tag=outcome.tag, messages=messages)
+            if isinstance(repaired, GenerationError):
+                return rejection
+            scene_text = repaired
+            rounds_done += 1
 
         new_facts = extract_scene_facts(strip_comments_and_strings(scene_text))
         turn_warnings = (
