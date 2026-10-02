@@ -397,3 +397,25 @@ def test_revise_prompt_asks_before_changing_what_the_request_does_not_name():
     assert "would also change something the request does not name" in (
         adapter.last_request.user_prompt
     )
+
+
+# --- usability review 2026-09, session 2 (F37/F40, msa#14) -------------------------------
+
+
+def test_rules_defer_the_procedural_presets_to_the_manifest():
+    # The preset list now lives in the manifest's proceduralType description (schema 1.3.0);
+    # a second hand-kept copy in the rules can only drift.
+    from core.generation import _RULES
+
+    assert "1 value_noise, 2 fbm, 3 worley" not in _RULES
+    assert "`proceduralType` description in the manifest" in _RULES
+
+
+def test_revise_prompt_drops_a_pattern_that_imitated_the_replaced_material():
+    # F40: "make it aluminium" kept the wood grain, because the prompt said never to remove a
+    # procedural texture.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    revise("make it aluminium", "prior scene text", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "replaces the look the old one imitated" in adapter.last_request.user_prompt

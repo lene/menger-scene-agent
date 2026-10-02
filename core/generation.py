@@ -189,6 +189,10 @@ def revise(
         "one, keep it and find another way, or respond with NEEDS_CLARIFICATION explaining "
         "the conflict. The same holds when satisfying the request would also change something "
         "the request does not name (moving or resizing an object, changing its rotation or "
-        "material): ask with NEEDS_CLARIFICATION instead of doing it silently."
+        "material): ask with NEEDS_CLARIFICATION instead of doing it silently. One exception: "
+        "a new material replaces the look the old one imitated -- when the request swaps an "
+        "object's material (\"make it aluminium\" on a wood-grained object), drop a "
+        "`proceduralType` that only imitated the old material (wood grain, marble veins) "
+        "unless the request keeps it."
     )
     return _complete(system_prompt, user_prompt, adapter)
