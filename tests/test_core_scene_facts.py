@@ -237,3 +237,61 @@ def test_garbage_input_never_raises():
     assert facts.objects == []
     assert facts.lights == []
     assert facts.camera is None
+
+
+# --- usability review 2026-09, session 2: F36 (msa#15), #4c/F55 (msa#13) -------------------
+
+from core.scene_facts import caveat_warnings, manifest_warn_levels  # noqa: E402
+
+_WARN_LEVELS = {("TesseractSponge", "level"): 2.0, ("Sponge", "level"): 3.0}
+
+_ANIMATED_SPONGE = """
+object S:
+  val duration = 10f
+  def scene(t: Float): Scene =
+    val progress = math.max(0f, math.min(t / duration, 1f))
+    val level = 1f + progress * 2f
+    Scene(objects = List(TesseractSponge(spongeType = VolumeRemoving, level = level,
+      material = Some(Material.%s))))
+"""
+
+
+def test_object_level_is_the_upper_bound_of_an_animated_level_expression():
+    facts = extract_scene_facts(_ANIMATED_SPONGE % "Gold")
+    assert facts.objects[0].level == 3.0
+
+
+def test_object_level_of_a_literal_and_of_t_over_duration():
+    literal = extract_scene_facts("Sponge(level = 2.5f)")
+    direct = extract_scene_facts(
+        "val duration = 4f\ndef scene(t: Float) = Sponge(level = 2f * t / duration)"
+    )
+    assert literal.objects[0].level == 2.5
+    assert direct.objects[0].level == 2.0
+
+
+def test_object_level_is_none_for_an_expression_it_cannot_evaluate():
+    facts = extract_scene_facts("Sponge(level = someHelper(t))")
+    assert facts.objects[0].level is None
+
+
+def test_caveat_warns_when_an_animated_level_passes_the_manifest_warn_level():
+    warnings = caveat_warnings(extract_scene_facts(_ANIMATED_SPONGE % "Gold"), _WARN_LEVELS)
+    assert any("level 3" in w and "slow" in w for w in warnings)
+
+
+def test_caveat_warns_about_glass_on_a_tesseract_sponge_from_level_2():
+    warnings = caveat_warnings(extract_scene_facts(_ANIMATED_SPONGE % "Glass"), _WARN_LEVELS)
+    assert any("Glass" in w and "chaotic" in w for w in warnings)
+
+
+def test_caveat_is_silent_below_the_warn_level_and_for_glass_at_level_1():
+    facts = extract_scene_facts("TesseractSponge(level = 1f, material = Some(Material.Glass))")
+    assert caveat_warnings(facts, _WARN_LEVELS) == []
+
+
+def test_manifest_warn_levels_reads_field_warn_at():
+    manifest = {"objects": [{"name": "Sponge", "fields": [
+        {"name": "level", "warnAt": 3.0}, {"name": "size"}
+    ]}]}
+    assert manifest_warn_levels(manifest) == {("Sponge", "level"): 3.0}

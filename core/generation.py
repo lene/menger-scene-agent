@@ -187,6 +187,8 @@ def revise(
         "property the request does not ask to remove (a procedural texture, rotation, edges, "
         "projection, colour, an object): if satisfying the request seems to require removing "
         "one, keep it and find another way, or respond with NEEDS_CLARIFICATION explaining "
-        "the conflict."
+        "the conflict. The same holds when satisfying the request would also change something "
+        "the request does not name (moving or resizing an object, changing its rotation or "
+        "material): ask with NEEDS_CLARIFICATION instead of doing it silently."
     )
     return _complete(system_prompt, user_prompt, adapter)

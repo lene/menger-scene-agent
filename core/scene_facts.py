@@ -20,6 +20,7 @@ so that fact is `None` -- never guessed, never failed.
 
 from __future__ import annotations
 
+import ast
 import math
 import re
 from dataclasses import dataclass, field
@@ -129,6 +130,9 @@ class ObjectFact:
     # docstring's `_TRANSPARENT_MATERIAL_PRESETS` note. `None` when it can't be determined
     # (non-literal color and no material).
     opacity: Optional[float] = None
+    # Highest `level` the object reaches: a literal, or an animated expression evaluated at
+    # t = 0 and t = duration (F36). `None` when absent or not evaluable.
+    level: Optional[float] = None
 
     @property
     def is_opaque(self) -> bool:
@@ -208,8 +212,60 @@ class SceneFacts:
         )
 
 
+_LOCAL_VAL_RE = re.compile(r"\bval\s+(\w+)\s*(?::\s*\w+)?\s*=\s*([^\n]+)")
+_SCALA_NUMBER_RE = re.compile(r"(\d+(?:\.\d*)?|\.\d+)[fFdD]\b")
+_MAX_VAL_DEPTH = 5
+
+
+def _evaluate(expr: str, env: dict[str, str], t: float, depth: int = 0) -> Optional[float]:
+    """Evaluates a Scala arithmetic expression: numbers, + - * /, parentheses, math.max/min/abs,
+    `t`, and local `val`s from `env` (resolved recursively). Anything else -> `None`."""
+    if depth > _MAX_VAL_DEPTH:
+        return None
+    try:
+        tree = ast.parse(_SCALA_NUMBER_RE.sub(r"\1", expr.strip()).replace("math.", ""), mode="eval")
+    except SyntaxError:
+        return None
+    functions = {"max": max, "min": min, "abs": abs}
+    operators = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+                 ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
+
+    def ev(node: ast.AST) -> float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            value = ev(node.operand)
+            return -value if isinstance(node.op, ast.USub) else value
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            return operators[type(node.op)](ev(node.left), ev(node.right))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions:
+            return functions[node.func.id](*(ev(a) for a in node.args))
+        if isinstance(node, ast.Name):
+            if node.id == "t":
+                return t
+            if node.id in env:
+                value = _evaluate(env[node.id], env, t, depth + 1)
+                if value is not None:
+                    return value
+        raise ValueError(node)
+
+    try:
+        return ev(tree.body)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+
+
+def _level_upper_bound(expr: str, env: dict[str, str]) -> Optional[float]:
+    """Highest value of a `level` expression over an animation: it is evaluated at t = 0 and
+    t = duration (as the renderer's validator does), so a monotonic ramp is bounded exactly."""
+    duration = _evaluate(env.get("duration", "1"), env, 0.0) or 1.0
+    ends = [_evaluate(expr, env, 0.0), _evaluate(expr, env, duration)]
+    return None if None in ends else max(ends)
+
+
 def _extract_objects(text: str) -> list[ObjectFact]:
     objects = []
+    local_vals = dict(_LOCAL_VAL_RE.findall(text))
     for type_name in OBJECT_TYPES:
         for offset, inner in find_call_bodies(text, type_name):
             args = named_args(inner)
@@ -229,7 +285,10 @@ def _extract_objects(text: str) -> list[ObjectFact]:
                 )
                 opacity = alpha if alpha is not None else 1.0
             rotation = parse_vec3(args["rotation"]) if "rotation" in args else None
-            objects.append(ObjectFact(type_name, offset, pos, size, color, rotation, material, opacity))
+            level = _level_upper_bound(args["level"], local_vals) if "level" in args else None
+            objects.append(
+                ObjectFact(type_name, offset, pos, size, color, rotation, material, opacity, level)
+            )
     return objects
 
 
@@ -321,6 +380,44 @@ def occlusion_warnings(facts: SceneFacts) -> list[str]:
                     f"the {obj.type_name} at {obj.pos} may be entirely hidden inside the "
                     f"opaque {occluder.type_name} at {occluder.pos}"
                 )
+    return warnings
+
+
+_CHAOTIC_TRANSPARENT_SPONGE_LEVEL = 2.0
+
+
+def manifest_warn_levels(manifest: dict) -> dict[tuple[str, str], float]:
+    """(type, field) -> the manifest's `warnAt` (schema 1.3.0): from that value on, rendering
+    gets slow."""
+    return {
+        (obj["name"], f["name"]): float(f["warnAt"])
+        for obj in manifest.get("objects", [])
+        for f in obj.get("fields", [])
+        if f.get("warnAt") is not None
+    }
+
+
+def caveat_warnings(facts: SceneFacts, warn_levels: dict[tuple[str, str], float]) -> list[str]:
+    """Caveats the user should hear about even when the request asked for exactly this:
+    a level that reaches the renderer's slowness threshold (F36: animated past it silently) and
+    a transparent material on a tesseract sponge from level 2 up, which renders as chaotic
+    refraction (F55, #4c; the manifest's conventions say so, the model doesn't always)."""
+    warnings: list[str] = []
+    for obj in facts.objects:
+        if obj.level is None:
+            continue
+        warn_at = warn_levels.get((obj.type_name, "level"))
+        if warn_at is not None and obj.level >= warn_at:
+            warnings.append(
+                f"the {obj.type_name} reaches level {obj.level:g}; rendering gets slow from "
+                f"level {warn_at:g}"
+            )
+        if (obj.type_name == "TesseractSponge" and obj.material in _TRANSPARENT_MATERIAL_PRESETS
+                and obj.level >= _CHAOTIC_TRANSPARENT_SPONGE_LEVEL):
+            warnings.append(
+                f"{obj.material} on a TesseractSponge at level {obj.level:g} renders as chaotic, "
+                f"fragmented refraction; an opaque or metal material, or level 1, shows the shape"
+            )
     return warnings
 
 

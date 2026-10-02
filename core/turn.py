@@ -24,7 +24,13 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
-from core.scene_facts import extract_scene_facts, facts_diff, occlusion_warnings
+from core.scene_facts import (
+    caveat_warnings,
+    extract_scene_facts,
+    facts_diff,
+    manifest_warn_levels,
+    occlusion_warnings,
+)
 from core.types import (
     GenerationError,
     ReadbackError,
@@ -266,6 +272,9 @@ def run_turn(
         # property of the current scene alone, so this runs on every accepted turn, generate()
         # included.
         turn_warnings = turn_warnings + occlusion_warnings(new_facts)
+        # F36, #4c: caveats about the current scene the user should hear even when the request
+        # asked for exactly this (a slow level, glass on a 4D sponge).
+        turn_warnings = turn_warnings + caveat_warnings(new_facts, manifest_warn_levels(manifest))
 
         _emit("reading back")
         readback_result = semantic_readback(scene_text, adapter, warnings=turn_warnings)

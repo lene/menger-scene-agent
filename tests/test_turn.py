@@ -1308,3 +1308,29 @@ def test_removed_properties_is_empty_for_a_first_scene_or_an_unchanged_one():
 
 def test_removed_properties_ignores_comparisons():
     assert removed_properties("if level == 2 then x", "x") == []
+
+
+def test_accepted_turn_warns_about_glass_on_a_level_2_tesseract_sponge(tmp_path, monkeypatch):
+    # Usability review 2026-09, session 2 (#4c/F55, msa#13): the request names glass, so the
+    # turn composes it -- and the user still hears that it will look chaotic.
+    scene = (
+        "object GlassSponge:\n  val scene = Scene(objects = List(\n"
+        "    TesseractSponge(spongeType = VolumeRemoving, level = 2f,\n"
+        "      material = Some(Material.Glass))\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "a glass tesseract sponge at level 2", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert any("chaotic" in w for w in result.warnings)

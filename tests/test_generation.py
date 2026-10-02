@@ -356,3 +356,44 @@ def test_revise_fails_fast_on_stale_manifest_schema_version():
     assert isinstance(result, GenerationError)
     assert result.kind == "stale_manifest"
     assert adapter.requests == []
+
+
+# --- usability review 2026-09, session 2 (F53, msa#13): ask instead of guessing -----------
+
+
+def test_generate_system_prompt_lists_when_to_ask_instead_of_guessing():
+    # F53: session 2 had zero clarification turns; the agent guessed placements, moved objects
+    # the request didn't name and animated past the renderer's warning level.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "Ask instead of guessing" in system_prompt
+    assert "`warnAt`" in system_prompt
+    assert "can only approximate" in system_prompt
+    # F45: "above" is not ambiguous, it is +y.
+    assert '"above"/"below" is +y/-y' in system_prompt
+
+
+def test_generate_system_prompt_composes_what_the_request_explicitly_names():
+    # Balance against over-asking: the MVP acceptance prompt names glass explicitly; the
+    # caveat reaches the user as an automatic warning, not as a question.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "do not ask about a value or material the request names explicitly" in (
+        adapter.last_request.system_prompt
+    )
+
+
+def test_revise_prompt_asks_before_changing_what_the_request_does_not_name():
+    # F8 recurrence: the sponge was moved to make world = local coordinates.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    revise("colour it by position", "prior scene text", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "would also change something the request does not name" in (
+        adapter.last_request.user_prompt
+    )
