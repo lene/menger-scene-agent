@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "1.3.0",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.4.3",
   "minDriverVersion": "580.65",
@@ -11,7 +11,9 @@
     "Colour and transparency: alpha 0 is fully transparent, 1 fully opaque. An object's explicit `color` tints only the material's RGB; the material's own alpha (its transparency) is preserved, so an opaque `color` on `Glass` or `Film` stays transparent (usability review 2026-09, F14).",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val duration = <seconds>f` in the same object; t is seconds in [0, duration]. The window plays it in real time, looping, and the validator checks the scene at t = 0 and at t = duration. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46).",
-    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). In one scene, all edge-rendered 4D objects must share the same `projection`.",
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object.",
+    "Procedural colouring (`proceduralType`) is evaluated at the hit point's world position. For a 4D object that is the projected 3D position, after `projection` and `pos`, so the colours follow the projected shape and change when the 4D rotation changes (usability review 2026-09, session 2, F43).",
+    "Image textures and texture maps (`texture`, `videoTexture`, `normalMap`, `roughnessMap`) need surface UV coordinates. 4D objects, edge tubes (`edgeRadius`), curves and an L-system's branches have no UV coordinates, so these fields have no effect on them; use a material colour or a `proceduralType` there instead.",
     "Glass on a TesseractSponge from level 2 up renders as chaotic, fragmented refraction: the projected sponge has thousands of overlapping refracting layers and a ray gets at most 5 bounces. Prefer an opaque or metal material there, or level 1 for glass, and say so if the user asks for glass (usability review 2026-09, session 2, F55).",
     "Camera: the horizontal field of view is fixed at 45 degrees (not adjustable per scene). To frame or zoom to fit a scene, move `Camera.position` -- aim `lookAt` at the scene's centre and set the eye's distance from it to at least radius / sin(22.5deg), where radius is the scene's bounding-sphere radius, with a margin for comfortable framing."
   ],
@@ -69,12 +71,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",
@@ -134,12 +138,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",
@@ -167,7 +173,8 @@
           "default": null,
           "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. Cost grows ~20x per level.",
           "min": 0,
-          "max": 5
+          "max": 5,
+          "warnAt": 3
         },
         {
           "name": "material",
@@ -213,12 +220,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",
@@ -280,12 +289,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -362,12 +373,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -442,12 +455,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -522,12 +537,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -602,12 +619,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -682,12 +701,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -730,7 +751,8 @@
           "default": null,
           "description": "Recursion depth; fractional levels blend between integer levels. Cost grows ~48x per level.",
           "min": 0,
-          "max": 4
+          "max": 4,
+          "warnAt": 2
         },
         {
           "name": "material",
@@ -777,12 +799,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -866,12 +890,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "projection",
@@ -983,12 +1009,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",
@@ -1068,12 +1096,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",
@@ -1180,12 +1210,14 @@
         {
           "name": "proceduralType",
           "type": "int",
-          "default": "0"
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets: 0 none (default); 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar -- each MODULATES the material's own colour by a pattern (same hue, varying brightness); 8 xyz_rgb REPLACES the colour with (|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis; 9 heatmap REPLACES the colour with a blue-to-red noise gradient. It belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
         },
         {
           "name": "proceduralScale",
           "type": "float",
-          "default": "1.0"
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
         },
         {
           "name": "rotation",

@@ -28,7 +28,8 @@ from gauntlet.types import Finding
 # DSL vocabulary), not a style nit -- see the I/O & Edge-Case Matrix.
 # 1.1.0 adds `conventions` and per-field `description`s (usability review 2026-09, F28).
 # 1.2.0 adds per-field `min`/`max` resource-bound limits (usability review 2026-09, T1#3).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.2.0"
+# 1.3.0 adds per-field `warnAt`, procedural preset descriptions and 4D conventions (session 2).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.3.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[
