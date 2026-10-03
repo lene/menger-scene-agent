@@ -1,0 +1,18 @@
+--- poc-run/turn1-generated.scala	2026-09-02 21:51:38.540317718 +0200
++++ poc-run/turn2-refined.scala	2026-09-02 22:05:33.228437033 +0200
+@@ -22,12 +22,12 @@
+  */
+ object TesseractSpongeGrowth:
+ 
+-  private val Speed = 1f   // timing scale for the ~10s loop (1f = full sweep across t in [0,1])
++  private val Speed = 0.5f   // timing scale for the ~10s loop (1f = full sweep across t in [0,1]); halved -> slower
+ 
+   def scene(t: Float): Scene =
+     val progress = t * Speed
+-    val level = progress * 3f      // intricacy: level 0.0 -> 3.0 over the loop
+-    val rotXW = progress * 360f    // turning: one full 4D XW rotation over the loop
++    val level = 1f + progress * 3f  // intricacy: level 1.0 -> 2.5 over the loop (capped by Speed=0.5); starts at level 1
++    val rotXW = progress * 360f    // turning: half a 4D XW rotation (180 deg) over the loop, capped by Speed=0.5
+ 
+     Scene(
+       camera = Camera(
