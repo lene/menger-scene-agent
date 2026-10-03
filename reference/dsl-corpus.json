@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.3",
+  "optixJniVersion": "0.4.4",
   "minDriverVersion": "580.65",
   "scenes": [
     {
