@@ -2408,3 +2408,14 @@ def test_unsupported_rejection_writes_a_ticket_draft_and_says_where(
     assert "no glow or halo exists" in text
     assert "an emissive surface" in text
     assert "give it a glowing halo" in text
+
+
+def test_help_documents_drop_ticket_drafts_and_self_repair(capsys):
+    # Usability session 3 prep: --help predated the session-2 fixes. It must name /drop (F48),
+    # the ticket draft an "unsupported" decline writes (F49) and the bounded repair rounds (F47).
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "/drop" in text
+    assert "ticket draft" in text
+    assert "repairing" in text

@@ -98,7 +98,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.tickets import write_draft
 from core.consult import answer_consult
 from core.generation import validate_artifacts
-from core.turn import check_hand_edit, run_turn
+from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, run_turn
 from core.types import ConsultError, RenderWindowOutcome, RenderWindowResult, TurnResult
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
@@ -165,13 +165,22 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "Compounds across repeated rounds; cleared as soon as a turn resolves any other "
             "way. The same applies after a rejected scene (compile_errors, lint_findings, "
             "local_finding, readback_failed): your next line is treated as a change to the "
-            "rejected request, e.g. \"start at level 0 instead\", not as a new request.\n"
+            "rejected request, e.g. \"start at level 0 instead\", not as a new request. The "
+            "prompt then reads \"(continuing) >\"; type /drop to abandon the rejected request "
+            "instead.\n"
+            "\n"
+            "Self-repair: a scene rejected for compile_errors, lint_findings or local_finding "
+            f"is sent back to the model with the error, at most {MAX_REPAIR_ROUNDS} times per "
+            "turn, shown as \"... repairing (<reason>)\". Only if that fails is the rejection "
+            "reported.\n"
             "\n"
             "unsupported: when a turn is rejected because the DSL genuinely cannot produce "
             "the requested effect at all (not just ambiguous), the rejection names the "
             "nearest thing that IS possible, but your next line is NOT threaded back -- "
             "nothing about a follow-up resolves \"this doesn't exist\", so it starts a fresh "
-            "request."
+            "request. A ticket draft for the missing feature is written to the session's "
+            "tickets/ directory and its path printed; filing it as an issue is a separate "
+            "step outside the agent."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
