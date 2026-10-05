@@ -297,10 +297,16 @@ def _evaluate(expr: str, env: dict[str, str], t: float, depth: int = 0) -> Optio
         return None
 
 
+def _duration_expr(env: dict[str, str]) -> Optional[str]:
+    """The scene's animation length: `val durationSeconds`, or the deprecated `val duration`
+    (menger#65, F84)."""
+    return env.get("durationSeconds", env.get("duration"))
+
+
 def _level_upper_bound(expr: str, env: dict[str, str]) -> Optional[float]:
     """Highest value of a `level` expression over an animation: it is evaluated at t = 0 and
     t = duration (as the renderer's validator does), so a monotonic ramp is bounded exactly."""
-    duration = _evaluate(env.get("duration", "1"), env, 0.0) or 1.0
+    duration = _evaluate(_duration_expr(env) or "1", env, 0.0) or 1.0
     ends = [_evaluate(expr, env, 0.0), _evaluate(expr, env, duration)]
     return None if None in ends else max(ends)
 
@@ -547,7 +553,7 @@ def camera_gaze_warnings(facts: SceneFacts, text: str) -> list[str]:
     if any(o.pos is None or o.size is None for o in facts.objects):
         return []
     env = _local_vals(text)
-    duration = _evaluate(env.get("duration", ""), env, 0.0)
+    duration = _evaluate(_duration_expr(env) or "", env, 0.0)
     args = named_args(calls[0][1])
     position_exprs = _vec_exprs(args.get("position", ""))
     look_at_exprs = _vec_exprs(args.get("lookAt", ""))

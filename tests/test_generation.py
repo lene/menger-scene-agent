@@ -58,14 +58,15 @@ def test_generate_composes_manifest_and_corpus_into_the_system_prompt():
 
 def test_generate_system_prompt_requires_a_duration_in_seconds_for_animated_scenes():
     # Usability review 2026-09 (F3): menger's window plays an animated scene only when the
-    # scene declares `val duration` (t in seconds); without it the user saw a still image.
+    # scene declares its duration (t in seconds); without it the user saw a still image.
+    # Named `durationSeconds` since menger#65 (F84).
     adapter = FakeModelAdapter(result=SCENE_TEXT)
 
     generate("a sponge that turns for ten seconds", VALID_MANIFEST, VALID_CORPUS, adapter)
 
     system_prompt = adapter.last_request.system_prompt
-    assert "val duration = <seconds>f" in system_prompt
-    assert "t / duration" in system_prompt
+    assert "val durationSeconds = <seconds>f" in system_prompt
+    assert "t / durationSeconds" in system_prompt
 
 
 def test_generate_system_prompt_treats_complaints_as_change_requests():
@@ -453,9 +454,10 @@ def test_system_prompt_teaches_the_not_done_marker_the_turn_parses():
     revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
 
     system_prompt = adapter.last_request.system_prompt
-    example = "// NOT DONE: extrusion along w -- nearest: a Tesseract"
+    # (Extrusion along w is expressible since menger#65's wScale, so the example is 5D.)
+    example = "// NOT DONE: a 5D penteract -- nearest: a Tesseract"
     assert example in system_prompt
-    assert _NOT_DONE.findall(example) == [" extrusion along w -- nearest: a Tesseract"]
+    assert _NOT_DONE.findall(example) == [" a 5D penteract -- nearest: a Tesseract"]
 
 
 def test_system_prompt_carries_the_session_3_rules():

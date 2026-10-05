@@ -31,7 +31,9 @@ from gauntlet.types import Finding
 # 1.3.0 adds per-field `warnAt`, procedural preset descriptions and 4D conventions (session 2).
 # 1.4.0 adds per-field `limitsBy` (per-spongeType level bounds), degrees for 4D rotations and more
 # conventions (session 3).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.4.0"
+# 1.5.0 adds `val durationSeconds` (`duration` deprecated) and `Projection4DSpec.wScale` to the
+# conventions (menger#65).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.5.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

@@ -501,3 +501,11 @@ def test_a_static_camera_is_left_to_the_frustum_lint():
     scene = "Camera(position = (0f, 0f, 5f), lookAt = (0f, 0f, 9f))\nSponge(size = 1f)"
 
     assert camera_gaze_warnings(extract_scene_facts(scene), scene) == []
+
+
+def test_a_durationSeconds_animation_is_bounded_like_a_duration_one():
+    # menger#65 (F84): `val durationSeconds` replaces `val duration`; both are read.
+    for name in ("durationSeconds", "duration"):
+        scene = f"val {name} = 4f\nSponge(level = 1f + t / 2f)"
+
+        assert extract_scene_facts(scene).objects[0].level == 3.0, name
