@@ -456,3 +456,22 @@ def test_system_prompt_teaches_the_not_done_marker_the_turn_parses():
     example = "// NOT DONE: extrusion along w -- nearest: a Tesseract"
     assert example in system_prompt
     assert _NOT_DONE.findall(example) == [" extrusion along w -- nearest: a Tesseract"]
+
+
+def test_system_prompt_carries_the_session_3_rules():
+    # F53 (ask: undefined terms, lowered values), F69 (no caustics intensity), F82/F83
+    # (phase arithmetic, a flight through an object enters it), F77 (apply a nearest that
+    # plainly satisfies the request).
+    adapter = FakeModelAdapter(result="object S:\n  val scene = Scene()\n")
+    revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    for phrase in (
+        "penteract",
+        "never deliver less than the request names or plainly implies",
+        "Caustics has no intensity",
+        "never re-time",
+        "enters it",
+        "plainly satisfies the request as worded",
+    ):
+        assert phrase in system_prompt, phrase
