@@ -25,6 +25,7 @@ from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
 from core.scene_facts import (
+    camera_gaze_warnings,
     caveat_warnings,
     extract_scene_facts,
     facts_diff,
@@ -343,6 +344,10 @@ def run_turn(
         # asked for exactly this (a slow level, glass on a 4D sponge).
         turn_warnings = turn_warnings + caveat_warnings(
             new_facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
+        )
+        # F83: an animated camera that ends up looking at nothing hides what happens then.
+        turn_warnings = turn_warnings + camera_gaze_warnings(
+            new_facts, strip_comments_and_strings(scene_text)
         )
         turn_warnings = repair_warnings + turn_warnings
 

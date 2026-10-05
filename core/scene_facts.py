@@ -305,6 +305,23 @@ def _level_upper_bound(expr: str, env: dict[str, str]) -> Optional[float]:
     return None if None in ends else max(ends)
 
 
+def _constant(expr: str, env: dict[str, str]) -> Optional[float]:
+    """A literal, or an expression over local `val`s (`size = SpongeSize`) that does not
+    depend on `t` -- evaluated at two times to tell. Anything else -> `None`."""
+    value = _evaluate(expr, env, 0.0)
+    return value if value is not None and value == _evaluate(expr, env, 1.0) else None
+
+
+def _constant_vec3(value: str, env: dict[str, str]) -> Optional[Vec3]:
+    literal = parse_vec3(value)
+    if literal is not None:
+        return literal
+    match = re.match(r"^(?:Vec3)?\((.*)\)$", value.strip(), re.DOTALL)
+    parts = split_top_level(match.group(1)) if match else []
+    values = [_constant(p, env) for p in parts]
+    return (values[0], values[1], values[2]) if len(values) == 3 and None not in values else None
+
+
 def _local_vals(text: str) -> dict[str, str]:
     """Local `val`s by name: the rest of the line, extended to the closing parenthesis when a
     call spans lines (a multi-line `Material(...)`, F75)."""
@@ -325,8 +342,8 @@ def _extract_objects(text: str) -> list[ObjectFact]:
     for type_name in OBJECT_TYPES:
         for offset, inner in find_call_bodies(text, type_name):
             args = named_args(inner)
-            pos = parse_vec3(args["pos"]) if "pos" in args else DEFAULT_POS
-            size = as_float(args["size"]) if "size" in args else DEFAULT_SIZE
+            pos = _constant_vec3(args["pos"], local_vals) if "pos" in args else DEFAULT_POS
+            size = _constant(args["size"], local_vals) if "size" in args else DEFAULT_SIZE
             color_arg = args.get("color")
             color = _parse_color_literal_option(color_arg) if color_arg is not None else None
             material = _material_name(args["material"], local_vals) if "material" in args else None
@@ -491,6 +508,70 @@ def scene_changes(before: SceneFacts, after: SceneFacts) -> list[str]:
     if before.background != after.background:
         changes.append(f"background: {before.background or 'default'} -> {after.background or 'default'}")
     return changes
+
+
+_GAZE_SAMPLES = 60
+# Bounding radius per unit `size`: a Sphere's size is its radius; the other objects span
+# `pos ± size/2`, so a cube of edge `size` fits in a sphere of radius size * sqrt(3) / 2.
+_CUBE_RADIUS_PER_SIZE = math.sqrt(3) / 2
+
+
+def _vec_exprs(value: str) -> Optional[list[str]]:
+    match = re.match(r"^(?:Vec3)?\((.*)\)$", value.strip(), re.DOTALL)
+    parts = split_top_level(match.group(1)) if match else []
+    return parts if len(parts) == 3 else None
+
+
+def _sees(position: Vec3, look_at: Vec3, center: Vec3, radius: float) -> bool:
+    """Does the gaze ray from `position` towards `look_at` meet the sphere (or start in it)?"""
+    to_center = [c - p for c, p in zip(center, position)]
+    if math.dist(position, center) <= radius:
+        return True
+    gaze = [l - p for l, p in zip(look_at, position)]
+    length = math.hypot(*gaze)
+    if length == 0:
+        return False
+    along = sum(a * g for a, g in zip(to_center, gaze)) / length
+    return along > 0 and sum(a * a for a in to_center) - along * along <= radius * radius
+
+
+def camera_gaze_warnings(facts: SceneFacts, text: str) -> list[str]:
+    """F83 (session 3, Task 8b): an animated camera that ends up looking at no object -- it
+    flew out of the sponge and the material and level phases after that were never seen.
+    Samples the camera over [0, duration] when its position/lookAt are expressions this
+    module can evaluate and every object has a literal position; anything else -> no
+    warning (never guessed). Objects are bounding spheres, so it can only under-warn."""
+    calls = find_call_bodies(text, "Camera")
+    if facts.camera is not None or not calls or not facts.objects:
+        return []
+    if any(o.pos is None or o.size is None for o in facts.objects):
+        return []
+    env = _local_vals(text)
+    duration = _evaluate(env.get("duration", ""), env, 0.0)
+    args = named_args(calls[0][1])
+    position_exprs = _vec_exprs(args.get("position", ""))
+    look_at_exprs = _vec_exprs(args.get("lookAt", ""))
+    if not duration or position_exprs is None or look_at_exprs is None:
+        return []
+    spheres = [
+        (o.pos, o.size * (1.0 if o.type_name == "Sphere" else _CUBE_RADIUS_PER_SIZE))
+        for o in facts.objects
+    ]
+    blind = []
+    for i in range(_GAZE_SAMPLES + 1):
+        t = duration * i / _GAZE_SAMPLES
+        position = [_evaluate(e, env, t) for e in position_exprs]
+        look_at = [_evaluate(e, env, t) for e in look_at_exprs]
+        if None in position or None in look_at:
+            return []
+        if not any(_sees(position, look_at, c, r) for c, r in spheres):
+            blind.append(t)
+    if not blind:
+        return []
+    return [
+        f"the animated camera looks at no object from t = {blind[0]:.1f} s to "
+        f"{blind[-1]:.1f} s; whatever the animation shows then is not seen"
+    ]
 
 
 def occlusion_warnings(facts: SceneFacts) -> list[str]:

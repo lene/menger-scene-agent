@@ -4,7 +4,8 @@ F7/F8/F20/F23 usability follow-ups. Pure string processing, no compiler, no netw
 from __future__ import annotations
 
 from core.scene_facts import (
-    extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb, parse_vec3, scene_changes,
+    camera_gaze_warnings, extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb,
+    parse_vec3, scene_changes,
 )
 
 
@@ -464,3 +465,39 @@ def test_scene_changes_is_empty_for_the_same_scene():
     facts = extract_scene_facts("Cube(size = 1f)")
 
     assert scene_changes(facts, facts) == []
+
+
+# --- camera_gaze_warnings (F83) ----------------------------------------------------------------
+
+_FLIGHT = """
+object Flight:
+  val duration = 12f
+  def scene(t: Float): Scene =
+    val progress = math.max(0f, math.min(t, duration)) / duration
+    val camZ     = 12f - progress * 24f
+    Scene(
+      camera = Camera(position = (0f, 0f, camZ), lookAt = (0f, 0f, camZ - 1f)),
+      objects = List(Sponge(pos = (0f, 0f, 0f), size = 2.5f))
+    )
+"""
+
+
+def test_an_animated_camera_that_ends_up_looking_at_nothing_is_reported():
+    # Session 3, Task 8b turn 4: the camera left the sponge at about 6.6 s and looked at an
+    # empty horizon; the material and level phases after that were never seen.
+    warnings = camera_gaze_warnings(extract_scene_facts(_FLIGHT), _FLIGHT)
+
+    assert len(warnings) == 1
+    assert "t = 7.2 s to 12.0 s" in warnings[0]
+
+
+def test_a_camera_that_keeps_looking_at_the_object_is_fine():
+    scene = _FLIGHT.replace("lookAt = (0f, 0f, camZ - 1f)", "lookAt = (0f, 0f, 0f)")
+
+    assert camera_gaze_warnings(extract_scene_facts(scene), scene) == []
+
+
+def test_a_static_camera_is_left_to_the_frustum_lint():
+    scene = "Camera(position = (0f, 0f, 5f), lookAt = (0f, 0f, 9f))\nSponge(size = 1f)"
+
+    assert camera_gaze_warnings(extract_scene_facts(scene), scene) == []
