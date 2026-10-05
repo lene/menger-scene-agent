@@ -15,10 +15,11 @@ discipline -- applied to a different task.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from adapters.model import ModelAdapter, ModelError, ModelRequest
-from core.scene_facts import SceneFacts, extract_scene_facts
+from core.scene_facts import SceneFacts, extract_scene_facts, scene_changes
 from core.types import ReadbackError, ReadbackResult
 from gauntlet._scala_text import strip_comments_and_strings
 
@@ -52,9 +53,11 @@ _SYSTEM_PROMPT = (
     "describe what it means, not how it's written.\n"
     "- If the scene text has no recognizable object, say so plainly in one sentence instead "
     "of guessing.\n"
-    "- If a <warnings> block is present, work its contents into your restatement (e.g. "
-    "\"...and also moved to 3,0,0\") -- it names a change the request may not have asked for, "
-    "and the user should see it in the same sentence, not just in the raw text.\n"
+    "- If <request> and <changes> blocks are present, lead with what this turn changed for "
+    "the request, using the values in <changes> exactly (e.g. \"now level 3 and glass; "
+    "...\"), then the rest of the scene. If <changes> says nothing changed, say so first.\n"
+    "- State a camera distance only as the <facts> block gives it; never estimate one.\n"
+    "- Do not mention warnings about unrequested changes; they are shown separately.\n"
     "- Respond with only the sentence -- no preamble, no code block, no markdown.\n"
 )
 
@@ -122,7 +125,10 @@ def _format_facts(facts: SceneFacts) -> str:
             lines.append(f"- {light.type_name} light at pos={light.position}")
     if facts.camera is not None:
         position, look_at = facts.camera
-        lines.append(f"- Camera at {position}, looking at {look_at}")
+        distance = math.dist(position, look_at)
+        lines.append(
+            f"- Camera at {position}, looking at {look_at}, {distance:.1f} units from its target"
+        )
     return "\n".join(lines) if lines else "(no facts could be extracted from this scene)"
 
 
@@ -159,7 +165,10 @@ def _complete(system_prompt: str, user_prompt: str, adapter: ModelAdapter) -> Re
 
 
 def semantic_readback(
-    scene_text: str, adapter: ModelAdapter, warnings: Optional[list[str]] = None
+    scene_text: str,
+    adapter: ModelAdapter,
+    request: Optional[str] = None,
+    prior_scene: Optional[str] = None,
 ) -> ReadbackResult:
     """Stage 5 of the validation gauntlet: restate what `scene_text` describes in one
     plain-language sentence, so a misreading of the original request surfaces here rather
@@ -177,22 +186,24 @@ def semantic_readback(
     checks are (AD-2: no compiler), gives it ground truth to check its restatement against
     instead of re-deriving it from syntax every time.
 
-    `warnings` (usability review 2026-09, F8), when given, are `core.scene_facts.facts_diff`'s
-    findings about what a revise() turn changed that the request may not have asked for (a
-    moved object, a changed material) -- folded into a `<warnings>` block so the summary
-    surfaces them in the same sentence rather than leaving them only in `TurnResult.warnings`
-    for a caller to print separately."""
+    Usability review 2026-10, session 3 (F62): readbacks omitted the change just made, so
+    `request` and the computed `scene_changes` against `prior_scene` go in as `<request>` and
+    `<changes>` blocks for the summary to lead with. The turn's warnings no longer go in
+    (F80a: the CLI prints them as their own lines, so they appeared twice)."""
     facts = extract_scene_facts(strip_comments_and_strings(scene_text))
-    warnings_block = (
-        f"<warnings>\n{chr(10).join(warnings)}\n</warnings>\n\n" if warnings else ""
-    )
+    turn_block = ""
+    if request is not None and prior_scene is not None:
+        prior_facts = extract_scene_facts(strip_comments_and_strings(prior_scene))
+        changes = scene_changes(prior_facts, facts)
+        listed = "\n".join(f"- {c}" for c in changes) if changes else "- nothing the facts cover changed"
+        turn_block = f"<request>\n{request}\n</request>\n\n<changes>\n{listed}\n</changes>\n\n"
     user_prompt = (
         "Here is the scene file's source text, verbatim, between <scene> tags, and "
         "ground-truth facts already extracted from it between <facts> tags (see the system "
         "prompt's rule on how to use them):\n\n"
         f"<scene>\n{scene_text}\n</scene>\n\n"
         f"<facts>\n{_format_facts(facts)}\n</facts>\n\n"
-        f"{warnings_block}"
+        f"{turn_block}"
         "Restate what this scene describes, following the system prompt's rules exactly."
     )
     return _complete(_SYSTEM_PROMPT, user_prompt, adapter)

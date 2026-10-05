@@ -217,3 +217,49 @@ def test_semantic_readback_facts_call_a_plus_y_offset_above():
     user_prompt = adapter.last_request.user_prompt
     assert "Sphere is above the Sponge (+2.0 along y)" in user_prompt
     assert "rotation=(0.0, 0.5, 0.0)" in user_prompt
+
+
+# --- Usability review 2026-10, session 3 (F62, F80a, msa#2) -------------------------------
+
+PRIOR_TEXT = (
+    "object S:\n"
+    "  val scene = Scene(\n"
+    "    camera = Camera(position = (0f, 0f, 5f), lookAt = (0f, 0f, 0f)),\n"
+    "    objects = List(Sponge(level = 2f, material = Some(Material.Gold)))\n"
+    "  )\n"
+)
+
+
+def test_semantic_readback_leads_with_the_request_and_the_computed_changes():
+    # F62: readbacks omitted the change just made; the model now gets the request and a
+    # deterministic list of what changed, and is told to lead with it.
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+    after = PRIOR_TEXT.replace("level = 2f", "level = 3f").replace("Gold", "Glass")
+
+    semantic_readback(after, adapter, request="make it level 3 glass", prior_scene=PRIOR_TEXT)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "<request>\nmake it level 3 glass\n</request>" in user_prompt
+    assert "- Sponge level: 2.0 -> 3.0" in user_prompt
+    assert "- Sponge material: Gold -> Glass" in user_prompt
+    assert "lead with" in adapter.last_request.system_prompt.lower()
+
+
+def test_semantic_readback_states_the_camera_distance_computed_not_estimated():
+    # F62: the readbacks gave wrong camera distances; the facts now carry the exact value.
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(PRIOR_TEXT, adapter)
+
+    assert "5.0 units from its target" in adapter.last_request.user_prompt
+
+
+def test_semantic_readback_does_not_repeat_the_turn_warnings():
+    # F80a: the warnings are printed as their own lines; folding them into the readback too
+    # printed each one twice.
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(PRIOR_TEXT, adapter)
+
+    assert "<warnings>" not in adapter.last_request.user_prompt
+    assert "<warnings>" not in adapter.last_request.system_prompt

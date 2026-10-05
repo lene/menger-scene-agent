@@ -330,7 +330,9 @@ def run_turn(
         )
 
         _emit("reading back")
-        readback_result = semantic_readback(scene_text, adapter, warnings=turn_warnings)
+        readback_result = semantic_readback(
+            scene_text, adapter, request=prompt, prior_scene=prior_scene
+        )
         if isinstance(readback_result, ReadbackError):
             # I/O & Edge-Case Matrix: "turn is NOT accepted without its summary -- treated
             # as rejection, not a partial accept."

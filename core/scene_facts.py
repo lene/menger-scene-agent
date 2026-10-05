@@ -170,6 +170,8 @@ class ObjectFact:
     # built from expressions (F8 recurrence) and the 4D `projection` (F45).
     pos_text: Optional[str] = None
     projection_text: Optional[str] = None
+    # Same for an animated `rotation` (F62: a new `Vec3(0f, angle, 0f)` was no change).
+    rotation_text: Optional[str] = None
     # The value of the `spongeType` argument (`RecursiveIAS`), which selects the manifest's
     # per-subtype level bounds (F59); `None` when absent or not an identifier.
     subtype: Optional[str] = None
@@ -345,6 +347,7 @@ def _extract_objects(text: str) -> list[ObjectFact]:
                 pos_text=_normalized(args.get("pos")),
                 projection_text=_normalized(args.get("projection")),
                 subtype=subtype_of(args.get("spongeType")),
+                rotation_text=_normalized(args.get("rotation")),
             ))
     return objects
 
@@ -450,6 +453,44 @@ def facts_diff(before: SceneFacts, after: SceneFacts, prompt: str = "") -> list[
                     f"{a.projection_text or 'the default'}"
                 )
     return warnings
+
+
+_CHANGE_FIELDS = (
+    ("pos", "position"), ("size", "size"), ("level", "level"), ("material", "material"),
+    ("color", "colour"), ("rotation", "rotation"), ("projection_text", "4D projection"),
+)
+
+
+def scene_changes(before: SceneFacts, after: SceneFacts) -> list[str]:
+    """Every extracted fact that differs between two scenes, neutrally worded, for the readback
+    to lead with (F62: readbacks omitted the change just made). Objects are matched by
+    occurrence within their type, like `facts_diff`."""
+    changes: list[str] = []
+    if after.camera is not None and before.camera != after.camera:
+        position, look_at = after.camera
+        changes.append(f"camera: now at {position}, looking at {look_at}")
+    for type_name in OBJECT_TYPES:
+        old = [o for o in before.objects if o.type_name == type_name]
+        new = [o for o in after.objects if o.type_name == type_name]
+        if len(new) != len(old):
+            verb = "added" if len(new) > len(old) else "removed"
+            changes.append(f"{verb} {abs(len(new) - len(old))} {type_name}")
+        for b, a in zip(old, new):
+            for attr, label in _CHANGE_FIELDS:
+                was, now = getattr(b, attr), getattr(a, attr)
+                if attr in ("pos", "rotation") and (was is None or now is None):
+                    # Not a literal (animated): compare the source text instead.
+                    was, now = getattr(b, f"{attr}_text"), getattr(a, f"{attr}_text")
+                if was != now:
+                    was, now = ("default" if v is None else v for v in (was, now))
+                    changes.append(f"{type_name} {label}: {was} -> {now}")
+    if len(before.lights) != len(after.lights):
+        changes.append(f"lights: {len(before.lights)} -> {len(after.lights)}")
+    elif [(l.position, l.direction) for l in before.lights] != [(l.position, l.direction) for l in after.lights]:
+        changes.append("lights moved or turned")
+    if before.background != after.background:
+        changes.append(f"background: {before.background or 'default'} -> {after.background or 'default'}")
+    return changes
 
 
 def occlusion_warnings(facts: SceneFacts) -> list[str]:

@@ -3,7 +3,9 @@ F7/F8/F20/F23 usability follow-ups. Pure string processing, no compiler, no netw
 
 from __future__ import annotations
 
-from core.scene_facts import extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb, parse_vec3
+from core.scene_facts import (
+    extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb, parse_vec3, scene_changes,
+)
 
 
 # --- parse_vec3 / parse_color_rgb -----------------------------------------------------------
@@ -437,3 +439,28 @@ def test_caveat_still_warns_for_a_volume_filling_sponge_at_the_warn_level():
         manifest_subtype_warn_levels(_SUBTYPE_MANIFEST),
     )
     assert any("slow" in w for w in warnings)
+
+
+# --- scene_changes (F62) -----------------------------------------------------------------------
+
+
+def test_scene_changes_lists_changed_values_and_added_objects():
+    before = extract_scene_facts("Sponge(level = 2f, material = Some(Material.Gold))")
+    after = extract_scene_facts(
+        "Sponge(level = 3f, material = Some(Material.Gold))\nSphere(pos = (0f, 2f, 0f))"
+    )
+
+    assert scene_changes(before, after) == ["added 1 Sphere", "Sponge level: 2.0 -> 3.0"]
+
+
+def test_scene_changes_sees_an_animated_rotation():
+    before = extract_scene_facts("Cube(size = 1f)")
+    after = extract_scene_facts("Cube(size = 1f, rotation = Vec3(0f, angle, 0f))")
+
+    assert scene_changes(before, after) == ["Cube rotation: default -> Vec3(0f, angle, 0f)"]
+
+
+def test_scene_changes_is_empty_for_the_same_scene():
+    facts = extract_scene_facts("Cube(size = 1f)")
+
+    assert scene_changes(facts, facts) == []
