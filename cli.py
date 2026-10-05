@@ -290,6 +290,8 @@ def _tag_label(tag: str) -> str:
 
 
 def _rejection_line(tag: Optional[str], message: str) -> str:
+    if tag == "unchanged" and message:
+        return message  # F76: not a rejection; the message says "No change made: ..."
     head = f"Rejected ({_tag_label(tag)})" if tag else "Rejected"
     return f"{head}: {message}" if message else head
 

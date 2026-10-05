@@ -261,6 +261,8 @@ TurnTag = Literal[
     "readback_failed",
     "storage_failed",
     "hand_edit_rejected",
+    # The model returned the current scene unchanged (F76): nothing saved, no new ordinal.
+    "unchanged",
 ]
 
 

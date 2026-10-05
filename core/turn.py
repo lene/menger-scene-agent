@@ -235,6 +235,16 @@ def run_turn(
 
     scene_text = generation_result
 
+    if prior_scene is not None and scene_text.split() == prior_scene.split():
+        # F76 (recurrence of F56): the model returned the current scene. Not a new turn: say
+        # so instead of presenting it with a readback as if something had been done.
+        message = (
+            "No change made: the model returned the current scene unchanged, so nothing was "
+            "saved. If you asked for a change, rephrase it."
+        )
+        messages = _record_rejected_safely(store, prompt, f"unchanged: {message}", [message])
+        return TurnResult(tag="unchanged", messages=messages)
+
     staging_path = store.session_dir / _STAGING_FILENAME
     try:
         # F47 (PRD FR-7 amendment 2026-10-02): a compile/lint failure of the agent's own

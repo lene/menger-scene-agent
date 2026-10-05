@@ -1317,6 +1317,27 @@ def test_removed_properties_ignores_comparisons():
     assert removed_properties("if level == 2 then x", "x") == []
 
 
+def test_a_turn_that_returns_the_current_scene_is_no_change_not_a_new_turn(tmp_path, monkeypatch):
+    # F76 (recurrence of F56): "keep them like that" came back as the same file and was shown
+    # as an accepted turn with a readback, as if something had been done.
+    prior = "object S:\n  val scene = Scene(objects = List(Sphere(size = 1f)))\n"
+    adapter = FakeModelAdapter(result=prior.replace("\n  val", "\n\n  val"))
+    store = _make_store(tmp_path)
+
+    def fail_validate(*args, **kwargs):
+        raise AssertionError("an unchanged scene must not be validated again")
+
+    monkeypatch.setattr(turn_module, "validate_scene", fail_validate)
+
+    result = run_turn(
+        "keep them like that", prior, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "unchanged"
+    assert result.ordinal is None
+    assert "no change" in result.messages[0].lower()
+
+
 def test_removed_properties_ignores_definitions():
     # F75: turning `val scene = ...` into `def scene(t: Float) = ...` is not "removed scene".
     before = "val scene = Scene(objects = List())"

@@ -2524,3 +2524,12 @@ def test_a_launched_window_that_comes_up_is_refreshed(monkeypatch, capsys):
 
     assert capsys.readouterr().out.strip() == "Render window: refreshed"
     assert returned is window
+
+
+def test_an_unchanged_turn_is_not_shown_as_a_rejection():
+    # F76: live and on resume, "No change made: ..." stands alone, not "Rejected (unchanged)".
+    result = TurnResult(tag="unchanged", messages=["No change made: same scene."])
+
+    assert cli._format_turn_result(result) == "No change made: same scene."
+    entry = {"outcome": "rejected", "reason": "unchanged: No change made: same scene."}
+    assert cli._format_history_entry(entry) == "No change made: same scene."
