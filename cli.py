@@ -673,6 +673,9 @@ class _ClarificationState:
     # False for a rejected attempt (usability review 2026-09, F4) rather than a question the
     # model asked -- only the framing of the merged prompt differs.
     asked_for_clarification: bool = True
+    # True for an "unsupported" decline (session 3, F77): the follow-up is a new request, the
+    # declined one only context for what it refers to.
+    declined: bool = False
 
 
 # Rejections the user typically answers by adjusting the same request ("start at level 0
@@ -683,7 +686,8 @@ class _ClarificationState:
 # subprocess_failed, storage_failed, ...) say nothing about the request itself. "unsupported"
 # (F16/msa#3) is deliberately excluded too, despite also being a request-shaped rejection: a
 # follow-up doesn't resolve "the DSL cannot do this" the way it resolves an ambiguity or a
-# fixable rejection, so it is never added here -- see TurnTag's own docstring in core/types.py.
+# fixable rejection, so it is never merged into it -- see TurnTag's own docstring in
+# core/types.py. It is passed along as context instead (`declined`, F77).
 _REJECTIONS_THREADED_INTO_FOLLOW_UP = frozenset(
     {"compile_errors", "lint_findings", "local_finding", "readback_failed"}
 )
@@ -695,6 +699,14 @@ def _build_clarification_prompt(state: _ClarificationState, answer: str) -> str:
     user's answer into one string. `core/generation.py`'s `prompt` parameter stays a single
     string throughout (Approach: no core/ signature changes), so this composition happens
     entirely here in the CLI."""
+    if state.declined:
+        return (
+            f"{answer}\n\n"
+            f"(Context: the previous request was declined as impossible -- "
+            f"\"{state.pending_prompt}\": {state.reason}. The request above may refer to it, "
+            f"e.g. accept its nearest alternative or mean the place or object it named; take "
+            f"nothing else from it.)"
+        )
     if state.asked_for_clarification:
         return (
             f"{state.pending_prompt}\n\n"
@@ -726,6 +738,13 @@ def _next_clarification_state(
             pending_prompt=pending_prompt,
             reason=f"{result.tag}: " + "; ".join(result.messages),
             asked_for_clarification=False,
+        )
+    if result.tag == "unsupported":
+        return _ClarificationState(
+            pending_prompt=pending_prompt,
+            reason="; ".join(result.messages),
+            asked_for_clarification=False,
+            declined=True,
         )
     return None
 

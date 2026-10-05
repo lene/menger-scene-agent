@@ -1894,12 +1894,15 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     ]
 
 
-def test_unsupported_rejection_does_not_thread_the_next_line_sent_raw(
+def test_unsupported_rejection_passes_the_declined_request_as_context_only(
     monkeypatch, tmp_path, capsys
 ):
     # Usability review 2026-09 (F16, msa#3): unlike needs_clarification, an "unsupported"
-    # rejection's follow-up line must NOT be merged with the original request -- nothing
-    # about the next line resolves "the DSL cannot do this."
+    # rejection's follow-up line is NOT merged into the original request -- nothing about the
+    # next line resolves "the DSL cannot do this." But session 3 (F77) lost what the follow-up
+    # referred to ("the emissive sphere in the centre" -- of the sponge, as the declined
+    # request said), so the declined request goes along as context, the follow-up being the
+    # request.
     monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
     _set_render_launcher_env(monkeypatch)
     monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
@@ -1927,7 +1930,10 @@ def test_unsupported_rejection_does_not_thread_the_next_line_sent_raw(
 
     assert exit_code == 0
     assert call_log[0] == "give it a glowing halo"
-    assert call_log[1] == "make a red cube instead"
+    assert call_log[1].startswith("make a red cube instead")
+    assert "declined" in call_log[1]
+    assert "give it a glowing halo" in call_log[1]
+    assert "nearest: an emissive surface" in call_log[1]
 
 
 def test_two_consecutive_clarification_rounds_compound_both_reasons(
