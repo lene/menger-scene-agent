@@ -66,8 +66,9 @@ alongside `_is_consult_input()`, before blank-line/`run_turn()` dispatch) is han
 `_handle_retry()`: no pending timeout reports "nothing to retry"; a changed scene resends
 immediately; an unchanged scene arms a confirmation gate on the first `/retry` and resends
 only on the second. `_next_retry_state()` is the single place either dispatch path
-(re)arms the gate on a fresh `"generation_timeout"` or clears it on any other tag -- no other
-`TurnTag` gets retry semantics (PRD FR7 narrows this to `generation_timeout` specifically).
+(re)arms the gate on a fresh `"generation_timeout"`. PRD FR7 narrowed retry to
+`generation_timeout`; usability session 3 (F71) widened it: any other rejection arms an
+ungated retry, since `/retry` is the natural word for "try that again".
 """
 
 from __future__ import annotations
@@ -158,12 +159,12 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "answered in prose, grounded in the DSL manifest/corpus and the current scene. "
             "Never edits the scene, never gauntlet-checked, never consumes a turn ordinal.\n"
             "\n"
-            "/retry: resends the prompt that most recently failed with a generation_timeout. "
-            "With no pending timeout, reports there is nothing to retry. If the scene has "
-            "changed since the failure (a hand edit or another accepted turn), resends "
-            "immediately. If unchanged, the first /retry explains nothing has changed and "
-            "requires a second /retry (still unchanged) before actually resending -- never "
-            "auto-retried, per PRD FR7.\n"
+            "/retry: resends the request that most recently failed. After a rejection it "
+            "resends at once. After a generation_timeout: if the scene has changed since the "
+            "failure (a hand edit or another accepted turn), resends immediately; if unchanged, "
+            "the first /retry explains nothing has changed and requires a second /retry (still "
+            "unchanged) before actually resending -- never auto-retried, per PRD FR7. With "
+            "nothing failed, reports there is nothing to retry.\n"
             "\n"
             "needs_clarification: when a turn is rejected for being too ambiguous, your "
             "next line is automatically threaded back into the original request (not sent "
@@ -653,6 +654,10 @@ def _next_retry_state(
       the same already-resolved prompt again)."""
     if result.tag == "generation_timeout":
         return _RetryState(prompt=prompt, scene_at_failure=scene_at_failure, confirmed=False)
+    if result.tag != "accepted":
+        # Session 3, F71: any rejected request can be tried again. The model answers anew each
+        # time, so there is no identical-resend gate as for a timeout: `/retry` is the request.
+        return _RetryState(prompt=prompt, scene_at_failure=scene_at_failure, confirmed=True)
     return None
 
 
@@ -853,7 +858,7 @@ def _handle_retry(
     `render_process` mirror `_execute_turn()`'s own contract -- unchanged unless a resend
     happened and was accepted."""
     if retry_state is None:
-        print("Retry: nothing to retry -- no prior generation_timeout to resend.")
+        print("Retry: nothing to retry -- no failed request to resend.")
         return None, None, prior_scene, render_process
 
     scene_changed = prior_scene != retry_state.scene_at_failure
@@ -877,6 +882,7 @@ def _handle_retry(
     # was already armed by a prior /retry and the scene is still unchanged (second /retry) --
     # both resend now, via the exact same call path a normal turn uses.
     resend_scene = prior_scene
+    print(f"Retry: resending: {retry_state.prompt}")
     result, prior_scene, render_process = _execute_turn(
         retry_state.prompt,
         resend_scene,
@@ -1085,7 +1091,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             # `_handle_retry()` owns the whole confirmation-gate decision tree (Boundaries &
             # Constraints, I/O & Edge-Case Matrix).
             if line.strip() == "/retry":
-                _, retry_state, prior_scene, render_process = _handle_retry(
+                resent_prompt = retry_state.prompt if retry_state is not None else None
+                retry_result, retry_state, prior_scene, render_process = _handle_retry(
                     retry_state,
                     prior_scene,
                     manifest,
@@ -1097,6 +1104,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     render_process,
                     on_stage=_print_stage,
                 )
+                if retry_result is not None and resent_prompt is not None:
+                    # The resend settles a pending request like any turn (F71).
+                    clarification_state = _next_clarification_state(retry_result, resent_prompt)
                 continue
 
             # F48: abandon a pending clarification/threaded rejection, so the next line starts
@@ -1149,9 +1159,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 clarification_state = _next_clarification_state(result, dispatched_prompt)
                 if clarification_state is not None:
                     print("  Your next line continues this request; /drop abandons it.")
-            if result is not None and result.tag == "generation_timeout":
+            if result is not None and result.tag != "accepted":
                 # story 22: a fresh timeout on THIS (possibly unrelated) prompt always re-arms
-                # the gate from scratch. Any other tag -- including a run_turn() exception
+                # the gate from scratch; any other rejection arms an ungated retry (F71). An
+                # accepted turn -- or a run_turn() exception
                 # (result is None) -- deliberately leaves an existing pending retry_state
                 # untouched: an intervening accepted/rejected turn must not erase the memory
                 # of an earlier generation_timeout, or the I/O & Edge-Case Matrix's "scene

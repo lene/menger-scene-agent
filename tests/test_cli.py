@@ -1481,7 +1481,7 @@ def test_retry_with_no_prior_timeout_reports_nothing_to_retry(monkeypatch, tmp_p
 
     assert exit_code == 0
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines == ["Retry: nothing to retry -- no prior generation_timeout to resend."]
+    assert out_lines == ["Retry: nothing to retry -- no failed request to resend."]
 
 
 def test_first_retry_after_timeout_with_unchanged_scene_arms_gate_without_resending(
@@ -1550,6 +1550,7 @@ def test_second_retry_with_still_unchanged_scene_resends_exactly_once(
         "Rejected (generation timeout): model hung",
         "Retry: nothing has changed since the last generation_timeout. Type /retry "
         "again to resend the identical prompt.",
+        "Retry: resending: timeout prompt",
         "Turn 1: accepted → 001.scala",
         "Render window: refreshed",
     ]
@@ -1646,6 +1647,7 @@ def test_retry_with_scene_changed_since_failure_resends_immediately_no_gate(
         "Rejected (generation timeout): model hung",
         "Turn 1: accepted → 001.scala",
         "Render window: refreshed",
+        "Retry: resending: timeout prompt",
         "Turn 2: accepted → 002.scala",
         "Render window: refreshed",
     ]
@@ -1689,6 +1691,7 @@ def test_retry_resend_that_times_out_again_resets_an_unarmed_gate(
     assert out_lines == [
         "Rejected (generation timeout): model hung again",
         arm_message,
+        "Retry: resending: timeout prompt",
         "Rejected (generation timeout): model hung again",
         arm_message,
     ]
@@ -1775,12 +1778,11 @@ def test_normal_turn_exception_does_not_clear_a_pending_retry_state(
     assert not any("nothing to retry" in line for line in out_lines)
 
 
-def test_retry_resend_landing_on_a_non_timeout_rejection_clears_the_gate(
+def test_retry_resend_landing_on_a_non_timeout_rejection_can_be_retried_again(
     monkeypatch, tmp_path, capsys
 ):
-    # A resend that lands on some other rejection tag (not generation_timeout, not accepted)
-    # resolves the pending retry either way -- a further /retry must report "nothing to
-    # retry", never silently resend the same already-resolved prompt again.
+    # A resend that lands on some other rejection tag resolves the timeout gate; that
+    # rejection is itself retryable, without a gate (session 3, F71).
     monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
     _set_render_launcher_env(monkeypatch)
     monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
@@ -1793,9 +1795,9 @@ def test_retry_resend_landing_on_a_non_timeout_rejection_clears_the_gate(
         call_log.append(prompt)
         if len(call_log) == 1:
             return TurnResult(tag="generation_timeout", messages=["model hung"])
-        if len(call_log) == 2:
+        if len(call_log) <= 3:
             return TurnResult(tag="local_finding", messages=["allowlist: disallowed import"])
-        raise AssertionError("must not be called a third time")
+        raise AssertionError("must not be called a fourth time")
 
     monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
     monkeypatch.setattr(
@@ -1806,11 +1808,39 @@ def test_retry_resend_landing_on_a_non_timeout_rejection_clears_the_gate(
 
     assert exit_code == 0
     # 1) timeout, arms gate. 2) first /retry only confirms. 3) second /retry resends -- lands
-    # on local_finding, resolving (clearing) the gate. 4) third /retry must report "nothing
-    # to retry", never call run_turn() a third time.
-    assert call_log == ["timeout prompt", "timeout prompt"]
-    out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines[-1] == "Retry: nothing to retry -- no prior generation_timeout to resend."
+    # on local_finding. 4) third /retry resends that at once, no gate.
+    assert call_log == ["timeout prompt", "timeout prompt", "timeout prompt"]
+
+
+def test_retry_after_a_rejection_resends_the_request_at_once(monkeypatch, tmp_path, capsys):
+    # Session 3, F71: "/retry" after a rejection said "no prior generation_timeout", although
+    # it is the natural word for "try that again".
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    call_log = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        call_log.append(prompt)
+        if len(call_log) == 1:
+            return TurnResult(tag="compile_errors", messages=["Not found: Icositetrachoron"])
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["add a 24-cell above the sponge", "/retry", "/retry"])
+    )
+
+    assert cli.main([]) == 0
+
+    assert call_log == ["add a 24-cell above the sponge"] * 2
+    out = capsys.readouterr().out
+    assert "Retry: resending: add a 24-cell above the sponge" in out
+    assert out.splitlines()[-1] == "Retry: nothing to retry -- no failed request to resend."
 
 
 def test_double_retry_after_a_successful_resend_reports_nothing_to_retry(
@@ -1843,7 +1873,7 @@ def test_double_retry_after_a_successful_resend_reports_nothing_to_retry(
     # re-resend the now-resolved prompt.
     assert call_log == ["timeout prompt", "timeout prompt"]
     out_lines = capsys.readouterr().out.splitlines()
-    assert out_lines[-1] == "Retry: nothing to retry -- no prior generation_timeout to resend."
+    assert out_lines[-1] == "Retry: nothing to retry -- no failed request to resend."
 
 
 def test_clarification_answer_is_threaded_into_the_original_request(
