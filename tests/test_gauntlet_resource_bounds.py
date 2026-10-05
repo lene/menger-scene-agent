@@ -231,3 +231,46 @@ def test_full_corpus_has_no_resource_bound_findings():
     for scene in scenes:
         findings = check_resource_bounds(scene["source"])
         assert findings == [], f"{scene['name']}: {findings}"
+
+
+# --- usability review 2026-10, session 3: F59 per-spongeType bounds (manifest 1.4.0) ----------
+
+
+def _sponge_scene(sponge_type: str, level: str) -> str:
+    return (
+        "object Foo:\n  val scene = Scene(objects = List("
+        f"Sponge(spongeType = {sponge_type}, level = {level})))\n"
+    )
+
+
+def test_recursive_ias_accepts_a_level_above_the_cube_sponge_ceiling():
+    # The engine accepts [1, 14) for sponge-recursive-ias; 5.8 used to be "repaired" to 5.
+    assert check_resource_bounds(_sponge_scene("RecursiveIAS", "5.8f")) == []
+
+
+def test_volume_filling_level_above_the_ceiling_is_still_flagged():
+    findings = check_resource_bounds(_sponge_scene("VolumeFilling", "5.8f"))
+
+    assert len(findings) == 1
+    assert "exceeds the resource-bound ceiling of 5" in findings[0].message
+
+
+def test_recursive_ias_level_below_its_minimum_is_flagged():
+    findings = check_resource_bounds(_sponge_scene("RecursiveIAS", "0f"))
+
+    assert len(findings) == 1
+    assert "below the minimum of 1" in findings[0].message
+
+
+def test_recursive_ias_level_above_its_own_ceiling_is_flagged():
+    findings = check_resource_bounds(_sponge_scene("RecursiveIAS", "14f"))
+
+    assert len(findings) == 1
+    assert "ceiling of 13" in findings[0].message
+
+
+def test_an_unknown_or_missing_sponge_type_keeps_the_conservative_ceiling():
+    unnamed = "object Foo:\n  val scene = Scene(objects = List(Sponge(level = 5.8f)))\n"
+
+    assert len(check_resource_bounds(unnamed)) == 1
+    assert len(check_resource_bounds(_sponge_scene("SpongeType.VolumeFilling", "5.8f"))) == 1

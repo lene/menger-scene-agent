@@ -40,6 +40,7 @@ from pathlib import Path
 
 from adapters.artifacts import ArtifactError, load_manifest
 from gauntlet._scala_text import as_float, find_call_bodies, line_of, named_args, strip_comments_and_strings
+from gauntlet.manifest_bounds import discriminator_of, field_bounds, subtype_of
 from gauntlet.types import Finding
 
 _STAGE = "resource_bounds"
@@ -93,6 +94,28 @@ def _load_ceilings() -> dict[str, dict[str, float]]:
 _FIELD_CEILINGS_BY_TYPE: dict[str, dict[str, float]] = _load_ceilings()
 
 
+def subtype_fields_from_manifest(manifest: dict) -> dict[tuple[str, str], dict]:
+    """(type, field) -> the manifest field entry, for the fields that carry `limitsBy`
+    (schema 1.4.0): their bounds depend on another argument, e.g. `Sponge.level` on
+    `spongeType`."""
+    return {
+        (obj.get("name"), f.get("name")): f
+        for obj in manifest.get("objects", [])
+        for f in obj.get("fields", [])
+        if f.get("limitsBy")
+    }
+
+
+def _load_subtype_fields() -> dict[tuple[str, str], dict]:
+    try:
+        return subtype_fields_from_manifest(load_manifest(_MANIFEST_PATH))
+    except ArtifactError:
+        return {}
+
+
+_SUBTYPE_FIELDS: dict[tuple[str, str], dict] = _load_subtype_fields()
+
+
 def check_resource_bounds(scene_text: str) -> list[Finding]:
     """AD-4 rule 3: flags any resource-affecting field bound to a literal value above its
     fixed ceiling, scoped to the constructor call that actually declares the field. A
@@ -108,19 +131,46 @@ def check_resource_bounds(scene_text: str) -> list[Finding]:
                 if field not in args:
                     continue
                 value = as_float(args[field])
-                if value is None or value <= ceiling:
+                if value is None:
+                    continue
+                low, high = _bounds_for(type_name, field, ceiling, args)
+                if high is not None and value > high:
+                    message = (
+                        f"{type_name}'s '{field}' = {args[field]} exceeds the "
+                        f"resource-bound ceiling of {high:g} (defense-in-depth, AD-4 rule 3)"
+                    )
+                elif low is not None and value < low:
+                    message = (
+                        f"{type_name}'s '{field}' = {args[field]} is below the minimum of "
+                        f"{low:g} the renderer accepts here"
+                    )
+                else:
                     continue
                 findings.append(
                     Finding(
                         stage=_STAGE,
-                        message=(
-                            f"{type_name}'s '{field}' = {args[field]} exceeds the "
-                            f"resource-bound ceiling of {ceiling} (defense-in-depth, "
-                            f"AD-4 rule 3)"
-                        ),
+                        message=message,
                         field=field,
                         identifier=args[field],
                         line=line_of(scene_text, offset),
                     )
                 )
     return findings
+
+
+def _bounds_for(
+    type_name: str, field: str, default_ceiling: float, args: dict[str, str]
+) -> tuple[float | None, float | None]:
+    """(minimum, ceiling) for one constructor call: the per-subtype bounds from `limitsBy`
+    when the discriminating argument (`spongeType`) is a literal the manifest lists, else the
+    conservative field-level ceiling and no minimum (usability review 2026-10, F59)."""
+    manifest_field = _SUBTYPE_FIELDS.get((type_name, field))
+    if manifest_field is None:
+        return None, default_ceiling
+    discriminator = discriminator_of(manifest_field)
+    subtype = subtype_of(args.get(discriminator)) if discriminator else None
+    by_value = (manifest_field.get("limitsBy") or {}).get("values") or {}
+    if subtype not in by_value:
+        return None, default_ceiling
+    low, high, _ = field_bounds(manifest_field, subtype)
+    return low, high

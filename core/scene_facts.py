@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from gauntlet._scala_text import as_float, find_call_bodies, named_args, scan_balanced, split_top_level
+from gauntlet.manifest_bounds import subtype_of
 
 Vec3 = tuple[float, float, float]
 
@@ -143,6 +144,9 @@ class ObjectFact:
     # built from expressions (F8 recurrence) and the 4D `projection` (F45).
     pos_text: Optional[str] = None
     projection_text: Optional[str] = None
+    # The value of the `spongeType` argument (`RecursiveIAS`), which selects the manifest's
+    # per-subtype level bounds (F59); `None` when absent or not an identifier.
+    subtype: Optional[str] = None
 
     @property
     def is_opaque(self) -> bool:
@@ -300,6 +304,7 @@ def _extract_objects(text: str) -> list[ObjectFact]:
                 type_name, offset, pos, size, color, rotation, material, opacity, level,
                 pos_text=_normalized(args.get("pos")),
                 projection_text=_normalized(args.get("projection")),
+                subtype=subtype_of(args.get("spongeType")),
             ))
     return objects
 
@@ -438,6 +443,21 @@ def occlusion_warnings(facts: SceneFacts) -> list[str]:
 _CHAOTIC_TRANSPARENT_SPONGE_LEVEL = 2.0
 
 
+def manifest_subtype_warn_levels(manifest: dict) -> dict[tuple[str, str], dict[str, Optional[float]]]:
+    """(type, field) -> {subtype: its `warnAt` or None} from the manifest's `limitsBy` (schema
+    1.4.0). A subtype with no `warnAt` (RecursiveIAS) never triggers the slow-level caveat,
+    unlike the field-level default."""
+    return {
+        (obj["name"], f["name"]): {
+            value: (None if bounds.get("warnAt") is None else float(bounds["warnAt"]))
+            for value, bounds in f["limitsBy"].get("values", {}).items()
+        }
+        for obj in manifest.get("objects", [])
+        for f in obj.get("fields", [])
+        if f.get("limitsBy")
+    }
+
+
 def manifest_warn_levels(manifest: dict) -> dict[tuple[str, str], float]:
     """(type, field) -> the manifest's `warnAt` (schema 1.3.0): from that value on, rendering
     gets slow."""
@@ -449,7 +469,11 @@ def manifest_warn_levels(manifest: dict) -> dict[tuple[str, str], float]:
     }
 
 
-def caveat_warnings(facts: SceneFacts, warn_levels: dict[tuple[str, str], float]) -> list[str]:
+def caveat_warnings(
+    facts: SceneFacts,
+    warn_levels: dict[tuple[str, str], float],
+    subtype_warn_levels: Optional[dict[tuple[str, str], dict[str, Optional[float]]]] = None,
+) -> list[str]:
     """Caveats the user should hear about even when the request asked for exactly this:
     a level that reaches the renderer's slowness threshold (F36: animated past it silently) and
     a transparent material on a tesseract sponge from level 2 up, which renders as chaotic
@@ -459,6 +483,9 @@ def caveat_warnings(facts: SceneFacts, warn_levels: dict[tuple[str, str], float]
         if obj.level is None:
             continue
         warn_at = warn_levels.get((obj.type_name, "level"))
+        by_subtype = (subtype_warn_levels or {}).get((obj.type_name, "level"), {})
+        if obj.subtype in by_subtype:
+            warn_at = by_subtype[obj.subtype]
         if warn_at is not None and obj.level >= warn_at:
             warnings.append(
                 f"the {obj.type_name} reaches level {obj.level:g}; rendering gets slow from "

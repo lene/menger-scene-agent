@@ -28,6 +28,7 @@ from core.scene_facts import (
     caveat_warnings,
     extract_scene_facts,
     facts_diff,
+    manifest_subtype_warn_levels,
     manifest_warn_levels,
     occlusion_warnings,
 )
@@ -304,7 +305,9 @@ def run_turn(
         turn_warnings = turn_warnings + occlusion_warnings(new_facts)
         # F36, #4c: caveats about the current scene the user should hear even when the request
         # asked for exactly this (a slow level, glass on a 4D sponge).
-        turn_warnings = turn_warnings + caveat_warnings(new_facts, manifest_warn_levels(manifest))
+        turn_warnings = turn_warnings + caveat_warnings(
+            new_facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
+        )
 
         _emit("reading back")
         readback_result = semantic_readback(scene_text, adapter, warnings=turn_warnings)

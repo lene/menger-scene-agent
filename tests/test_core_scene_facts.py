@@ -241,7 +241,11 @@ def test_garbage_input_never_raises():
 
 # --- usability review 2026-09, session 2: F36 (msa#15), #4c/F55 (msa#13) -------------------
 
-from core.scene_facts import caveat_warnings, manifest_warn_levels  # noqa: E402
+from core.scene_facts import (  # noqa: E402
+    caveat_warnings,
+    manifest_subtype_warn_levels,
+    manifest_warn_levels,
+)
 
 _WARN_LEVELS = {("TesseractSponge", "level"): 2.0, ("Sponge", "level"): 3.0}
 
@@ -332,3 +336,45 @@ def test_facts_diff_does_not_report_what_the_request_asked_for():
 
     assert facts_diff(before, after, prompt="make it aluminium") == []
     assert facts_diff(before, after, prompt="make it bigger") != []
+
+
+# --- usability review 2026-10, session 3: F59 per-subtype warnAt (manifest 1.4.0) -------------
+
+_SUBTYPE_MANIFEST = {"objects": [{"name": "Sponge", "fields": [{
+    "name": "level", "warnAt": 3.0,
+    "limitsBy": {"field": "spongeType", "values": {
+        "VolumeFilling": {"min": 0, "max": 5, "warnAt": 3},
+        "RecursiveIAS": {"min": 1, "max": 13},
+    }},
+}]}]}
+
+
+def test_object_fact_carries_the_sponge_type_argument():
+    facts = extract_scene_facts("Sponge(spongeType = SpongeType.RecursiveIAS, level = 5f)")
+    assert facts.objects[0].subtype == "RecursiveIAS"
+
+
+def test_manifest_subtype_warn_levels_reads_limits_by_and_keeps_missing_warn_at_as_none():
+    assert manifest_subtype_warn_levels(_SUBTYPE_MANIFEST) == {
+        ("Sponge", "level"): {"VolumeFilling": 3.0, "RecursiveIAS": None}
+    }
+
+
+def test_caveat_does_not_warn_about_slowness_for_a_recursive_ias_sponge():
+    facts = extract_scene_facts("Sponge(spongeType = RecursiveIAS, level = 6f)")
+    warnings = caveat_warnings(
+        facts,
+        manifest_warn_levels(_SUBTYPE_MANIFEST),
+        manifest_subtype_warn_levels(_SUBTYPE_MANIFEST),
+    )
+    assert warnings == []
+
+
+def test_caveat_still_warns_for_a_volume_filling_sponge_at_the_warn_level():
+    facts = extract_scene_facts("Sponge(spongeType = VolumeFilling, level = 3f)")
+    warnings = caveat_warnings(
+        facts,
+        manifest_warn_levels(_SUBTYPE_MANIFEST),
+        manifest_subtype_warn_levels(_SUBTYPE_MANIFEST),
+    )
+    assert any("slow" in w for w in warnings)
