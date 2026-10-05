@@ -58,13 +58,14 @@ def test_repeat_request_same_capability_overwrites_rather_than_duplicates(tmp_pa
     assert len(list(tmp_path.iterdir())) == 1
 
 
-def test_repeat_request_overwritten_file_has_the_new_content(tmp_path):
+def test_repeat_request_keeps_every_use_case_in_the_one_draft(tmp_path):
+    # Session 3, F79: the draft collects every request that hit the capability (it used to
+    # keep only the last).
     write_draft("torus knot geometry", "first prompt", tmp_path)
     result = write_draft("torus knot geometry", "second prompt", tmp_path)
 
     text = Path(result).read_text(encoding="utf-8")
-    assert "second prompt" in text
-    assert "first prompt" not in text
+    assert "- first prompt\n- second prompt\n" in text
 
 
 def test_repeat_request_differing_only_by_surrounding_whitespace_overwrites_not_duplicates(
@@ -80,8 +81,7 @@ def test_repeat_request_differing_only_by_surrounding_whitespace_overwrites_not_
     assert first_result == second_result
     assert len(list(tmp_path.iterdir())) == 1
     text = Path(second_result).read_text(encoding="utf-8")
-    assert "second prompt" in text
-    assert "first prompt" not in text
+    assert "- first prompt\n- second prompt\n" in text
 
 
 # --- Two different capabilities: no collision -----------------------------------------------
@@ -227,3 +227,45 @@ def test_draft_names_the_nearest_possible_alternative_when_given(tmp_path):
     text = Path(path).read_text(encoding="utf-8")
     assert "## Nearest possible today" in text
     assert "an emissive surface" in text
+
+
+# --- Usability review 2026-10, session 3 (F79): titles, de-dupe, use cases, session -------
+
+# The three declines session 3 turned into three drafts of one capability.
+_GLOW_DECLINES = (
+    "no glow or halo around an object, and no emission that falls off with distance",
+    "there is no glow or halo effect in this DSL",
+    "no glow or halo exists",
+)
+
+
+def test_the_title_names_the_capability_as_a_request_not_the_decline(tmp_path):
+    result = write_draft(_GLOW_DECLINES[0], PROMPT, tmp_path)
+
+    first_line = Path(result).read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == "# Support glow or halo around an object"
+
+
+def test_differently_worded_declines_of_one_capability_share_one_draft(tmp_path):
+    paths = {
+        write_draft(decline, f"prompt {i}", tmp_path, session_id=f"s{i}")
+        for i, decline in enumerate(_GLOW_DECLINES)
+    }
+
+    assert len(paths) == 1
+    text = Path(paths.pop()).read_text(encoding="utf-8")
+    for i in range(3):
+        assert f"- prompt {i} (session s{i})" in text
+
+
+def test_unrelated_capabilities_stay_separate(tmp_path):
+    write_draft("no camera shake", PROMPT, tmp_path)
+    write_draft("no orbiting camera path", PROMPT, tmp_path)
+
+    assert len(list(tmp_path.glob("*.md"))) == 2
+
+
+def test_a_draft_says_when_it_is_done(tmp_path):
+    text = Path(write_draft("no 5D penteract", PROMPT, tmp_path)).read_text(encoding="utf-8")
+
+    assert "## Done when" in text

@@ -32,7 +32,7 @@ import tempfile
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 from core.types import TicketError, TicketResult
 
@@ -72,16 +72,76 @@ def _draft_filename(missing_capability: str) -> str:
     return f"{stem}-{digest}.md"
 
 
-def _draft_text(missing_capability: str, prompt: str, nearest: str = "") -> str:
+def _title(missing_capability: str) -> str:
+    """The capability as a request (session 3, F79: titles were the decline sentence): the
+    first clause, without the negation around it -- "there is no glow or halo effect in this
+    DSL" -> "Support glow or halo effect"."""
+    text = re.split(r",? and no |; | -- ", missing_capability.strip())[0]
+    text = re.sub(r"^(?:there is |there are |the DSL has |this DSL has )?no\s+", "", text, flags=re.I)
+    text = re.sub(r"\s+(?:exists?|is possible|in (?:this|the) DSL)\b.*$", "", text, flags=re.I)
+    return f"Support {text.strip()}"
+
+
+# Words that say nothing about which capability a title names (de-dupe, F79).
+_GENERIC_WORDS = frozenset({
+    "support", "the", "and", "around", "with", "for", "from", "that", "this", "object",
+    "objects", "effect", "effects", "scene", "any", "into", "onto",
+})
+
+
+def _content_words(title: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 1} - _GENERIC_WORDS
+
+
+def _same_capability(a: str, b: str) -> bool:
+    """Two titles name one capability when their content words mostly overlap: session 3's
+    three glow declines ({glow, halo}, {glow, halo}, {glow, halo}) but not "camera shake" and
+    "orbiting camera path"."""
+    words_a, words_b = _content_words(a), _content_words(b)
+    if not words_a or not words_b:
+        return a == b
+    shared = len(words_a & words_b)
+    smaller = min(len(words_a), len(words_b))
+    return shared >= min(2, smaller) and shared / smaller >= 2 / 3
+
+
+def _existing_draft(drafts_dir: Path, title: str) -> Optional[Path]:
+    for draft in sorted(drafts_dir.glob("*.md")):
+        with suppress(OSError, UnicodeError):
+            first_line = draft.read_text(encoding="utf-8").splitlines()[0]
+            if _same_capability(first_line.removeprefix("# "), title):
+                return draft
+    return None
+
+
+def _use_cases(draft: Optional[Path]) -> list[str]:
+    if draft is None:
+        return []
+    with suppress(OSError, UnicodeError):
+        text = draft.read_text(encoding="utf-8")
+        section = text.split("## Use cases\n", 1)[1].split("\n## ", 1)[0]
+        return [line for line in section.splitlines() if line.startswith("- ")]
+    return []
+
+
+def _draft_text(
+    missing_capability: str, use_cases: list[str], nearest: str = ""
+) -> str:
     timestamp = datetime.now(timezone.utc).isoformat()
     text = (
-        f"# Missing capability: {missing_capability}\n\n"
-        f"**Requested:** {timestamp}\n\n"
-        "## Triggering prompt\n\n"
-        f"{prompt}\n"
+        f"# {_title(missing_capability)}\n\n"
+        f"**Declined as:** {missing_capability.strip()}\n\n"
+        f"**Last requested:** {timestamp}\n\n"
+        "## Use cases\n\n"
+        + "".join(f"{case}\n" for case in use_cases)
     )
     if nearest.strip():
         text += f"\n## Nearest possible today\n\n{nearest.strip()}\n"
+    text += (
+        "\n## Done when\n\n"
+        "A scene can express the use cases above as asked, not only through the nearest "
+        "workaround.\n"
+    )
     return text
 
 
@@ -98,6 +158,7 @@ def write_draft(
     prompt: str,
     drafts_dir: Union[str, Path],
     nearest: str = "",
+    session_id: str = "",
 ) -> TicketResult:
     """Writes a ticket draft naming `missing_capability` and the `prompt` that surfaced it,
     under `drafts_dir` (always an injected parameter -- AD-10). Returns the written file's
@@ -105,8 +166,10 @@ def write_draft(
     (Boundaries & Constraints).
 
     The draft filename is deterministic from `missing_capability` alone (AD-17): a second
-    call with the same `missing_capability` text overwrites the first draft's file rather
-    than creating a second one, regardless of `prompt`.
+    call with the same `missing_capability` text rewrites the first draft's file rather
+    than creating a second one, regardless of `prompt`. Session 3 (F79): so does a differently
+    worded decline of the same capability (`_same_capability`), and the rewrite keeps every
+    earlier use case, adding this `prompt` (with `session_id`, when given).
     """
     if not missing_capability.strip():
         return TicketError(
@@ -128,8 +191,13 @@ def write_draft(
     # contract.
     tmp_name = None
     try:
-        target = resolved_dir / _draft_filename(missing_capability)
-        text = _draft_text(missing_capability, prompt, nearest)
+        # F79: one draft per capability -- a differently worded decline of the same one adds
+        # its use case to the existing draft instead of starting a second.
+        existing = _existing_draft(resolved_dir, _title(missing_capability))
+        target = existing or resolved_dir / _draft_filename(missing_capability)
+        case = " ".join(prompt.split()) + (f" (session {session_id})" if session_id else "")
+        use_cases = [c for c in _use_cases(existing) if c != f"- {case}"] + [f"- {case}"]
+        text = _draft_text(missing_capability, use_cases, nearest)
 
         fd, tmp_name = tempfile.mkstemp(
             dir=resolved_dir, prefix=f".{target.name}.", suffix=".tmp"

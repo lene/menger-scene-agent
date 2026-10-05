@@ -774,7 +774,9 @@ def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:
         drafts_dir.mkdir(exist_ok=True)
     except OSError:
         return
-    draft = write_draft(missing or prompt, prompt, drafts_dir, nearest=nearest)
+    draft = write_draft(
+        missing or prompt, prompt, drafts_dir, nearest=nearest, session_id=store.session_dir.name
+    )
     if isinstance(draft, str):
         print(f"  Ticket draft: {draft}")
 
