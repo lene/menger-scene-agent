@@ -193,6 +193,9 @@ def revise(
         "a new material replaces the look the old one imitated -- when the request swaps an "
         "object's material (\"make it aluminium\" on a wood-grained object), drop a "
         "`proceduralType` that only imitated the old material (wood grain, marble veins) "
-        "unless the request keeps it."
+        "unless the request keeps it. The doc comment, the `object` name and the "
+        "`SceneRegistry.register` id are not content to carry over: when the change makes any "
+        "of them false (a level, type or material they name), update them to match the "
+        "modified scene, the name and the id consistently."
     )
     return _complete(system_prompt, user_prompt, adapter)

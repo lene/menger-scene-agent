@@ -153,6 +153,10 @@ def test_turn_1_then_turn_2_through_a_real_session_diff_touches_only_timing_and_
     forbidden_keywords = ("camera", "material", "directional", "light", "background")
     for line in changed_lines:
         lowered = line.lower()
+        if lowered.lstrip().startswith(("/*", "*", "//")):
+            # The doc comment is updated to describe the changed scene (session 3, stale
+            # name/doc comment); a comment line naming the background changes no setting.
+            continue
         assert not any(keyword in lowered for keyword in forbidden_keywords), (
             "CAP-3 diff bar violated: camera/material/lights/background must be "
             f"byte-identical between turns, but a changed line mentions one of "

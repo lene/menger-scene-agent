@@ -419,3 +419,27 @@ def test_revise_prompt_drops_a_pattern_that_imitated_the_replaced_material():
     revise("make it aluminium", "prior scene text", VALID_MANIFEST, VALID_CORPUS, adapter)
 
     assert "replaces the look the old one imitated" in adapter.last_request.user_prompt
+
+
+# --- Usability review 2026-10, session 3 (INBOX 2026-10-04): stale name and doc comment -----
+
+
+def test_revise_prompt_keeps_the_doc_comment_and_name_true_to_the_scene():
+    # Session 3, Task 3: a level-4.75 SurfaceUnfolding sponge was still `MengerLevel2`,
+    # registered as "menger-level-2", with a level-2 doc comment.
+    prior = "object MengerLevel2:\n  val scene = Scene()\n"
+    adapter = FakeModelAdapter(result=prior)
+
+    revise("go to level 4.75", prior, VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    user_prompt = adapter.last_request.user_prompt
+    assert "doc comment" in user_prompt
+    assert "SceneRegistry.register" in user_prompt
+
+
+def test_system_prompt_names_scenes_by_subject_not_parameter_values():
+    adapter = FakeModelAdapter(result="object GlassSponge:\n  val scene = Scene()\n")
+
+    revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert "not by a parameter value" in adapter.last_request.system_prompt
