@@ -83,9 +83,19 @@ def removed_properties(prior_scene: Optional[str], new_scene: str) -> List[str]:
     removed proceduralType" -- usability review 2026-09, F29."""
     if prior_scene is None:
         return []
-    before = set(_NAMED_ARGUMENT.findall(prior_scene))
-    after = set(_NAMED_ARGUMENT.findall(new_scene))
+    before = _named_arguments(prior_scene)
+    after = _named_arguments(new_scene)
     return sorted(before - after)
+
+
+def _named_arguments(scene: str) -> set[str]:
+    # A `val x =` is a definition, not an argument: `val scene` -> `def scene(t)` is no
+    # removal (F75).
+    return {
+        match.group(1)
+        for match in _NAMED_ARGUMENT.finditer(scene)
+        if not re.search(r"\b(?:val|var)\s+$", scene[: match.start()])
+    }
 
 
 def _run_local_checks(scene_text: str) -> List[Finding]:

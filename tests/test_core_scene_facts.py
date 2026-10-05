@@ -17,6 +17,18 @@ def test_parse_vec3_returns_none_for_non_literal():
     assert parse_vec3("Vec3(t, 2f, 3f)") is None
 
 
+def test_parse_vec3_reads_a_tuple_literal():
+    # Session 3's scenes all wrote `pos = (0f, 0f, 0f)`; only `Vec3(...)` was parsed, so every
+    # position and the camera were unknown and the occlusion check never ran (F78).
+    assert parse_vec3("(1f, 2f, -3f)") == (1.0, 2.0, -3.0)
+
+
+def test_camera_with_tuple_vectors_is_extracted():
+    facts = extract_scene_facts("Camera(position = (9f, 4.75f, 13.5f), lookAt = (0f, 3.25f, 0f))")
+
+    assert facts.camera == ((9.0, 4.75, 13.5), (0.0, 3.25, 0.0))
+
+
 def test_parse_color_rgb_ignores_a_fourth_alpha_component():
     assert parse_color_rgb("Color(1f, 0f, 0f, 0.5f)") == (1.0, 0.0, 0.0)
 
@@ -166,6 +178,32 @@ def test_facts_diff_flags_a_changed_material():
     assert any("Glass" in w and "Chrome" in w for w in warnings)
 
 
+def test_local_material_is_named_by_its_val_not_none():
+    # F75: `material = Some(emissiveGreen)` read as "none", so a turn reported "changed the
+    # material from Film to none".
+    scene = (
+        "val emissiveGreen = Material(color = Color(0.1f, 0.8f, 0.3f), emission = 1.0f)\n"
+        "Sponge(material = Some(emissiveGreen))\n"
+    )
+
+    fact = extract_scene_facts(scene).objects[0]
+
+    assert fact.material == "emissiveGreen"
+    assert fact.is_opaque
+
+
+def test_local_copy_of_a_preset_keeps_the_preset_name():
+    scene = (
+        "private val tinted = Material.Glass.copy(ior = 1.6f)\n"
+        "Sphere(material = Some(tinted))\n"
+    )
+
+    fact = extract_scene_facts(scene).objects[0]
+
+    assert fact.material == "Glass"
+    assert not fact.is_opaque
+
+
 def test_facts_diff_flags_a_moved_camera():
     before = extract_scene_facts("Camera(position = Vec3(0f, 0f, 5f), lookAt = Vec3(0f, 0f, 0f))")
     after = extract_scene_facts("Camera(position = Vec3(0f, 0f, 9f), lookAt = Vec3(0f, 0f, 0f))")
@@ -194,9 +232,9 @@ def test_facts_diff_skips_objects_whose_type_changed_at_the_same_index():
 # --- occlusion_warnings (F23) ------------------------------------------------------------------
 
 
-def test_occlusion_warning_for_a_small_orb_centered_inside_an_opaque_sponge():
+def test_occlusion_warning_for_a_small_orb_centered_inside_an_opaque_cube():
     scene = (
-        "Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome))\n"
+        "Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome))\n"
         "Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
     )
     facts = extract_scene_facts(scene)
@@ -205,12 +243,33 @@ def test_occlusion_warning_for_a_small_orb_centered_inside_an_opaque_sponge():
 
     assert len(warnings) == 1
     assert "Sphere" in warnings[0]
-    assert "Sponge" in warnings[0]
+    assert "Cube" in warnings[0]
+
+
+def test_occlusion_warning_for_an_orb_inside_a_cube_with_a_local_material():
+    scene = (
+        "val stone = Material(color = Color(0.5f, 0.5f, 0.5f), roughness = 1.0f)\n"
+        "Cube(pos = (0f, 0f, 0f), size = 5f, material = Some(stone))\n"
+        "Sphere(pos = (0f, 0f, 0f), size = 0.5f)\n"
+    )
+
+    assert len(occlusion_warnings(extract_scene_facts(scene))) == 1
+
+
+def test_no_occlusion_warning_inside_a_sponge_because_it_has_holes():
+    # Session 3, 4.13: the orb inside the tesseract sponge was visible through its holes (F78).
+    for occluder in ("Sponge", "TesseractSponge"):
+        scene = (
+            f"{occluder}(pos = (0f, 0f, 0f), size = 2.5f, material = Some(Material.Chrome))\n"
+            "Sphere(pos = (0f, 0f, 0f), size = 0.8f)\n"
+        )
+
+        assert occlusion_warnings(extract_scene_facts(scene)) == [], occluder
 
 
 def test_no_occlusion_warning_when_the_containing_object_is_transparent():
     scene = (
-        "Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass))\n"
+        "Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass))\n"
         "Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
     )
     facts = extract_scene_facts(scene)

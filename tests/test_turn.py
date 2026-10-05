@@ -1222,12 +1222,13 @@ def test_accepted_revise_turn_warns_about_a_moved_object_the_request_did_not_ask
     assert "Sphere" in result.warnings[0]
 
 
-def test_accepted_turn_warns_when_an_orb_is_hidden_inside_an_opaque_sponge(tmp_path, monkeypatch):
+def test_accepted_turn_warns_when_an_orb_is_hidden_inside_an_opaque_cube(tmp_path, monkeypatch):
     # Usability review 2026-09 (F23) -- runs on generate() too, not just revise(), since
-    # occlusion is a property of the current scene, not a before/after diff.
+    # occlusion is a property of the current scene, not a before/after diff. A cube, not a
+    # sponge: a sponge has holes and never occludes (F78).
     scene = (
         "object Hidden:\n  val scene = Scene(objects = List(\n"
-        "    Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome)),\n"
+        "    Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome)),\n"
         "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
         "  ))\n"
     )
@@ -1240,13 +1241,13 @@ def test_accepted_turn_warns_when_an_orb_is_hidden_inside_an_opaque_sponge(tmp_p
     monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
 
     result = run_turn(
-        "put a small orb in the sponge", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
+        "put a small orb in the cube", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
         _SCRIPT_PATH,
     )
 
     assert result.tag == "accepted"
     assert len(result.warnings) == 1
-    assert "Sphere" in result.warnings[0] and "Sponge" in result.warnings[0]
+    assert "Sphere" in result.warnings[0] and "Cube" in result.warnings[0]
 
 
 def test_no_occlusion_warning_when_the_containing_object_is_glass(tmp_path, monkeypatch):
@@ -1314,6 +1315,14 @@ def test_removed_properties_is_empty_for_a_first_scene_or_an_unchanged_one():
 
 def test_removed_properties_ignores_comparisons():
     assert removed_properties("if level == 2 then x", "x") == []
+
+
+def test_removed_properties_ignores_definitions():
+    # F75: turning `val scene = ...` into `def scene(t: Float) = ...` is not "removed scene".
+    before = "val scene = Scene(objects = List())"
+    after = "def scene(t: Float): Scene = Scene(objects = List())"
+
+    assert removed_properties(before, after) == []
 
 
 def test_accepted_turn_warns_about_glass_on_a_level_2_tesseract_sponge(tmp_path, monkeypatch):

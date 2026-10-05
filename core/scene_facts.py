@@ -60,11 +60,16 @@ _TRANSPARENT_MATERIAL_PRESETS = frozenset({
     "Glass", "Water", "Diamond", "GlassDispersive", "DiamondDispersive", "Film",
 })
 _TRANSPARENT_MATERIAL_OPACITY_HINT = 0.3
+# Fractals with holes through them: an object inside one stays visible through the holes, so
+# they never occlude (F78: the orb inside a tesseract sponge was visible).
+_HOLED_TYPES = frozenset({"Sponge", "TesseractSponge", "Sierpinski4D"})
 
 
 def parse_vec3(value: str) -> Optional[Vec3]:
+    """`Vec3(x, y, z)` or the tuple `(x, y, z)` the DSL converts implicitly (F78: session 3's
+    scenes only used tuples)."""
     value = value.strip()
-    match = re.match(r"^Vec3\((.*)\)$", value, re.DOTALL)
+    match = re.match(r"^(?:Vec3)?\((.*)\)$", value, re.DOTALL)
     if not match:
         return None
     parts = split_top_level(match.group(1))
@@ -114,10 +119,31 @@ def _parse_color_literal_option(value: str) -> Optional[Vec3]:
     return parse_color_rgb(inner)
 
 
-def _material_name(value: str) -> Optional[str]:
-    """`material = Some(Material.Glass)` (or a bare `Material.Glass`) -> `"Glass"`."""
+def _material_name(value: str, local_vals: dict[str, str]) -> Optional[str]:
+    """`material = Some(Material.Glass)` (or a bare `Material.Glass`) -> `"Glass"`. A local
+    `val` resolves to its definition: a preset copy (`Material.Glass.copy(...)`) keeps the
+    preset's name, a `Material(...)` of its own is named by the `val` (F75: it was "none")."""
     match = re.search(r"\bMaterial\.(\w+)", value)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1)
+    match = re.match(r"^(?:Some\()?\s*(\w+)\s*\)?$", value.strip())
+    if not match or match.group(1) not in local_vals:
+        return None
+    name = match.group(1)
+    return _material_name(local_vals[name], {}) or name
+
+
+def _material_opacity(material: str, value: str, local_vals: dict[str, str]) -> float:
+    """Coarse opacity of a material (F23): the alpha of a `Color` its definition sets (the DSL
+    defaults alpha to 1), else the preset hint."""
+    name = re.sub(r"^Some\(|\)$", "", value.strip()).strip()
+    definition = local_vals.get(name, value)
+    color = re.search(r"\bColor\(", definition)
+    if color:
+        close = scan_balanced(definition, color.end() - 1)
+        alpha = _parse_color_alpha(definition[color.start() : close + 1])
+        return alpha if alpha is not None else 1.0
+    return _TRANSPARENT_MATERIAL_OPACITY_HINT if material in _TRANSPARENT_MATERIAL_PRESETS else 1.0
 
 
 def _distance(a: Vec3, b: Vec3) -> float:
@@ -277,9 +303,23 @@ def _level_upper_bound(expr: str, env: dict[str, str]) -> Optional[float]:
     return None if None in ends else max(ends)
 
 
+def _local_vals(text: str) -> dict[str, str]:
+    """Local `val`s by name: the rest of the line, extended to the closing parenthesis when a
+    call spans lines (a multi-line `Material(...)`, F75)."""
+    vals = {}
+    for match in _LOCAL_VAL_RE.finditer(text):
+        value = match.group(2)
+        if value.count("(") > value.count(")"):
+            start = match.start(2)
+            open_idx = text.index("(", start)
+            value = text[start : scan_balanced(text, open_idx) + 1]
+        vals[match.group(1)] = value
+    return vals
+
+
 def _extract_objects(text: str) -> list[ObjectFact]:
     objects = []
-    local_vals = dict(_LOCAL_VAL_RE.findall(text))
+    local_vals = _local_vals(text)
     for type_name in OBJECT_TYPES:
         for offset, inner in find_call_bodies(text, type_name):
             args = named_args(inner)
@@ -287,10 +327,10 @@ def _extract_objects(text: str) -> list[ObjectFact]:
             size = as_float(args["size"]) if "size" in args else DEFAULT_SIZE
             color_arg = args.get("color")
             color = _parse_color_literal_option(color_arg) if color_arg is not None else None
-            material = _material_name(args["material"]) if "material" in args else None
+            material = _material_name(args["material"], local_vals) if "material" in args else None
             opacity = None
             if material is not None:
-                opacity = _TRANSPARENT_MATERIAL_OPACITY_HINT if material in _TRANSPARENT_MATERIAL_PRESETS else 1.0
+                opacity = _material_opacity(material, args["material"], local_vals)
             elif color_arg is not None:
                 alpha = _parse_color_alpha(
                     re.match(r"^Some\((.*)\)$", color_arg.strip(), re.DOTALL).group(1)
@@ -428,6 +468,8 @@ def occlusion_warnings(facts: SceneFacts) -> list[str]:
     warnings: list[str] = []
     for occluder in facts.objects:
         if occluder.pos is None or occluder.size is None or not occluder.is_opaque:
+            continue
+        if occluder.type_name in _HOLED_TYPES:
             continue
         for obj in facts.objects:
             if obj is occluder or obj.pos is None or obj.size is None:
