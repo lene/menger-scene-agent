@@ -309,11 +309,8 @@ def test_stage_callback_output_appears_before_final_turn_result_line(
     # stderr (with an explicit flush), never stdout -- stdout stays clean for the actual
     # "Turn N: tag" result line.
     # F50: the session line opens the session, on stderr with the other status lines.
-    assert captured.err.splitlines()[1:] == [
-        "... generating",
-        "... validating",
-        "... reading back",
-    ]
+    # Session 3 wish (msa#21): the stages share one line.
+    assert captured.err.splitlines()[1:] == ["... generating, validating, reading back"]
     assert captured.err.splitlines()[0].startswith("Session: ")
     # story 21: the render-refresh status line follows the turn result line on stdout.
     assert _file_names(captured.out.splitlines()) == [
@@ -2603,3 +2600,25 @@ def test_a_not_done_part_of_an_accepted_turn_writes_a_ticket_draft(monkeypatch, 
     assert "Not done: no 5D penteract -- nearest: a Tesseract" in out
     draft = [l for l in out.splitlines() if "Ticket draft:" in l][0].split("Ticket draft: ", 1)[1]
     assert "no 5D penteract" in open(draft, encoding="utf-8").read()
+
+
+def test_a_rejection_puts_reasons_and_the_nearest_on_their_own_lines():
+    # Session 3, F80b: "Rejected (unsupported): ... -- nearest: ..." was one very long line.
+    unsupported = TurnResult(
+        tag="unsupported", messages=["no glow or halo exists -- nearest: an emissive surface"]
+    )
+    compile_failure = TurnResult(
+        tag="compile_errors",
+        messages=["Compilation of 'a.scala' failed:\nline 3: Not found: X", "lint: too dark"],
+    )
+
+    assert cli._format_turn_result(unsupported) == (
+        "Rejected (unsupported):\n  no glow or halo exists\n  Nearest: an emissive surface"
+    )
+    assert cli._format_turn_result(compile_failure) == (
+        "Rejected (compile errors):\n  Compilation of 'a.scala' failed:\n  line 3: Not found: X"
+        "\n  lint: too dark"
+    )
+    assert cli._format_turn_result(TurnResult(tag="local_finding", messages=["bad thing"])) == (
+        "Rejected (local finding): bad thing"
+    )

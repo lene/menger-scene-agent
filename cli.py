@@ -290,11 +290,20 @@ def _tag_label(tag: str) -> str:
     return tag.replace("_", " ")
 
 
-def _rejection_line(tag: Optional[str], message: str) -> str:
-    if tag == "unchanged" and message:
-        return message  # F76: not a rejection; the message says "No change made: ..."
+def _rejection_line(tag: Optional[str], *messages: str) -> str:
+    """One line for a single short reason; otherwise every reason, every line of a multi-line
+    one (compiler output) and the nearest alternative on its own indented line (F80b)."""
+    messages = tuple(m for m in messages if m)
+    if tag == "unchanged" and messages:
+        return "; ".join(messages)  # F76: not a rejection; it says "No change made: ..."
     head = f"Rejected ({_tag_label(tag)})" if tag else "Rejected"
-    return f"{head}: {message}" if message else head
+    lines = []
+    for message in messages:
+        reason, found, nearest = message.partition(" -- nearest: ")
+        lines += reason.splitlines() + ([f"Nearest: {nearest}"] if found else [])
+    if len(lines) <= 1:
+        return f"{head}: {lines[0]}" if lines else head
+    return f"{head}:" + "".join(f"\n  {line}" for line in lines)
 
 
 def _format_history_entry(entry: dict, session_dir: Optional[Path] = None) -> str:
@@ -383,7 +392,7 @@ def _format_turn_result(
         if result.messages:
             text += " - " + "; ".join(result.messages)
     else:
-        text = _rejection_line(result.tag, "; ".join(result.messages))
+        text = _rejection_line(result.tag, *result.messages)
     if result.readback_summary:
         text += f"\n  Readback: {result.readback_summary}"
     if result.removed_properties:
@@ -810,13 +819,16 @@ def _execute_turn(
             script_path,
             on_stage=on_stage,
         )
+        _end_stage_line()
     except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
+        _end_stage_line()
         print(f"Turn error: {e}")
         return None, prior_scene, render_process
     except KeyboardInterrupt:
         # F51: Ctrl-C during a (slow, model-bound) turn abandons the turn, not the REPL, and
         # never prints a traceback. The scene is re-read in case the turn got as far as
         # accepting before the interrupt.
+        _end_stage_line()
         print("Turn interrupted (Ctrl-C).")
         return None, store.current_scene(), render_process
 
@@ -914,8 +926,22 @@ def _print_stage(stage: str) -> None:
     # explicitly (patch-level fix, post-review): ephemeral progress output belongs on
     # stderr, keeping stdout clean for the actual "Turn N: tag" result line -- and under any
     # buffered/piped stdout, unflushed progress output would silently defeat the entire
-    # point of a live status line (it would just look hung).
-    print(f"... {stage}", file=sys.stderr, flush=True)
+    # point of a live status line (it would just look hung). Session 3 (msa#21): the stages
+    # of one turn share a line, "... generating, validating, reading back";
+    # `_end_stage_line()` closes it when the turn returns.
+    global _stage_line_open
+    print(f", {stage}" if _stage_line_open else f"... {stage}", end="", file=sys.stderr, flush=True)
+    _stage_line_open = True
+
+
+_stage_line_open = False
+
+
+def _end_stage_line() -> None:
+    global _stage_line_open
+    if _stage_line_open:
+        print(file=sys.stderr, flush=True)
+    _stage_line_open = False
 
 
 def _is_consult_input(line: str) -> bool:
