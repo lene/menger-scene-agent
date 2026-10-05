@@ -25,9 +25,11 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
@@ -182,7 +184,7 @@ def crash_report(
         returncode = process.poll() if process is not None else None
     except Exception:
         return None
-    if returncode is None or returncode == 0:
+    if returncode is None:
         return None
     try:
         text = log_paths(scene_file)[1].read_text(errors="replace")
@@ -190,12 +192,110 @@ def crash_report(
         text = ""
     # Stack-frame lines ("at ...") never name the cause; prefer the last line that does.
     lines = [s for s in (raw.strip() for raw in text.splitlines()) if s and not s.startswith("at ")]
+    startup_failures = [s for s in lines if _STARTUP_FAILED in s]
+    # menger exits with status 0 when it cannot build the initial scene, so a zero exit with
+    # that line in the log is a crash, not a window the user closed (usability review
+    # 2026-10, session 3, F61).
+    if returncode == 0 and not startup_failures:
+        return None
     errors = [s for s in lines if "error" in s.lower() or "exception" in s.lower()]
-    detail = (errors or lines or ["no output in render.stderr.log"])[-1]
+    detail = (startup_failures or errors or lines or ["no output in render.stderr.log"])[-1]
     return f"exit {returncode}: {detail[:_STDOUT_PREVIEW_LENGTH]}"
 
 
 _FRAME_BUILD_FAILED = "FRAME-BUILD-FAILED "
+
+# Lines menger's render window writes to render.stderr.log about its own life cycle (usability
+# review 2026-10, session 3, F57/F61): "up" once it watches the scene file, the outcome of a
+# live reload, and the failure that makes it exit at the first scene.
+_UP = "Watching scene file for live reload"
+_RELOADED = ("Reloaded animated scene from file", "Reloaded scene from file")
+_RELOAD_FAILED = "Failed to reload"
+_KEEPING_SCENE = "keeping the current scene:"
+_KIND_CHANGED = "restart the window to pick it up"
+_STARTUP_FAILED = "Failed to create initial"
+
+RELOAD_EVENTS = ("reloaded", "reload_failed", "kind_changed")
+LAUNCH_EVENTS = ("up",)
+
+
+@dataclass(frozen=True)
+class WindowEvent:
+    """What the window reported about itself: `up`, `reloaded`, `reload_failed` (the playing
+    scene stays), `kind_changed` (static <-> animated, needs a restart), `startup_failed` or
+    `exited` (the process ended), or `unavailable` (no log to read)."""
+
+    kind: str
+    detail: str = ""
+
+
+def log_size(scene_file: Union[str, Path]) -> int:
+    """Size of render.stderr.log now, the offset from which a wait reads only what the window
+    writes after an action. 0 when there is no log yet."""
+    try:
+        return log_paths(scene_file)[1].stat().st_size
+    except OSError:
+        return 0
+
+
+def _event_in(line: str, wanted: Iterable[str]) -> Optional[WindowEvent]:
+    if _STARTUP_FAILED in line:
+        return WindowEvent("startup_failed", line.split(_STARTUP_FAILED, 1)[1].strip(" :")[:_STDOUT_PREVIEW_LENGTH])
+    if "up" in wanted and _UP in line:
+        return WindowEvent("up")
+    if "reloaded" in wanted and any(marker in line for marker in _RELOADED):
+        return WindowEvent("reloaded")
+    if "reload_failed" in wanted and _RELOAD_FAILED in line:
+        # "Failed to reload <path>, keeping the current scene: <cause>" -- only the cause
+        # tells the user something the REPL line does not.
+        cause = line.split(_RELOAD_FAILED, 1)[1].split(_KEEPING_SCENE, 1)[-1]
+        return WindowEvent("reload_failed", cause.strip(" :")[:_STDOUT_PREVIEW_LENGTH])
+    if "kind_changed" in wanted and _KIND_CHANGED in line:
+        return WindowEvent("kind_changed")
+    return None
+
+
+def wait_for_window_event(
+    scene_file: Union[str, Path],
+    process: Optional[subprocess.Popen[str]],
+    offset: int,
+    wanted: Iterable[str],
+    timeout: float,
+    poll_interval: float = 0.2,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> Optional[WindowEvent]:
+    """Waits until the window reports one of `wanted` (or a startup failure) in what it wrote
+    to render.stderr.log after `offset`, or its process ends, or `timeout` seconds pass (then
+    `None`). Without a log file at all there is nothing to wait for: `unavailable`. Never
+    raises; this is how "Render window: reloaded" stops being a guess (F57)."""
+    log = log_paths(scene_file)[1]
+    if not log.exists():
+        return WindowEvent("unavailable")
+    wanted = tuple(wanted)
+    deadline = monotonic() + timeout
+    while True:
+        # The process status first: once it has ended the log is complete, so a marker it
+        # wrote just before exiting is found by the read below, not lost to a race.
+        try:
+            returncode = process.poll() if process is not None else None
+        except Exception:
+            returncode = None
+        try:
+            with open(log, "rb") as handle:
+                handle.seek(offset)
+                text = handle.read().decode(errors="replace")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            event = _event_in(line, wanted)
+            if event is not None:
+                return event
+        if returncode is not None:
+            return WindowEvent("exited", str(returncode))
+        if monotonic() >= deadline:
+            return None
+        sleep(poll_interval)
 
 
 def frame_build_failures(scene_file: Union[str, Path]) -> List[str]:

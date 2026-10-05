@@ -22,6 +22,7 @@ import pytest
 
 import cli
 from adapters.model import MissingAPIKeyError
+from adapters.render_window import WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.types import (
     ConsultError,
@@ -2419,3 +2420,107 @@ def test_help_documents_drop_ticket_drafts_and_self_repair(capsys):
     assert "/drop" in text
     assert "ticket draft" in text
     assert "repairing" in text
+
+
+# --- usability review 2026-10, session 3: F57/F61 render window status from what it says -----
+
+
+class _LiveWindow:
+    """A running window process stand-in."""
+
+    def poll(self):
+        return None
+
+
+def _after_reload(event):
+    window = _LiveWindow()
+    returned = cli._after_reload(event, Path("/s/current.scala"), "/fake/launcher", window)
+    return window, returned
+
+
+def test_a_confirmed_reload_prints_reloaded_and_keeps_tracking_the_window(capsys):
+    window, returned = _after_reload(WindowEvent("reloaded"))
+
+    assert capsys.readouterr().out.strip() == "Render window: reloaded"
+    assert returned is window
+
+
+def test_a_window_without_a_log_keeps_the_old_reloaded_wording(capsys):
+    _after_reload(WindowEvent("unavailable"))
+
+    assert capsys.readouterr().out.strip() == "Render window: reloaded"
+
+
+def test_a_failed_reload_says_so_and_names_the_reason(capsys):
+    window, returned = _after_reload(WindowEvent("reload_failed", "compile error"))
+
+    out = capsys.readouterr().out
+    assert "Render window: reload failed - compile error" in out
+    assert "keeps the previous scene" in out
+    assert returned is window
+
+
+def test_a_reload_nobody_confirmed_is_not_called_reloaded(capsys):
+    window, returned = _after_reload(None)
+
+    out = capsys.readouterr().out
+    assert "reloaded" not in out.replace("not confirmed the reload", "")
+    assert "has not confirmed the reload" in out
+    assert returned is window
+
+
+def test_a_window_that_died_on_the_reload_is_reported_as_crashed(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "crash_report", lambda process, scene: "exit 0: Failed to create")
+
+    _, returned = _after_reload(WindowEvent("startup_failed", "Failed to create"))
+
+    assert "Render window: crashed - exit 0: Failed to create" in capsys.readouterr().out
+    assert returned is None
+
+
+def test_a_scene_kind_change_restarts_the_window(monkeypatch, capsys):
+    fresh = _LiveWindow()
+    monkeypatch.setattr(
+        cli, "refresh_render_window", lambda *a, **kw: RenderWindowResult(process=fresh)
+    )
+    monkeypatch.setattr(cli, "wait_for_window_event", lambda *a, **kw: WindowEvent("up"))
+
+    _, returned = _after_reload(WindowEvent("kind_changed"))
+
+    assert (
+        "Render window: refreshed (the scene changed between static and animated)"
+        in capsys.readouterr().out
+    )
+    assert returned is fresh
+
+
+def test_a_launched_window_that_cannot_build_its_first_scene_is_reported_as_crashed(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        cli, "refresh_render_window", lambda *a, **kw: RenderWindowResult(process=_LiveWindow())
+    )
+    monkeypatch.setattr(
+        cli,
+        "wait_for_window_event",
+        lambda *a, **kw: WindowEvent("startup_failed", "preview scene: level out of range"),
+    )
+    monkeypatch.setattr(cli, "crash_report", lambda process, scene: None)
+
+    returned = cli._launch_window(Path("/s/current.scala"), "/fake/launcher", None)
+
+    assert "Render window: crashed - preview scene: level out of range" in capsys.readouterr().out
+    assert returned is None
+
+
+def test_a_launched_window_that_comes_up_is_refreshed(monkeypatch, capsys):
+    window = _LiveWindow()
+    monkeypatch.setattr(
+        cli, "refresh_render_window", lambda *a, **kw: RenderWindowResult(process=window)
+    )
+    monkeypatch.setattr(cli, "wait_for_window_event", lambda *a, **kw: WindowEvent("up"))
+
+    returned = cli._launch_window(Path("/s/current.scala"), "/fake/launcher", None)
+
+    assert capsys.readouterr().out.strip() == "Render window: refreshed"
+    assert returned is window

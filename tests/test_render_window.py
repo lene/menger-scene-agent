@@ -17,13 +17,18 @@ from typing import Any, List, Optional
 import pytest
 
 from adapters.render_window import (
+    LAUNCH_EVENTS,
+    RELOAD_EVENTS,
+    WindowEvent,
     close_render_window,
     crash_report,
     frame_build_failures,
     log_paths,
+    log_size,
     refresh_render_window,
     render_window_scene_path,
     sync_render_window_scene,
+    wait_for_window_event,
 )
 from core.types import RenderWindowError, RenderWindowResult
 
@@ -551,3 +556,140 @@ def test_sync_render_window_scene_leaves_no_temp_file_behind(tmp_path):
 
     leftovers = [p for p in tmp_path.iterdir() if p.name not in {"001.scala", "current.scala"}]
     assert leftovers == []
+
+
+# --- usability review 2026-10, session 3: F61 startup failure exits with status 0 -------------
+
+
+def test_crash_report_treats_a_zero_exit_after_a_startup_failure_as_a_crash(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "12:00:01 ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: "
+        "sponge-recursive-ias requires level in [1, 14)\n"
+    )
+
+    report = crash_report(FakePopen(returncode=0), scene_file)
+
+    assert report is not None
+    assert report.startswith("exit 0: ")
+    assert "sponge-recursive-ias requires level in [1, 14)" in report
+
+
+# --- wait_for_window_event (usability review 2026-10, session 3: F57/F61) ---------------------
+
+
+class _Clock:
+    """Deterministic time: `sleep` advances `now`, so a wait never really sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def _wait(scene_file, process, offset, wanted, timeout=5.0, clock=None):
+    clock = clock or _Clock()
+    return wait_for_window_event(
+        scene_file, process, offset, wanted, timeout,
+        poll_interval=0.5, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+
+
+def test_wait_reports_a_reload_the_window_logged_after_the_offset(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log = log_paths(scene_file)[1]
+    log.write_text("old: Reloaded scene from file (1 object(s))\n")
+    offset = log_size(scene_file)
+    log.write_text(
+        log.read_text() + "12:00:05 INFO  menger.engines.PreviewEngine - "
+        "Reloaded animated scene from file (duration 6.0s)\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), offset, RELOAD_EVENTS)
+
+    assert event == WindowEvent("reloaded")
+
+
+def test_wait_ignores_what_was_logged_before_the_offset(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("old: Reloaded scene from file (1 object(s))\n")
+
+    event = _wait(
+        scene_file, FakePopen(still_running=True), log_size(scene_file), RELOAD_EVENTS, timeout=2.0
+    )
+
+    assert event is None  # nothing new within the timeout
+
+
+def test_wait_reports_a_failed_reload_with_its_reason(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "WARN  menger.engines.PreviewEngine - Failed to reload /x/current.scala, keeping the "
+        "current scene: compile error\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
+
+    assert event == WindowEvent("reload_failed", "compile error")
+
+
+def test_wait_reports_a_scene_kind_change_that_needs_a_restart(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "WARN  menger.engines.InteractiveEngine - /x/current.scala changed to an animated "
+        "scene; live reload only supports static scenes -- restart the window to pick it up\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
+
+    assert event == WindowEvent("kind_changed")
+
+
+def test_wait_reports_a_window_that_is_up(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "INFO  menger.engines.PreviewEngine - Watching scene file for live reload: /x\n"
+    )
+
+    assert _wait(scene_file, FakePopen(still_running=True), 0, LAUNCH_EVENTS) == WindowEvent("up")
+
+
+def test_wait_reports_a_startup_failure_even_when_not_asked_for_it(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: boom\n"
+    )
+
+    event = _wait(scene_file, FakePopen(returncode=0), 0, LAUNCH_EVENTS)
+
+    assert event.kind == "startup_failed"
+    assert event.detail.endswith("boom")
+
+
+def test_wait_reports_an_exited_process_without_a_marker(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("INFO  Loading scene\n")
+
+    assert _wait(scene_file, FakePopen(returncode=1), 0, RELOAD_EVENTS) == WindowEvent("exited", "1")
+
+
+def test_wait_without_a_log_has_nothing_to_wait_for(tmp_path):
+    assert _wait(tmp_path / "001.scala", FakePopen(still_running=True), 0, RELOAD_EVENTS) == (
+        WindowEvent("unavailable")
+    )
+
+
+def test_wait_gives_up_after_the_timeout(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("INFO  Loading scene\n")
+    clock = _Clock()
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS, 3.0, clock)
+
+    assert event is None
+    assert clock.now >= 3.0

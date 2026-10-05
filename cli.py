@@ -88,11 +88,17 @@ from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter
 from adapters.render_window import (
+    LAUNCH_EVENTS,
+    RELOAD_EVENTS,
+    WindowEvent,
     close_render_window,
     crash_report,
     frame_build_failures,
+    log_size,
     refresh_render_window,
+    render_window_scene_path,
     sync_render_window_scene,
+    wait_for_window_event,
 )
 from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.tickets import write_draft
@@ -410,6 +416,13 @@ def _turn_paths(
     return None, None
 
 
+# Seconds the REPL waits for the render window to say what became of a reload or a launch: a
+# reload compiles the scene first (about 5 s), a launch also builds the first frame (usability
+# review 2026-10, session 3, F57/F61). Past them the window is reported as unconfirmed.
+_RELOAD_CONFIRM_SECONDS = 20.0
+_LAUNCH_CONFIRM_SECONDS = 25.0
+
+
 def _format_render_outcome(outcome: RenderWindowOutcome) -> str:
     # story 21: "print a one-line status" -- success carries nothing else to report (the
     # live Popen handle isn't printable status), failure names its typed kind/message so a
@@ -472,6 +485,65 @@ def _report_frame_build_failures(store: SceneStore, reported: int) -> int:
     return len(failures)
 
 
+def _launch_window(
+    window_path: Path,
+    render_launcher_path: str,
+    previous_process: Optional[subprocess.Popen[str]],
+    note: str = "",
+) -> Optional[subprocess.Popen[str]]:
+    """Launches (or relaunches) the window and waits until it reports that it is up -- or that
+    it could not build its first scene (menger then exits with status 0, which used to look
+    like a window the user had closed: F61). Returns the process to track, or None."""
+    outcome = refresh_render_window(window_path, render_launcher_path, previous_process=previous_process)
+    if not isinstance(outcome, RenderWindowResult):
+        print(_format_render_outcome(outcome))
+        return None
+    event = wait_for_window_event(window_path, outcome.process, 0, LAUNCH_EVENTS, _LAUNCH_CONFIRM_SECONDS)
+    if event is not None and event.kind in ("startup_failed", "exited"):
+        report = crash_report(outcome.process, window_path) or event.detail or "the window ended"
+        print(f"Render window: crashed - {report}")
+        return None
+    print(f"Render window: refreshed{note}")
+    return outcome.process
+
+
+def _after_reload(
+    event: Optional[WindowEvent],
+    window_path: Path,
+    render_launcher_path: str,
+    render_process: Optional[subprocess.Popen[str]],
+) -> Optional[subprocess.Popen[str]]:
+    """Reports what became of a live reload from what the window said about it (F57): the old
+    "Render window: reloaded" was printed for any running process, including an animated window
+    that never reloaded."""
+    kind = event.kind if event is not None else "timeout"
+    if kind in ("reloaded", "unavailable"):
+        # "unavailable": no log to read (a window not started by this adapter) -- as before.
+        print("Render window: reloaded")  # the file is already on the "Turn N" line
+        return render_process
+    if kind == "reload_failed":
+        print(
+            f"Render window: reload failed - {event.detail}; the window keeps the previous scene"
+        )
+        return render_process
+    if kind == "kind_changed":
+        return _launch_window(
+            window_path,
+            render_launcher_path,
+            render_process,
+            note=" (the scene changed between static and animated)",
+        )
+    if kind in ("startup_failed", "exited"):
+        report = crash_report(render_process, window_path) or "the window ended"
+        print(f"Render window: crashed - {report}")
+        return None
+    print(
+        "Render window: file synced, but the window has not confirmed the reload "
+        "(an older menger build, or still compiling)"
+    )
+    return render_process
+
+
 def _accept_and_refresh_render(
     store: SceneStore,
     render_launcher_path: str,
@@ -513,6 +585,9 @@ def _accept_and_refresh_render(
                 "impossible; SceneStore/run_turn's accept-then-report invariant may be "
                 "broken"
             )
+        # Where the window's log ends now: only what it writes after the sync tells whether
+        # this reload worked (F57).
+        offset = log_size(render_window_scene_path(store.session_dir))
         window_path = sync_render_window_scene(scene_path, store.session_dir)
 
         try:
@@ -523,20 +598,11 @@ def _accept_and_refresh_render(
             # than risking a sync with no window to show it.
             still_running = False
         if still_running:
-            print("Render window: reloaded")  # the file is already on the "Turn N" line
-            return render_process
-
-        render_outcome = refresh_render_window(
-            window_path,
-            render_launcher_path,
-            previous_process=render_process,
-        )
-        print(_format_render_outcome(render_outcome))
-        return (
-            render_outcome.process
-            if isinstance(render_outcome, RenderWindowResult)
-            else None
-        )
+            event = wait_for_window_event(
+                window_path, render_process, offset, RELOAD_EVENTS, _RELOAD_CONFIRM_SECONDS
+            )
+            return _after_reload(event, window_path, render_launcher_path, render_process)
+        return _launch_window(window_path, render_launcher_path, render_process)
     except Exception as e:  # noqa: BLE001 -- a render-refresh failure must not kill the REPL
         print(f"Render window: error - {e}")
         return None
