@@ -1,0 +1,29 @@
+name: CI
+
+# Unit suite on every push and PR. The live-model tests skip without their API keys, and nothing
+# here needs menger, Docker or a GPU (the gauntlet's renderer side is faked in the tests).
+# A push-event run is also what menger-toplevel's absence-of-run watchdog matches HEAD against.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev,gemini,openai-compatible]"
+
+      - name: Unit tests
+        run: python -m pytest -q
