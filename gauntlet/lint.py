@@ -25,9 +25,11 @@ the actual lint rules. Behavior is unchanged; this file's own tests are the safe
 from __future__ import annotations
 
 import math
+import re
+from typing import Optional
 
 from core.scene_facts import ObjectFact, extract_scene_facts
-from gauntlet._scala_text import line_of, strip_comments_and_strings
+from gauntlet._scala_text import as_float, line_of, scan_balanced, split_top_level, strip_comments_and_strings
 from gauntlet.types import Finding
 
 _STAGE = "lint"
@@ -169,6 +171,66 @@ def _check_degenerate_scale(objects, text) -> list[Finding]:
     return findings
 
 
+_REFRACTIVE_PRESETS = ("Glass", "Water", "Diamond", "GlassDispersive", "DiamondDispersive", "Film")
+_MATERIAL_CALL = re.compile(r"\bMaterial(?:\.(" + "|".join(_REFRACTIVE_PRESETS) + r")\.copy)?\(")
+_COLOR_ARG = re.compile(r"\bcolor\s*=\s*(Color\((?:[^()]|\([^()]*\))*\)|\"[^\"]*\"|[\w.]+)")
+# Alpha from here up reads as opaque: a refractive material needs a low alpha to transmit.
+_OPAQUE_ALPHA = 0.9
+
+
+def _color_alpha(value: str) -> Optional[float]:
+    """Alpha of a `color =` value: `Color(r, g, b[, a])`, a hex string (with or without
+    `Color(...)`, 8 digits carry alpha), or a named `Color.X`; 1 when it sets none, `None`
+    when it can't be read (a local val, a non-literal alpha)."""
+    hex_match = re.search(r"\"#?([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\"", value)
+    if hex_match:
+        digits = hex_match.group(1)
+        return int(digits[6:], 16) / 255 if len(digits) == 8 else 1.0
+    if value.startswith("Color("):
+        parts = split_top_level(value[len("Color(") : -1])
+        return as_float(parts[3]) if len(parts) >= 4 else 1.0
+    return 1.0 if value.startswith("Color.") else None
+
+
+def _check_refractive_alpha(raw_text: str, text: str) -> list[Finding]:
+    """F66 (session 3, recurring from session 1's F14): `Color(r, g, b)` and a 6-digit hex
+    default to alpha 1, so tinting a refractive preset (`Material.Glass.copy(color = ...)`) or
+    giving `Material(...)` an `ior` without a low-alpha colour renders fully opaque. Runs on
+    the raw text for hex strings; `text` (stripped, same offsets) keeps the paren scan sane."""
+    findings = []
+    for match in _MATERIAL_CALL.finditer(text):
+        open_idx = match.end() - 1
+        body = raw_text[open_idx + 1 : scan_balanced(text, open_idx)]
+        preset = match.group(1)
+        if preset is None:
+            ior = re.search(r"\bior\s*=\s*([\w.]+)", body)
+            ior_value = as_float(ior.group(1)) if ior else None
+            if ior_value is None or ior_value <= 1.0:
+                continue
+        color = _COLOR_ARG.search(body)
+        if color is None and preset is not None:
+            continue  # the preset's own colour keeps its low alpha
+        alpha = 1.0 if color is None else _color_alpha(color.group(1))
+        if alpha is None or alpha < _OPAQUE_ALPHA:
+            continue
+        name = f"Material.{preset}.copy" if preset else "Material(ior = ...)"
+        findings.append(
+            Finding(
+                stage=_STAGE,
+                message=(
+                    f"{name} is refractive but its colour has alpha {alpha:g}, which renders "
+                    "fully opaque (Color(r, g, b) and 6-digit hex default to alpha 1): give the "
+                    "colour a low alpha to keep it transparent, e.g. Color(r, g, b, 0.1f) or "
+                    "\"#RRGGBB1A\""
+                ),
+                field="refractive_alpha",
+                identifier=name,
+                line=line_of(text, match.start()),
+            )
+        )
+    return findings
+
+
 def check_lint(scene_text: str) -> list[Finding]:
     """The five stage-2 lint checks from `validation-gauntlet.md`, each evaluated only
     where the relevant DSL call uses literal values -- a `t`-driven expression is skipped
@@ -190,4 +252,5 @@ def check_lint(scene_text: str) -> list[Finding]:
     findings.extend(_check_camera_inside_object(camera, objects, text))
     findings.extend(_check_black_on_black(objects, background, text))
     findings.extend(_check_degenerate_scale(objects, text))
+    findings.extend(_check_refractive_alpha(scene_text, text))
     return findings

@@ -286,3 +286,48 @@ def test_full_corpus_has_no_lint_findings():
     for scene in scenes:
         findings = check_lint(scene["source"])
         assert findings == [], f"{scene['name']}: {findings}"
+
+
+# --- Usability review 2026-10, session 3 (F66): a tinted refractive material turned opaque --
+
+
+def _refractive_findings(scene: str) -> list:
+    return [f for f in check_lint(scene) if f.field == "refractive_alpha"]
+
+
+def test_a_tinted_glass_copy_without_alpha_is_flagged():
+    # Session 3, Task 3: `Material.Glass.copy(color = Color(1f, 0.5f, 0f))` rendered opaque.
+    findings = _refractive_findings(
+        "Sphere(material = Some(Material.Glass.copy(color = Color(1f, 0.5f, 0f))))"
+    )
+
+    assert len(findings) == 1
+    assert "alpha" in findings[0].message
+
+
+def test_a_six_digit_hex_tint_on_a_local_diamond_copy_is_flagged():
+    # Session 3, Task 8b turn 3: the "translucent" ruby stayed opaque.
+    scene = (
+        'val ruby = Material.Diamond.copy(color = Color("#CC1020"), roughness = 0.3f)\n'
+        "Sphere(material = Some(ruby))\n"
+    )
+
+    assert len(_refractive_findings(scene)) == 1
+
+
+def test_a_material_with_an_ior_and_no_colour_is_flagged():
+    assert len(_refractive_findings("Sphere(material = Some(Material(ior = 1.5f)))")) == 1
+
+
+def test_a_refractive_tint_with_low_alpha_passes():
+    for color in ("Color(1f, 0.5f, 0f, 0.1f)", 'Color("#CC10201A")', '"#CC10201A"'):
+        scene = f"Sphere(material = Some(Material.Glass.copy(color = {color})))"
+
+        assert _refractive_findings(scene) == [], color
+
+
+def test_an_untinted_preset_and_an_opaque_preset_copy_pass():
+    assert _refractive_findings("Sphere(material = Some(Material.Glass))") == []
+    assert _refractive_findings(
+        "Sphere(material = Some(Material.Gold.copy(color = Color(1f, 0.8f, 0f))))"
+    ) == []
