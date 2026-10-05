@@ -1463,3 +1463,36 @@ def test_a_refusal_is_never_repaired(tmp_path, monkeypatch):
 
     assert result.tag == "refused"
     assert len(adapter.requests) == 1
+
+
+def test_a_repair_that_changes_a_value_says_so(tmp_path, monkeypatch):
+    # F60 (session 3): a repair round clamped a requested level 5.8 to 5 without a word.
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    first = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5.8f)))\n"
+    repaired = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5f)))\n"
+    adapter = _SequenceAdapter([first, repaired])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it level 5.8", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert any(
+        "repair" in w and "Sponge level: 5.8 -> 5.0" in w and "missing ')'" in w
+        for w in result.warnings
+    ), result.warnings
+
+
+def test_a_repair_that_changes_no_fact_adds_no_warning(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert not any("repair" in w for w in result.warnings)

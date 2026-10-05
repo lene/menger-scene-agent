@@ -31,6 +31,7 @@ from core.scene_facts import (
     manifest_subtype_warn_levels,
     manifest_warn_levels,
     occlusion_warnings,
+    scene_changes,
 )
 from core.types import (
     GenerationError,
@@ -251,6 +252,8 @@ def run_turn(
         # candidate gets up to `repair_rounds` revisions with the failure fed back; each round
         # is a visible stage and each failed candidate is kept by `_record_rejected_safely`.
         rounds_done = 0
+        first_candidate = scene_text
+        repair_reasons: List[str] = []
         while True:
             _emit("validating")
             local_findings = _run_local_checks(scene_text)
@@ -309,9 +312,18 @@ def run_turn(
             if isinstance(repaired, GenerationError):
                 return rejection
             scene_text = repaired
+            repair_reasons.extend(feedback)
             rounds_done += 1
 
         new_facts = extract_scene_facts(strip_comments_and_strings(scene_text))
+        # F60: a repair may change what the request asked for (a level 5.8 clamped to 5 to fit
+        # a limit); every fact it changed is reported, with the reason it was repaired.
+        repair_warnings = [
+            f"the automatic repair changed {change} (to fix: {'; '.join(repair_reasons)})"
+            for change in scene_changes(
+                extract_scene_facts(strip_comments_and_strings(first_candidate)), new_facts
+            )
+        ] if rounds_done else []
         turn_warnings = (
             facts_diff(
                 extract_scene_facts(strip_comments_and_strings(prior_scene)), new_facts, prompt
@@ -328,6 +340,7 @@ def run_turn(
         turn_warnings = turn_warnings + caveat_warnings(
             new_facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
         )
+        turn_warnings = repair_warnings + turn_warnings
 
         _emit("reading back")
         readback_result = semantic_readback(
