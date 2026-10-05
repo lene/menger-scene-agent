@@ -291,6 +291,9 @@ class TurnResult:
     # review 2026-09, F8: a revise() turn silently moved something the user didn't ask to
     # move). Reported, not rejected -- same spirit as `removed_properties`.
     warnings: List[str] = field(default_factory=list)
+    # Parts of the request the accepted scene does not do, each "<part> -- nearest: <alt>",
+    # from the scene's `// NOT DONE:` lines (session 3, F81: they hid in a doc comment).
+    not_done: List[str] = field(default_factory=list)
 
 
 # `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):

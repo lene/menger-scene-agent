@@ -2533,3 +2533,37 @@ def test_an_unchanged_turn_is_not_shown_as_a_rejection():
     assert cli._format_turn_result(result) == "No change made: same scene."
     entry = {"outcome": "rejected", "reason": "unchanged: No change made: same scene."}
     assert cli._format_history_entry(entry) == "No change made: same scene."
+
+
+def test_not_done_parts_are_printed():
+    result = TurnResult(
+        tag="accepted", messages=[], ordinal=2, readback_summary="a tesseract",
+        not_done=["extrusion along w -- nearest: a Tesseract"],
+    )
+
+    assert "\n  Not done: extrusion along w -- nearest: a Tesseract" in cli._format_turn_result(result)
+
+
+def test_a_not_done_part_of_an_accepted_turn_writes_a_ticket_draft(monkeypatch, tmp_path, capsys):
+    # F81: a part the scene could not do gets a ticket draft, like a full decline (F49).
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _stub_render_window(monkeypatch)
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+        return TurnResult(
+            tag="accepted", messages=[], ordinal=1, readback_summary="a tesseract",
+            not_done=["no 5D penteract -- nearest: a Tesseract"],
+        )
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr("builtins.input", _scripted_input(["extrude it into a penteract"]))
+
+    assert cli.main([]) == 0
+
+    out = capsys.readouterr().out
+    assert "Not done: no 5D penteract -- nearest: a Tesseract" in out
+    draft = [l for l in out.splitlines() if "Ticket draft:" in l][0].split("Ticket draft: ", 1)[1]
+    assert "no 5D penteract" in open(draft, encoding="utf-8").read()

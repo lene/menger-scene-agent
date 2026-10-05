@@ -1496,3 +1496,27 @@ def test_a_repair_that_changes_no_fact_adds_no_warning(tmp_path, monkeypatch):
     )
 
     assert not any("repair" in w for w in result.warnings)
+
+
+def test_parts_the_scene_could_not_do_are_reported_not_hidden_in_a_comment(tmp_path, monkeypatch):
+    # F81 (session 3, Task 8a): the shortfall (no extrusion, no 5D type) was only in the doc
+    # comment; the REPL printed nothing.
+    _validator_sequence(monkeypatch, ["ok"])
+    scene = (
+        "// NOT DONE: extrusion along w -- nearest: switch to a Tesseract\n"
+        "//   NOT DONE:  a penteract (5D) -- nearest: none, the DSL is 4D at most \n"
+        + CLEAN_SCENE_TEXT
+    )
+    adapter = _SequenceAdapter([scene])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "extrude it into a penteract", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.not_done == [
+        "extrusion along w -- nearest: switch to a Tesseract",
+        "a penteract (5D) -- nearest: none, the DSL is 4D at most",
+    ]

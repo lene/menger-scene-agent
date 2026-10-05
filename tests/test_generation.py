@@ -443,3 +443,16 @@ def test_system_prompt_names_scenes_by_subject_not_parameter_values():
     revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
 
     assert "not by a parameter value" in adapter.last_request.system_prompt
+
+
+def test_system_prompt_teaches_the_not_done_marker_the_turn_parses():
+    # F81: the rule and core.turn._NOT_DONE must agree on the marker.
+    from core.turn import _NOT_DONE
+
+    adapter = FakeModelAdapter(result="object S:\n  val scene = Scene()\n")
+    revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    example = "// NOT DONE: extrusion along w -- nearest: a Tesseract"
+    assert example in system_prompt
+    assert _NOT_DONE.findall(example) == [" extrusion along w -- nearest: a Tesseract"]

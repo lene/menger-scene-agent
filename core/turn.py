@@ -73,6 +73,10 @@ _REPAIRABLE_TAGS: dict[str, StageName] = {
 # `TurnResult.messages`/`findings` report everything wrong with the candidate at once.
 _LOCAL_CHECKS = (check_allowlist, check_resource_bounds, check_clean_code, check_lint)
 
+# A part of the request the scene does not do, as generation_rules.md tells the model to mark
+# it: `// NOT DONE: <part> -- nearest: <alternative>` (F81).
+_NOT_DONE = re.compile(r"^[ \t]*//[ \t]*NOT DONE:(.+)$", re.MULTILINE)
+
 # A named argument in a scene file: `proceduralType = 8`, `edgeRadius = Some(0.005f)`.
 # `==` is excluded so comparisons don't count.
 _NAMED_ARGUMENT = re.compile(r"\b([a-z][A-Za-z0-9]*)\s*=(?!=)")
@@ -378,6 +382,7 @@ def run_turn(
             ordinal=ordinal,
             removed_properties=removed_properties(prior_scene, scene_text),
             warnings=turn_warnings,
+            not_done=[m.strip() for m in _NOT_DONE.findall(scene_text)],
         )
     finally:
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted

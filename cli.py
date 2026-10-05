@@ -393,6 +393,8 @@ def _format_turn_result(
         # ask for must say so, not do it silently -- same spirit as F29 above.
         for warning in result.warnings:
             text += f"\n  Warning: {warning}"
+    for part in result.not_done:
+        text += f"\n  Not done: {part}"  # F81: not only in a doc comment
     if candidate_path is not None:
         text += f"\n  Candidate kept: {candidate_path}"
     return text
@@ -728,11 +730,11 @@ def _next_clarification_state(
     return None
 
 
-def _write_ticket_draft(store: SceneStore, result: TurnResult, prompt: str) -> None:
-    """F49 (msa#17): an "unsupported" decline leaves a ticket draft in the session's
-    `tickets/` directory, for the filing script outside the agent (AD-1: the agent never files
-    anything itself). A failure to write it never disturbs the REPL."""
-    message = result.messages[0] if result.messages else ""
+def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:
+    """F49 (msa#17): an "unsupported" decline, or a part of an accepted turn marked not done
+    (F81), leaves a ticket draft in the session's `tickets/` directory, for the filing script
+    outside the agent (AD-1: the agent never files anything itself). A failure to write it
+    never disturbs the REPL."""
     missing, _, nearest = message.partition(" -- nearest: ")
     drafts_dir = store.session_dir / "tickets"
     try:
@@ -796,7 +798,9 @@ def _execute_turn(
 
     print(_format_turn_result(result, *_turn_paths(store, result, prompt)))
     if result.tag == "unsupported":
-        _write_ticket_draft(store, result, prompt)
+        _write_ticket_draft(store, result.messages[0] if result.messages else "", prompt)
+    for part in result.not_done:
+        _write_ticket_draft(store, part, prompt)
     if result.tag == "accepted":
         prior_scene = store.current_scene()
         render_process = _accept_and_refresh_render(
