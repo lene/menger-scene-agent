@@ -1,0 +1,1522 @@
+"""Unit tests for core/turn.py's run_turn() -- the turn pipeline orchestration story (20).
+
+One test per I/O & Edge-Case Matrix row, plus the `generation_failed` precondition path
+(a real failure mode -- gauntlet.check_*() requires a str -- not itself an enumerated matrix
+row). `validate_scene` is monkey-patched directly (Code Map: "run_turn's tests should
+monkeypatch validate_scene itself, not subprocess, since story 10 already covers the
+subprocess layer") -- this suite never shells out, never touches Docker. `SceneStore` is
+real, backed by `tmp_path`, so every assertion about "no scene file remains"/"a fresh ordinal
+exists" is a real filesystem check, matching tests/test_scene_store.py's own pattern."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List
+
+import pytest
+
+import core.turn as turn_module
+from adapters.model import ModelError, ModelRequest, ModelResult
+from adapters.scene_store import SceneStore, SceneStoreError
+from core.turn import check_hand_edit, removed_properties, run_turn
+from core.types import (
+    EXPECTED_MANIFEST_SCHEMA_VERSION,
+    TurnResult,
+    ValidationError,
+    ValidationResult,
+)
+from tests.fakes import FakeModelAdapter
+
+VALID_MANIFEST = {
+    "schemaVersion": EXPECTED_MANIFEST_SCHEMA_VERSION,
+    "objects": [{"name": "Sphere", "fields": []}],
+}
+VALID_CORPUS = {"schemaVersion": "1.0.0", "scenes": []}
+
+# Trips no local gauntlet check (gauntlet/allowlist.py, resource_bounds.py, clean_code.py,
+# lint.py): no imports, no resource-bounded constructor calls, no placeholder text, the
+# top-level `object` is the first line, and there's no Camera/object/light for lint.py's
+# heuristics to reason about at all.
+CLEAN_SCENE_TEXT = "object Simple:\n  val scene = Scene()\n"
+
+# Trips clean_code.py's placeholder-text check (a leftover "TODO") -- deliberately the only
+# thing wrong with it, so this scripts exactly one local gauntlet finding.
+SCENE_TEXT_WITH_TODO = "object Simple:\n  val scene = Scene() // TODO fix this\n"
+
+_SCRIPT_PATH = "/fake/menger/docker/scene-validator/run-sandboxed.sh"
+
+
+@dataclass
+class _SequencedModelAdapter:
+    """Returns a different scripted `ModelResult` per call, in order. Needed only for the
+    "ok tag but semantic_readback() fails" row: generate() must succeed (return scene text)
+    while the *later* semantic_readback() call on the same adapter fails --
+    `FakeModelAdapter`'s single scripted `result` answers every call identically and can't
+    express that."""
+
+    results: List[ModelResult]
+
+    def __post_init__(self) -> None:
+        self._index = 0
+
+    def complete(self, request: ModelRequest) -> ModelResult:
+        result = self.results[self._index]
+        self._index += 1
+        return result
+
+
+def _make_store(tmp_path) -> SceneStore:
+    return SceneStore.create_session(tmp_path, slug="turn-test")
+
+
+def _staging_path(store: SceneStore):
+    return store.session_dir / ".candidate.scala"
+
+
+def _ordinal_paths(store: SceneStore):
+    return sorted(store.session_dir.glob("[0-9]*.scala"))
+
+
+def _history_entries(store: SceneStore) -> List[dict]:
+    import json
+
+    if not store.history_path.exists():
+        return []
+    return [json.loads(line) for line in store.history_path.read_text(encoding="utf-8").splitlines()]
+
+
+def _refuse_validate_scene(monkeypatch) -> None:
+    """Fails the test loudly if validate_scene() is ever invoked -- used on every path that
+    must short-circuit before the renderer is reached."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("validate_scene() must not be called on this path")
+
+    monkeypatch.setattr(turn_module, "validate_scene", _boom)
+
+
+# --- Agent-side finding: local gauntlet check trips, renderer never invoked ----------------
+
+
+def test_local_finding_short_circuits_before_any_renderer_call(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=SCENE_TEXT_WITH_TODO)
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=0,
+    )
+
+    assert isinstance(result, TurnResult)
+    assert result.tag == "local_finding"
+    assert result.findings  # at least the TODO placeholder finding
+    assert any("TODO" in f.message for f in result.findings)
+    # No scene file -- staging or accepted -- remains on disk afterward.
+    assert not _staging_path(store).exists()
+    assert _ordinal_paths(store) == []
+    entries = _history_entries(store)
+    assert len(entries) == 1
+    assert entries[0]["outcome"] == "rejected"
+    assert entries[0]["ordinal"] is None
+
+
+# --- Agent-side clean, renderer ok: readback runs, turn is accepted ------------------------
+
+
+def test_clean_pass_renderer_ok_readback_ok_is_accepted(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        assert script_path == _SCRIPT_PATH
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert result.ordinal == 1
+    # core/readback.py's semantic_readback() strips the model's raw response -- the scripted
+    # FakeModelAdapter result is CLEAN_SCENE_TEXT itself, stripped of its trailing newline.
+    assert result.readback_summary == CLEAN_SCENE_TEXT.strip()
+    # A fresh ordinal exists in session_dir.
+    assert _ordinal_paths(store) == [store.session_dir / "001.scala"]
+    # The staging file never survives past run_turn's return.
+    assert not _staging_path(store).exists()
+    # history.jsonl's new entry includes the readback summary.
+    entries = _history_entries(store)
+    assert len(entries) == 1
+    assert entries[0]["outcome"] == "accepted"
+    assert entries[0]["ordinal"] == 1
+    assert entries[0]["readback_summary"] == CLEAN_SCENE_TEXT.strip()
+
+
+# --- Agent-side clean, renderer non-ok: compile_errors / lint_findings / refused -----------
+
+
+@pytest.mark.parametrize("wire_tag", ["compile_errors", "refused"])
+def test_clean_pass_renderer_non_ok_is_rejected_with_tag_and_messages(tmp_path, monkeypatch, wire_tag):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag=wire_tag, messages=["renderer says no"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == wire_tag
+    assert result.messages == ["renderer says no"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+    assert entries[-1]["ordinal"] is None
+
+
+def test_lint_findings_with_no_messages_still_produces_an_informative_rejection(tmp_path, monkeypatch):
+    # story 10's I/O & Edge-Case Matrix: a lint_findings result populates `findings`, not
+    # `messages` -- run_turn must still fold the structured findings into a real reason,
+    # never record an empty/uninformative rejection.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        from core.types import ValidationFinding
+
+        return ValidationResult(
+            tag="lint_findings",
+            messages=[],
+            findings=[ValidationFinding(invariant="frustum", message="object behind camera")],
+        )
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "lint_findings"
+    assert any("object behind camera" in m for m in result.messages)
+    entries = _history_entries(store)
+    assert entries[-1]["reason"]  # non-empty -- not silently dropped
+    assert "object behind camera" in entries[-1]["reason"]
+    assert not _staging_path(store).exists()
+
+
+def test_a_finding_the_validator_also_lists_in_messages_is_reported_once(tmp_path, monkeypatch):
+    # Usability review session 2 (F44): the validator puts every finding both in `messages`
+    # ("invariant: message") and in `findings`; the 4.5 rejection printed it twice.
+    from core.types import ValidationFinding
+
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda *a, **kw: ValidationResult(
+            tag="lint_findings",
+            messages=["scene-build: 24-cell: Incompatible 4D projection"],
+            findings=[ValidationFinding(invariant="scene-build", message="24-cell: Incompatible 4D projection")],
+        ),
+    )
+
+    result = run_turn(
+        "add a 24-cell", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=CLEAN_SCENE_TEXT), _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert result.messages == ["scene-build: 24-cell: Incompatible 4D projection"]
+
+
+# --- validate_scene() returns a ValidationError: timeout/malformed/subprocess_failed -------
+
+
+def test_validate_scene_error_is_rejected_and_staging_file_is_removed(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationError(kind="timeout", message="renderer subprocess timed out")
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "timeout"
+    assert result.messages == ["renderer subprocess timed out"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+    assert "renderer subprocess timed out" in entries[-1]["reason"]
+
+
+# --- ok tag but semantic_readback() fails: rejection, never a partial accept ---------------
+
+
+def test_ok_tag_but_readback_failure_is_rejected_not_partially_accepted(tmp_path, monkeypatch):
+    # generate() must succeed; the *second* adapter.complete() call (semantic_readback())
+    # must fail -- FakeModelAdapter can't express two different outcomes from one instance.
+    adapter = _SequencedModelAdapter(
+        results=[CLEAN_SCENE_TEXT, ModelError(kind="call_failed", message="readback model down")]
+    )
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "readback_failed"
+    assert result.messages == ["readback model down"]
+    assert result.readback_summary is None
+    assert result.ordinal is None
+    # No ordinal was consumed -- store.accept() must never have been called.
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+    assert "readback model down" in entries[-1]["reason"]
+
+
+# --- usability review session 2 (F32): a rejected candidate is kept for analysis ----------
+
+
+def _rejected_file(store: SceneStore) -> str:
+    return (store.session_dir / "rejected-001.scala").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("wire_tag", ["compile_errors", "lint_findings", "refused"])
+def test_renderer_rejection_keeps_the_candidate(tmp_path, monkeypatch, wire_tag):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda *a, **kw: ValidationResult(tag=wire_tag, messages=["no"], findings=[]),
+    )
+
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=0,
+    )
+
+    assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
+    assert _rejected_file(store) == CLEAN_SCENE_TEXT
+    assert _ordinal_paths(store) == []
+    assert store.current_scene() is None
+
+
+def test_local_finding_keeps_the_candidate(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    store = _make_store(tmp_path)
+
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=SCENE_TEXT_WITH_TODO), store, _SCRIPT_PATH, repair_rounds=0,
+    )
+
+    assert _history_entries(store)[-1]["file"] == "rejected-001.scala"
+    assert _rejected_file(store) == SCENE_TEXT_WITH_TODO
+
+
+def test_validation_error_and_readback_failure_keep_the_candidate(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(
+        turn_module, "validate_scene", lambda *a, **kw: ValidationError(kind="timeout", message="t")
+    )
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=CLEAN_SCENE_TEXT), store, _SCRIPT_PATH,
+    )
+    monkeypatch.setattr(
+        turn_module,
+        "validate_scene",
+        lambda scene_file, *a, **kw: ValidationResult(
+            tag="ok", messages=[], findings=[], scene=str(scene_file)
+        ),
+    )
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        _SequencedModelAdapter(results=[CLEAN_SCENE_TEXT, ModelError(kind="call_failed", message="x")]),
+        store, _SCRIPT_PATH,
+    )
+
+    assert [e["file"] for e in _history_entries(store)] == [
+        "rejected-001.scala",
+        "rejected-002.scala",
+    ]
+
+
+def test_generation_failure_has_no_candidate_to_keep(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    store = _make_store(tmp_path)
+
+    run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS,
+        FakeModelAdapter(result=ModelError(kind="call_failed", message="down")), store, _SCRIPT_PATH,
+    )
+
+    assert _history_entries(store)[-1]["file"] is None
+    assert list(store.session_dir.glob("rejected-*.scala")) == []
+
+
+# --- Precondition: generate()/revise() itself fails --------------------------------------
+
+
+def test_generation_failure_short_circuits_before_any_local_check_or_renderer_call(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="call_failed", message="model unreachable"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "generation_failed"
+    assert result.messages == ["model unreachable"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+# --- spec-ai-scene-agent story 15: model-call timeout gets its own distinct TurnTag --------
+
+
+def test_generation_timeout_maps_to_a_distinct_turn_tag_not_generation_failed(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="model call timed out"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "generation_timeout"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["model call timed out"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+# --- spec-ai-scene-agent story 18: needs_clarification outcome ----------------------------
+
+
+def test_needs_clarification_maps_to_its_own_distinct_turn_tag(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="needs_clarification", message="'fribbly' is not a defined DSL term"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it more fribbly", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "needs_clarification"
+    assert result.tag != "generation_failed"
+    assert result.tag != "generation_timeout"
+    assert result.messages == ["'fribbly' is not a defined DSL term"]
+    # No scene file (staging or accepted) remains on disk; no ordinal consumed.
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+    assert entries[-1]["ordinal"] is None
+    assert "'fribbly' is not a defined DSL term" in entries[-1]["reason"]
+
+
+def test_needs_clarification_via_revise_also_maps_to_the_distinct_turn_tag(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="needs_clarification", message="redder and greener are contradictory"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it redder and greener",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "needs_clarification"
+    assert result.messages == ["redder and greener are contradictory"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+# --- usability review 2026-09 (F16, msa#3): unsupported outcome ----------------------------
+
+
+def test_unsupported_maps_to_its_own_distinct_turn_tag_not_needs_clarification(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(
+        result=ModelError(
+            kind="unsupported", message="no glow or halo exists -- nearest: an emissive surface"
+        )
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "give it a glowing halo", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "unsupported"
+    assert result.tag != "needs_clarification"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["no glow or halo exists -- nearest: an emissive surface"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+def test_generation_timeout_via_revise_maps_to_a_distinct_turn_tag_not_generation_failed(
+    tmp_path, monkeypatch
+):
+    # The existing generation-timeout test only covers the generate()/prior_scene=None path
+    # -- mirrors tests/test_generation.py testing both generate() and revise() for the same
+    # mapping (core/generation.py's _model_error_to_generation_error is shared by both).
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="timeout", message="model call timed out"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "change it",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "generation_timeout"
+    assert result.tag != "generation_failed"
+    assert result.messages == ["model call timed out"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+# --- revise() path: prior_scene is not None -------------------------------------------------
+
+
+def test_prior_scene_present_uses_revise_not_generate(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "change it",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    # revise()'s user prompt carries the prior scene verbatim -- generate()'s does not.
+    assert "object Prior" in adapter.requests[0].user_prompt
+
+
+# --- Patch-level fixes (post-review) --------------------------------------------------------
+
+
+def test_non_ok_tag_with_empty_messages_and_findings_falls_back_to_tag_string(tmp_path, monkeypatch):
+    # A bare "refused" (or any non-"ok" tag) with neither `messages` nor `findings`
+    # populated must still leave `TurnResult.messages` non-empty -- the module's own
+    # docstring claims `messages` is "always populated with at least one human-readable
+    # string on any non-accepted tag."
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="refused", messages=[], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "refused"
+    assert result.messages == ["refused"]
+    entries = _history_entries(store)
+    assert entries[-1]["reason"] == "refused"
+
+
+def test_run_turn_forwards_a_non_default_timeout_to_validate_scene(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+    observed = {}
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        observed["timeout"] = timeout
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        timeout=42.5,
+    )
+
+    assert observed["timeout"] == 42.5
+
+
+def test_run_turn_forwards_a_non_default_image_to_validate_scene(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+    observed = {}
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        observed["image"] = image
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        image="base64-image-data",
+    )
+
+    assert observed["image"] == "base64-image-data"
+
+
+def test_store_accept_failure_is_reported_as_storage_failed_not_raised(tmp_path, monkeypatch):
+    # store.accept() can raise SceneStoreError after exhausting its ordinal-claim retries
+    # under contention (documented on SceneStore.accept()) -- run_turn() must never let
+    # that propagate.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    def failing_accept(self, scene_text, prompt, readback_summary=None):
+        raise SceneStoreError("ordinal-claim retries exhausted")
+
+    monkeypatch.setattr(SceneStore, "accept", failing_accept)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "storage_failed"
+    assert any("ordinal-claim retries exhausted" in m for m in result.messages)
+    assert result.ordinal is None
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+def test_record_rejected_failure_is_folded_into_messages_not_raised(tmp_path, monkeypatch):
+    # store.record_rejected() could itself raise (e.g. an I/O error inside SceneStore) --
+    # run_turn() must fold both the original rejection reason and the storage failure into
+    # the returned TurnResult's messages, never let the exception propagate.
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=SCENE_TEXT_WITH_TODO)
+    store = _make_store(tmp_path)
+
+    def failing_record_rejected(self, prompt, reason, scene_text=None):
+        raise SceneStoreError("history.jsonl append failed: disk full")
+
+    monkeypatch.setattr(SceneStore, "record_rejected", failing_record_rejected)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "local_finding"
+    assert any("TODO" in m for m in result.messages)
+    assert any("history.jsonl append failed" in m for m in result.messages)
+
+
+def test_staging_file_write_failure_is_reported_as_storage_failed_not_raised(tmp_path, monkeypatch):
+    # write_text() itself can raise OSError (disk full, permission error) -- run_turn()
+    # must not let that propagate uncaught.
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    import pathlib
+
+    def failing_write_text(self, data, encoding=None, errors=None, newline=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", failing_write_text)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "storage_failed"
+    assert any("disk full" in m for m in result.messages)
+    assert _ordinal_paths(store) == []
+
+
+def test_multiple_local_gauntlet_checks_fire_together(tmp_path, monkeypatch):
+    # The module's own comment claims findings from all four gauntlet.check_*() stages are
+    # "aggregated together ... so a rejected turn's messages/findings report everything
+    # wrong with the candidate at once" -- trip clean_code.py's placeholder check and
+    # resource_bounds.py's ceiling check simultaneously and confirm both show up.
+    _refuse_validate_scene(monkeypatch)
+    scene_text = (
+        "object Simple:\n"
+        "  val scene = Scene(objects = List(Sponge(level = 50f))) // TODO fix this\n"
+    )
+    adapter = FakeModelAdapter(result=scene_text)
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "local_finding"
+    stages = {finding.stage for finding in result.findings}
+    assert "clean_code" in stages
+    assert "resource_bounds" in stages
+    assert len(result.findings) >= 2
+
+
+def test_generation_failure_via_revise_short_circuits_before_any_local_check_or_renderer_call(
+    tmp_path, monkeypatch
+):
+    # The existing generation-failure test only covers the generate()/prior_scene=None path
+    # -- this covers the revise() path (prior_scene is not None).
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="call_failed", message="model unreachable"))
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "change it",
+        "object Prior:\n  val scene = Scene()\n",
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "generation_failed"
+    assert result.messages == ["model unreachable"]
+    assert _ordinal_paths(store) == []
+    assert not _staging_path(store).exists()
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "rejected"
+
+
+def test_staging_file_content_matches_candidate_scene_text_when_validate_scene_is_invoked(
+    tmp_path, monkeypatch
+):
+    # Every existing test only asserts the staging file is gone *after* run_turn returns --
+    # this captures its content at the moment validate_scene() is actually invoked.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+    observed_content = {}
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        from pathlib import Path
+
+        observed_content["text"] = Path(scene_file).read_text(encoding="utf-8")
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    run_turn("make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH)
+
+    assert observed_content["text"] == CLEAN_SCENE_TEXT
+
+
+# --- Live status line (story 12): on_stage fires at each stage transition, never skipped ---
+# and never fired for a stage that's short-circuited past.
+
+
+def test_on_stage_fires_generating_validating_reading_back_in_order_on_accepted_turn(
+    tmp_path, monkeypatch
+):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "accepted"
+    assert stages == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_fires_generating_only_when_generation_fails(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=ModelError(kind="call_failed", message="model unreachable"))
+    store = _make_store(tmp_path)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "generation_failed"
+    assert stages == ["generating"]
+
+
+def test_on_stage_never_fires_reading_back_on_local_finding(tmp_path, monkeypatch):
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=SCENE_TEXT_WITH_TODO)
+    store = _make_store(tmp_path)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+        repair_rounds=0,
+    )
+
+    assert result.tag == "local_finding"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_never_fires_reading_back_on_renderer_rejection(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="compile_errors", messages=["renderer says no"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+        repair_rounds=0,
+    )
+
+    assert result.tag == "compile_errors"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_omitted_is_a_no_op_and_behaves_exactly_as_before(tmp_path, monkeypatch):
+    # Boundaries & Constraints: "Defaults to None (a no-op) so every existing caller/test is
+    # unaffected without modification." -- no TypeError, no stray output, same TurnResult as
+    # every pre-story-12 test already asserts for this exact scenario.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert result.ordinal == 1
+
+
+# --- Patch-level fixes (post-review, story 12) ----------------------------------------------
+
+
+def test_on_stage_exception_does_not_abort_turn_and_result_is_still_correct(
+    tmp_path, monkeypatch
+):
+    # An on_stage callback's only job is cosmetic reporting -- a raise from it (or from a
+    # non-callable value) must never abort a turn that had otherwise succeeded up to that
+    # point.
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    calls: List[str] = []
+
+    def _raising_on_stage(stage: str) -> None:
+        calls.append(stage)
+        if len(calls) == 1:
+            raise RuntimeError("boom: rendering the status line failed")
+
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=_raising_on_stage,
+    )
+
+    assert result.tag == "accepted"
+    assert result.ordinal == 1
+    assert result.readback_summary == CLEAN_SCENE_TEXT.strip()
+    # All three stages were still attempted, despite the first call raising.
+    assert calls == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_sequence_is_exactly_three_stages_on_readback_failure(tmp_path, monkeypatch):
+    # Previously untested path: the ReadbackError branch (rejected, not partially accepted)
+    # must still fire on_stage for all three stages, in order, never re-fired, never altered.
+    adapter = _SequencedModelAdapter(
+        results=[CLEAN_SCENE_TEXT, ModelError(kind="call_failed", message="readback model down")]
+    )
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "readback_failed"
+    assert stages == ["generating", "validating", "reading back"]
+
+
+def test_on_stage_never_fires_reading_back_on_staging_write_failure(tmp_path, monkeypatch):
+    # Two independent reviewers flagged this exact path as untested and a real
+    # silent-regression risk: a pure storage failure (the staging file write raises
+    # OSError) must never fire "reading back" -- nothing would catch a future reordering
+    # of the write/emit calls that made it fire spuriously.
+    _refuse_validate_scene(monkeypatch)
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    import pathlib
+
+    def failing_write_text(self, data, encoding=None, errors=None, newline=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", failing_write_text)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "storage_failed"
+    assert stages == ["generating", "validating"]
+
+
+def test_on_stage_never_fires_reading_back_on_validation_error(tmp_path, monkeypatch):
+    # Same reviewers found this branch untested too: validate_scene() returning a
+    # ValidationError (not a ValidationResult with a non-"ok" tag -- a structurally
+    # distinct rejection path) must also never fire "reading back".
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationError(kind="timeout", message="renderer subprocess timed out")
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    stages: List[str] = []
+    result = run_turn(
+        "make a scene",
+        None,
+        VALID_MANIFEST,
+        VALID_CORPUS,
+        adapter,
+        store,
+        _SCRIPT_PATH,
+        on_stage=stages.append,
+    )
+
+    assert result.tag == "timeout"
+    assert stages == ["generating", "validating"]
+
+
+# ============================================================================================
+# check_hand_edit() -- story 17: hand-edit fallback, lint-gated and ordinal-assigned
+#
+# One test per frozen I/O & Edge-Case Matrix row, plus the "accepted edit becomes prior_scene
+# for the next turn" row (exercised end to end via a real run_turn() call using revise()).
+# ============================================================================================
+
+
+def _refuse_local_checks(monkeypatch) -> None:
+    """Fails the test loudly if _run_local_checks() is ever invoked -- used to prove
+    check_hand_edit() never runs the lint gate when disk matches known_scene (or when there
+    is nothing to compare)."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("_run_local_checks() must not be called on this path")
+
+    monkeypatch.setattr(turn_module, "_run_local_checks", _boom)
+
+
+def test_check_hand_edit_no_prior_scene_and_empty_disk_returns_none(tmp_path, monkeypatch):
+    _refuse_local_checks(monkeypatch)
+    store = _make_store(tmp_path)
+
+    result = check_hand_edit(store, None)
+
+    assert result is None
+
+
+def test_check_hand_edit_disk_matches_known_scene_returns_none_no_lint_check(
+    tmp_path, monkeypatch
+):
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+    _refuse_local_checks(monkeypatch)
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result is None
+
+
+def test_check_hand_edit_clean_edit_is_accepted_under_new_ordinal(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    # Simulate an out-of-band hand edit: overwrite the accepted ordinal file directly on
+    # disk, bypassing store.accept() entirely -- exactly what a user's editor would do.
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    result = check_hand_edit(store, original_text)
+
+    assert isinstance(result, TurnResult)
+    assert result.tag == "accepted"
+    assert result.ordinal == 2
+    # A brand-new ordinal was written -- the edited file itself (001.scala) was never
+    # touched/renamed (AD-8: never an in-place mutation).
+    assert _ordinal_paths(store) == [
+        store.session_dir / "001.scala",
+        store.session_dir / "002.scala",
+    ]
+    assert store.current_scene() == edited_text
+    entries = _history_entries(store)
+    assert entries[-1]["outcome"] == "accepted"
+    assert entries[-1]["ordinal"] == 2
+    assert entries[-1]["prompt"] == "<hand-edit>"
+
+
+def test_check_hand_edit_dirty_edit_is_rejected_naming_the_violation(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+    (store.session_dir / "001.scala").write_text(SCENE_TEXT_WITH_TODO, encoding="utf-8")
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result.tag == "hand_edit_rejected"
+    assert result.findings
+    assert any("TODO" in f.message for f in result.findings)
+    assert any("TODO" in m for m in result.messages)
+    # No new ordinal was consumed -- the failing edit is left exactly where the user put it,
+    # never promoted, never rewritten.
+    assert _ordinal_paths(store) == [store.session_dir / "001.scala"]
+    # Review round, patch-level fix: a rejected hand edit now DOES get a history.jsonl entry
+    # (matching every other rejection path's audit trail) -- the seed turn's accepted entry,
+    # plus one new rejected entry naming the violation via the synthetic hand-edit prompt.
+    entries = _history_entries(store)
+    assert len(entries) == 2
+    assert entries[-1]["outcome"] == "rejected"
+    assert entries[-1]["ordinal"] is None
+    assert entries[-1]["prompt"] == "<hand-edit>"
+    assert "TODO" in entries[-1]["reason"]
+    assert result.ordinal is None
+
+
+def test_check_hand_edit_current_scene_read_failure_is_reported_as_storage_failed_not_raised(
+    tmp_path, monkeypatch
+):
+    # Review round, patch-level fix: check_hand_edit()'s own store.current_scene() read was
+    # previously unguarded -- only the later store.accept() call's SceneStoreError was caught.
+    # A failure reading current_scene() itself (e.g. the session directory became
+    # inaccessible) must also be reported as "storage_failed", never an unhandled
+    # SceneStoreError escaping this never-raises function.
+    store = _make_store(tmp_path)
+    store.accept(CLEAN_SCENE_TEXT, "seed turn")
+
+    def failing_current_scene(self):
+        raise SceneStoreError("session directory became inaccessible")
+
+    monkeypatch.setattr(SceneStore, "current_scene", failing_current_scene)
+
+    result = check_hand_edit(store, CLEAN_SCENE_TEXT)
+
+    assert result.tag == "storage_failed"
+    assert any("session directory became inaccessible" in m for m in result.messages)
+    assert result.ordinal is None
+
+
+def test_check_hand_edit_accepted_edit_becomes_prior_scene_for_the_next_turn(
+    tmp_path, monkeypatch
+):
+    # I/O & Edge-Case Matrix: "the real turn's run_turn() call uses the newly-accepted
+    # content as prior_scene, not the pre-edit value."
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    hand_edit_result = check_hand_edit(store, original_text)
+    assert hand_edit_result.tag == "accepted"
+
+    new_prior_scene = store.current_scene()
+    assert new_prior_scene == edited_text
+
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    run_turn(
+        "change it", new_prior_scene, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    # revise()'s user prompt carries the prior scene verbatim -- proving run_turn() was
+    # handed the newly-promoted hand-edited content, not the pre-edit value.
+    assert "object New" in adapter.requests[0].user_prompt
+
+
+def test_check_hand_edit_accept_failure_is_reported_as_storage_failed_not_raised(
+    tmp_path, monkeypatch
+):
+    store = _make_store(tmp_path)
+    original_text = "object Old:\n  val scene = Scene()\n"
+    store.accept(original_text, "seed turn")
+    edited_text = "object New:\n  val scene = Scene()\n"
+    (store.session_dir / "001.scala").write_text(edited_text, encoding="utf-8")
+
+    def failing_accept(self, scene_text, prompt, readback_summary=None):
+        raise SceneStoreError("ordinal-claim retries exhausted")
+
+    monkeypatch.setattr(SceneStore, "accept", failing_accept)
+
+    result = check_hand_edit(store, original_text)
+
+    assert result.tag == "storage_failed"
+    assert any("ordinal-claim retries exhausted" in m for m in result.messages)
+    assert result.ordinal is None
+
+
+# --- usability review 2026-09 (F8): warn on an unrequested move/material change ---------------
+
+
+def test_accepted_revise_turn_warns_about_a_moved_object_the_request_did_not_ask_for(
+    tmp_path, monkeypatch
+):
+    old_scene = "object Old:\n  val scene = Scene(objects = List(Sphere(pos = Vec3(0f, 0f, 0f))))\n"
+    new_scene = "object Old:\n  val scene = Scene(objects = List(Sphere(pos = Vec3(3f, 0f, 0f))))\n"
+    adapter = FakeModelAdapter(result=new_scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make it red", old_scene, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert len(result.warnings) == 1
+    assert "Sphere" in result.warnings[0]
+
+
+def test_accepted_turn_warns_when_an_orb_is_hidden_inside_an_opaque_cube(tmp_path, monkeypatch):
+    # Usability review 2026-09 (F23) -- runs on generate() too, not just revise(), since
+    # occlusion is a property of the current scene, not a before/after diff. A cube, not a
+    # sponge: a sponge has holes and never occludes (F78).
+    scene = (
+        "object Hidden:\n  val scene = Scene(objects = List(\n"
+        "    Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome)),\n"
+        "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "put a small orb in the cube", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert len(result.warnings) == 1
+    assert "Sphere" in result.warnings[0] and "Cube" in result.warnings[0]
+
+
+def test_no_occlusion_warning_when_the_containing_object_is_glass(tmp_path, monkeypatch):
+    scene = (
+        "object NotHidden:\n  val scene = Scene(objects = List(\n"
+        "    Sponge(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass)),\n"
+        "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "put a small orb in the glass sponge", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.warnings == []
+
+
+def test_accepted_first_turn_has_no_warnings_no_prior_scene_to_diff_against(tmp_path, monkeypatch):
+    adapter = FakeModelAdapter(result=CLEAN_SCENE_TEXT)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH
+    )
+
+    assert result.tag == "accepted"
+    assert result.warnings == []
+
+
+# --- usability review 2026-09 (F29): report settings a turn dropped ---------------------------
+
+
+_COLOURED_SPONGE = (
+    "Sponge(level = 2f, color = Some(Color(\"#AAAAAA\")), proceduralType = 8, "
+    "proceduralScale = 0.399f)"
+)
+
+
+def test_removed_properties_names_what_the_new_scene_no_longer_sets():
+    assert removed_properties(_COLOURED_SPONGE, "Sponge(level = 2f, material = Some(Glass))") == [
+        "color",
+        "proceduralScale",
+        "proceduralType",
+    ]
+
+
+def test_removed_properties_is_empty_for_a_first_scene_or_an_unchanged_one():
+    assert removed_properties(None, _COLOURED_SPONGE) == []
+    assert removed_properties(_COLOURED_SPONGE, _COLOURED_SPONGE) == []
+
+
+def test_removed_properties_ignores_comparisons():
+    assert removed_properties("if level == 2 then x", "x") == []
+
+
+def test_a_turn_that_returns_the_current_scene_is_no_change_not_a_new_turn(tmp_path, monkeypatch):
+    # F76 (recurrence of F56): "keep them like that" came back as the same file and was shown
+    # as an accepted turn with a readback, as if something had been done.
+    prior = "object S:\n  val scene = Scene(objects = List(Sphere(size = 1f)))\n"
+    adapter = FakeModelAdapter(result=prior.replace("\n  val", "\n\n  val"))
+    store = _make_store(tmp_path)
+
+    def fail_validate(*args, **kwargs):
+        raise AssertionError("an unchanged scene must not be validated again")
+
+    monkeypatch.setattr(turn_module, "validate_scene", fail_validate)
+
+    result = run_turn(
+        "keep them like that", prior, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "unchanged"
+    assert result.ordinal is None
+    assert "no change" in result.messages[0].lower()
+
+
+def test_removed_properties_ignores_definitions():
+    # F75: turning `val scene = ...` into `def scene(t: Float) = ...` is not "removed scene".
+    before = "val scene = Scene(objects = List())"
+    after = "def scene(t: Float): Scene = Scene(objects = List())"
+
+    assert removed_properties(before, after) == []
+
+
+def test_accepted_turn_warns_about_glass_on_a_level_2_tesseract_sponge(tmp_path, monkeypatch):
+    # Usability review 2026-09, session 2 (#4c/F55, msa#13): the request names glass, so the
+    # turn composes it -- and the user still hears that it will look chaotic.
+    scene = (
+        "object GlassSponge:\n  val scene = Scene(objects = List(\n"
+        "    TesseractSponge(spongeType = VolumeRemoving, level = 2f,\n"
+        "      material = Some(Material.Glass))\n"
+        "  ))\n"
+    )
+    adapter = FakeModelAdapter(result=scene)
+    store = _make_store(tmp_path)
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        return ValidationResult(tag="ok", messages=[], findings=[], scene=str(scene_file))
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+
+    result = run_turn(
+        "a glass tesseract sponge at level 2", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert any("chaotic" in w for w in result.warnings)
+
+
+# --- Usability review 2026-09, session 2 (F47, msa#16): bounded, visible self-repair -----
+# PRD FR-7 amendment 2026-10-02: at most 2 repair rounds on a compile/lint failure.
+
+
+@dataclass
+class _SequenceAdapter:
+    """Returns its scripted results in order (the last one repeats)."""
+
+    results: List[ModelResult]
+    requests: List[ModelRequest] = None  # type: ignore[assignment]
+
+    def complete(self, request: ModelRequest) -> ModelResult:
+        if self.requests is None:
+            self.requests = []
+        self.requests.append(request)
+        return self.results[min(len(self.requests) - 1, len(self.results) - 1)]
+
+
+def _validator_sequence(monkeypatch, tags: List[str]) -> None:
+    calls = []
+
+    def fake(*a, **kw):
+        calls.append(1)
+        tag = tags[min(len(calls) - 1, len(tags) - 1)]
+        return ValidationResult(tag=tag, messages=[] if tag == "ok" else ["missing ')'"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake)
+    monkeypatch.setattr(turn_module, "semantic_readback", lambda *a, **kw: "a simple scene")
+
+
+def test_a_compile_error_is_repaired_with_the_error_fed_back(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+    stages: List[str] = []
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        on_stage=stages.append, repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+    assert "missing ')'" in adapter.requests[1].user_prompt
+    assert "repairing (compile errors)" in stages
+    assert (store.session_dir / "rejected-001.scala").exists()
+
+
+def test_repair_stops_after_the_bound_and_keeps_every_candidate(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "compile_errors"
+    assert len(adapter.requests) == 3
+    assert [p.name for p in sorted(store.session_dir.glob("rejected-*.scala"))] == [
+        "rejected-001.scala", "rejected-002.scala", "rejected-003.scala",
+    ]
+
+
+def test_a_local_finding_is_repaired_too(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["ok"])
+    adapter = _SequenceAdapter([SCENE_TEXT_WITH_TODO, CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+
+
+def test_a_refusal_is_never_repaired(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["refused"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "refused"
+    assert len(adapter.requests) == 1
+
+
+def test_a_repair_that_changes_a_value_says_so(tmp_path, monkeypatch):
+    # F60 (session 3): a repair round clamped a requested level 5.8 to 5 without a word.
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    first = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5.8f)))\n"
+    repaired = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5f)))\n"
+    adapter = _SequenceAdapter([first, repaired])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make it level 5.8", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert any(
+        "repair" in w and "Sponge level: 5.8 -> 5.0" in w and "missing ')'" in w
+        for w in result.warnings
+    ), result.warnings
+
+
+def test_a_repair_that_changes_no_fact_adds_no_warning(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["compile_errors", "ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make a scene", None, VALID_MANIFEST, VALID_CORPUS, adapter, store, _SCRIPT_PATH,
+        repair_rounds=2,
+    )
+
+    assert not any("repair" in w for w in result.warnings)
+
+
+def test_parts_the_scene_could_not_do_are_reported_not_hidden_in_a_comment(tmp_path, monkeypatch):
+    # F81 (session 3, Task 8a): the shortfall (no extrusion, no 5D type) was only in the doc
+    # comment; the REPL printed nothing.
+    _validator_sequence(monkeypatch, ["ok"])
+    scene = (
+        "// NOT DONE: extrusion along w -- nearest: switch to a Tesseract\n"
+        "//   NOT DONE:  a penteract (5D) -- nearest: none, the DSL is 4D at most \n"
+        + CLEAN_SCENE_TEXT
+    )
+    adapter = _SequenceAdapter([scene])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "extrude it into a penteract", None, VALID_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.not_done == [
+        "extrusion along w -- nearest: switch to a Tesseract",
+        "a penteract (5D) -- nearest: none, the DSL is 4D at most",
+    ]

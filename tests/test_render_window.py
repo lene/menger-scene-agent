@@ -1,0 +1,695 @@
+"""Unit tests for adapters/render_window.py -- the render-window launch adapter (story 13).
+One test per I/O & Edge-Case Matrix row. `subprocess.Popen` is always monkey-patched with a
+scripted `FakePopen` (never launches a real window/process), and `grace_period` is set tiny so
+these tests run fast."""
+
+from __future__ import annotations
+
+import io
+import json
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, List, Optional
+
+import pytest
+
+from adapters.render_window import (
+    LAUNCH_EVENTS,
+    RELOAD_EVENTS,
+    WindowEvent,
+    close_render_window,
+    crash_report,
+    frame_build_failures,
+    log_paths,
+    log_size,
+    refresh_render_window,
+    render_window_scene_path,
+    sync_render_window_scene,
+    wait_for_window_event,
+)
+from core.types import RenderWindowError, RenderWindowResult
+
+_LAUNCHER_PATH = "/fake/menger-app/target/universal/stage/bin/menger-app"
+# A real directory: the adapter writes the window's stdout/stderr logs next to the scene file.
+_SESSION_DIR = Path(tempfile.mkdtemp(prefix="render-window-test-"))
+_SCENE_FILE = str(_SESSION_DIR / "001.scala")
+_GRACE_PERIOD = 0.01
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _remove_session_dir():
+    yield
+    shutil.rmtree(_SESSION_DIR, ignore_errors=True)
+
+
+class FakePopen:
+    """A scripted stand-in for `subprocess.Popen` -- never launches a real process.
+
+    `still_running=True` simulates a launch that survives the grace period: `wait()` raises
+    `subprocess.TimeoutExpired` until `terminate()`/`kill()` has been called (mirroring a real
+    process that only exits once asked to). `still_running=False` simulates a fast exit:
+    `wait()` returns `returncode` immediately. `_patch_popen` writes the scripted
+    `stdout`/`stderr` into the files the adapter hands to `Popen`, as a real process would.
+    """
+
+    def __init__(
+        self, returncode: int = 0, stdout: str = "", stderr: str = "", still_running: bool = False
+    ):
+        self.returncode = returncode
+        self.stdout = io.StringIO(stdout)
+        self.stderr = io.StringIO(stderr)
+        self._still_running = still_running
+        self.terminated = False
+        self.killed = False
+        self.wait_calls: List[Optional[float]] = []
+
+    def poll(self) -> Optional[int]:
+        return None if self._still_running else self.returncode
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        self.wait_calls.append(timeout)
+        if self._still_running and not (self.terminated or self.killed):
+            raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+        self._still_running = False
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def _patch_popen(monkeypatch, fake_popen: FakePopen) -> List[Any]:
+    """Monkey-patches `adapters.render_window.subprocess.Popen` to return `fake_popen`
+    (or raise, if `fake_popen` is an exception instance) and returns the list of positional
+    `cmd` arguments each call was invoked with, for assertions on the command actually built."""
+    calls: List[Any] = []
+
+    def recording_popen(cmd, **kwargs):
+        calls.append(cmd)
+        if isinstance(fake_popen, BaseException):
+            raise fake_popen
+        kwargs["stdout"].write(fake_popen.stdout.getvalue())
+        kwargs["stderr"].write(fake_popen.stderr.getvalue())
+        return fake_popen
+
+    import adapters.render_window as render_window
+
+    monkeypatch.setattr(render_window.subprocess, "Popen", recording_popen)
+    return calls
+
+
+# --- No prior process, launch succeeds -------------------------------------------------------
+
+
+def test_no_prior_process_launch_succeeds_returns_running_handle(monkeypatch):
+    fake = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(
+        _SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD
+    )
+
+    assert isinstance(result, RenderWindowResult)
+    assert result.process is fake
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+    # The caller-supplied grace_period must be the exact value passed through to the
+    # underlying wait() call, not e.g. a default or a mangled value.
+    assert fake.wait_calls == [_GRACE_PERIOD]
+
+
+def test_no_prior_process_accepts_path_objects_for_scene_file_and_launcher_path(monkeypatch):
+    fake = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(
+        Path(_SCENE_FILE), Path(_LAUNCHER_PATH), grace_period=_GRACE_PERIOD
+    )
+
+    assert isinstance(result, RenderWindowResult)
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+
+
+def test_builds_command_with_display_only_when_render_lock_path_not_given(monkeypatch):
+    fake = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fake)
+
+    refresh_render_window(
+        _SCENE_FILE, _LAUNCHER_PATH, display=":1", grace_period=_GRACE_PERIOD
+    )
+
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--display", ":1"]]
+
+
+def test_builds_command_with_render_lock_path_only_when_display_not_given(monkeypatch):
+    fake = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fake)
+
+    refresh_render_window(
+        _SCENE_FILE,
+        _LAUNCHER_PATH,
+        render_lock_path="/fake/render.lock",
+        grace_period=_GRACE_PERIOD,
+    )
+
+    assert calls == [
+        [_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--render-lock-path", "/fake/render.lock"]
+    ]
+
+
+def test_builds_command_with_display_and_render_lock_path_when_given(monkeypatch):
+    fake = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fake)
+
+    refresh_render_window(
+        _SCENE_FILE,
+        _LAUNCHER_PATH,
+        display=":1",
+        render_lock_path="/fake/render.lock",
+        grace_period=_GRACE_PERIOD,
+    )
+
+    assert calls == [
+        [
+            _LAUNCHER_PATH,
+            "--scene",
+            _SCENE_FILE,
+            "--display",
+            ":1",
+            "--render-lock-path",
+            "/fake/render.lock",
+        ]
+    ]
+
+
+# --- `previous_process` still running ---------------------------------------------------------
+
+
+def test_still_running_previous_process_is_terminated_before_fresh_launch(monkeypatch):
+    previous = FakePopen(still_running=True)
+    fresh = FakePopen(still_running=True)
+    calls = _patch_popen(monkeypatch, fresh)
+
+    result = refresh_render_window(
+        _SCENE_FILE, _LAUNCHER_PATH, previous_process=previous, grace_period=_GRACE_PERIOD
+    )
+
+    assert previous.terminated is True
+    assert isinstance(result, RenderWindowResult)
+    assert result.process is fresh
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+    # The same grace_period the caller supplied must reach the previous_process termination
+    # wait, not a default or a different value.
+    assert previous.wait_calls == [_GRACE_PERIOD]
+
+
+def test_already_exited_previous_process_is_not_terminated(monkeypatch):
+    # poll() returning a real exit code (not None) means it's already dead -- terminate()
+    # must not be called on a process that isn't running.
+    previous = FakePopen(still_running=False, returncode=0)
+    fresh = FakePopen(still_running=True)
+    _patch_popen(monkeypatch, fresh)
+
+    refresh_render_window(
+        _SCENE_FILE, _LAUNCHER_PATH, previous_process=previous, grace_period=_GRACE_PERIOD
+    )
+
+    assert previous.terminated is False
+
+
+def test_previous_process_not_responding_to_terminate_is_killed(monkeypatch):
+    # A previous process that ignores terminate() (still "running" even after it) must be
+    # killed rather than left orphaned -- never left un-reaped.
+    class StubbornFakePopen(FakePopen):
+        def wait(self, timeout: Optional[float] = None) -> int:
+            self.wait_calls.append(timeout)
+            if self._still_running and not self.killed:
+                raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+            self._still_running = False
+            return self.returncode
+
+    previous = StubbornFakePopen(still_running=True)
+    fresh = FakePopen(still_running=True)
+    _patch_popen(monkeypatch, fresh)
+
+    refresh_render_window(
+        _SCENE_FILE, _LAUNCHER_PATH, previous_process=previous, grace_period=_GRACE_PERIOD
+    )
+
+    assert previous.terminated is True
+    assert previous.killed is True
+
+
+# --- Another process holds the AD-16 lock -----------------------------------------------------
+
+
+def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatch):
+    payload = {
+        "tag": "refused",
+        "messages": ["render lock already held"],
+        "findings": [],
+        "scene": None,
+        "schemaVersion": "1.0.0",
+    }
+    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "refused"
+    assert "render lock already held" in result.message
+
+
+def test_refused_with_no_previous_process_terminates_nothing(monkeypatch):
+    payload = {"tag": "refused", "messages": ["render lock already held"]}
+    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "refused"
+    # Nothing else exists to terminate in this scenario; the fast-exiting launcher process
+    # itself was never a `previous_process` and must not be touched beyond reading its output.
+    assert fake.terminated is False
+    assert fake.killed is False
+
+
+# --- Launcher exits fast with unexpected/malformed output --------------------------------------
+
+
+def test_malformed_json_on_fast_exit_returns_typed_malformed_output_error(monkeypatch):
+    fake = FakePopen(returncode=1, stdout="not valid json{", still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+
+
+def test_unexpected_tag_on_fast_exit_returns_typed_malformed_output_error(monkeypatch):
+    # A fast exit reporting "ok" (or any tag other than "refused") is itself unexpected --
+    # story 8's launcher never exits fast except to report `refused`.
+    payload = {"tag": "ok", "messages": [], "schemaVersion": "1.0.0"}
+    fake = FakePopen(returncode=0, stdout=json.dumps(payload), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+
+
+def test_empty_stdout_on_fast_exit_returns_typed_malformed_output_error(monkeypatch):
+    fake = FakePopen(
+        returncode=1, stdout="", stderr="native windowing failure", still_running=False
+    )
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+    assert "native windowing failure" in result.message
+
+
+def test_valid_json_but_not_an_object_returns_typed_malformed_output_error(monkeypatch):
+    fake = FakePopen(returncode=1, stdout=json.dumps(["refused"]), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+
+
+def test_missing_tag_field_returns_typed_malformed_output_error(monkeypatch):
+    payload = {"messages": ["something"], "schemaVersion": "1.0.0"}
+    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+
+
+def test_non_list_messages_returns_typed_malformed_output_error(monkeypatch):
+    payload = {"tag": "refused", "messages": "not a list"}
+    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "malformed_output"
+
+
+# --- `launcher_path` doesn't exist / can't be executed -----------------------------------------
+
+
+def test_launcher_path_not_found_returns_typed_launch_failed_error_not_an_oserror(monkeypatch):
+    _patch_popen(monkeypatch, FileNotFoundError("menger-app not found"))
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "launch_failed"
+
+
+def test_launcher_path_not_executable_returns_typed_launch_failed_error(monkeypatch):
+    _patch_popen(monkeypatch, PermissionError("menger-app is not executable"))
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert isinstance(result, RenderWindowError)
+    assert result.kind == "launch_failed"
+
+
+# --- Never raises, regardless of scenario -------------------------------------------------------
+
+
+@pytest.mark.parametrize("returncode", [0, 1, 2])
+def test_never_raises_regardless_of_fast_exit_code(monkeypatch, returncode):
+    fake = FakePopen(returncode=returncode, stdout="garbage", still_running=False)
+    _patch_popen(monkeypatch, fake)
+
+    result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)  # must not raise
+
+    assert isinstance(result, RenderWindowError)
+
+
+# --- Non-OSError exceptions from Popen are not swallowed --------------------------------------
+
+
+def test_non_oserror_from_popen_propagates_uncaught(monkeypatch):
+    # launch_failed handling must only catch OSError -- a ValueError (e.g. a bad argument to
+    # Popen) is a programmer error, not a modeled "launcher couldn't be started" outcome, and
+    # must be left to propagate rather than accidentally swallowed.
+    _patch_popen(monkeypatch, ValueError("bad Popen argument"))
+
+    with pytest.raises(ValueError):
+        refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+
+# --- grace_period precondition -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("grace_period", [0, -1, -0.5])
+def test_grace_period_not_positive_raises_value_error(monkeypatch, grace_period):
+    result_calls = _patch_popen(monkeypatch, FakePopen(still_running=True))
+
+    with pytest.raises(ValueError):
+        refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=grace_period)
+
+    # The precondition check must happen before anything is launched or terminated.
+    assert result_calls == []
+
+
+# --- A long-running window's output must never block it ----------------------------------------
+
+
+def test_running_window_writing_past_grace_period_never_blocks_on_its_output(tmp_path):
+    # Real process, not FakePopen: the deadlock only exists with a real OS pipe. The child
+    # sleeps past the grace period, then writes 200 KB to stderr (well over the 64 KB pipe
+    # buffer) and only then touches its marker. If its output went to a pipe nobody drains
+    # after the grace period, the write blocks forever and the marker never appears.
+    marker = tmp_path / "wrote-everything"
+    launcher = tmp_path / "fake-launcher"
+    launcher.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        "time.sleep(0.5)\n"
+        "sys.stderr.write('x' * 200_000)\n"
+        "sys.stderr.flush()\n"
+        f"open({str(marker)!r}, 'w').close()\n"
+        "time.sleep(30)\n"
+    )
+    launcher.chmod(0o755)
+    scene_file = tmp_path / "001.scala"
+    scene_file.write_text("object Scene")
+
+    result = refresh_render_window(scene_file, launcher, grace_period=0.2)
+
+    assert isinstance(result, RenderWindowResult)
+    try:
+        deadline = time.monotonic() + 5.0
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert marker.exists(), "window process blocked writing its output"
+        _, stderr_log = log_paths(scene_file)
+        assert stderr_log.stat().st_size == 200_000
+    finally:
+        result.process.kill()
+        result.process.wait(timeout=5)
+
+
+# --- close_render_window / crash_report (usability review 2026-09: W4, F12) -------------------
+
+
+def test_close_render_window_terminates_and_reaps_a_running_window():
+    window = FakePopen(still_running=True)
+
+    close_render_window(window, grace_period=_GRACE_PERIOD)
+
+    assert window.terminated is True
+    assert window.wait_calls == [_GRACE_PERIOD]
+
+
+def test_close_render_window_with_no_window_is_a_no_op():
+    close_render_window(None, grace_period=_GRACE_PERIOD)
+
+
+def test_crash_report_is_none_while_the_window_runs(tmp_path):
+    assert crash_report(FakePopen(still_running=True), tmp_path / "001.scala") is None
+
+
+def test_crash_report_is_none_after_a_clean_close(tmp_path):
+    assert crash_report(FakePopen(returncode=0), tmp_path / "001.scala") is None
+
+
+def test_crash_report_names_the_error_line_not_the_stack_trace(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "Error: OptiX rendering hit an unrecoverable CUDA error, restart required\n"
+        "\tat Main$.main(Main.scala:56)\n"
+    )
+
+    report = crash_report(FakePopen(returncode=1), scene_file)
+
+    assert report == (
+        "exit 1: Error: OptiX rendering hit an unrecoverable CUDA error, restart required"
+    )
+
+
+def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_path):
+    report = crash_report(FakePopen(returncode=-11), tmp_path / "001.scala")
+
+    assert report == "exit -11: no output in render.stderr.log"
+
+
+# --- frame_build_failures (usability review 2026-09, F44: menger#54's stderr marker) ----------
+
+
+def test_frame_build_failures_lists_the_marker_lines_without_the_marker(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "12:00:01.250 ERROR menger.engines.WithPreview - FRAME-BUILD-FAILED t=0.25: "
+        "at least 27648 instances needed\n"
+        "\tat Main$.main(Main.scala:56)\n"
+        "12:00:02.000 ERROR menger.engines.InteractiveEngine - FRAME-BUILD-FAILED "
+        "rebuild after 4D rotation: boom\n"
+    )
+
+    assert frame_build_failures(scene_file) == [
+        "t=0.25: at least 27648 instances needed",
+        "rebuild after 4D rotation: boom",
+    ]
+
+
+def test_frame_build_failures_without_a_stderr_log_is_empty(tmp_path):
+    assert frame_build_failures(tmp_path / "001.scala") == []
+
+
+# --- F5 (usability review 2026-09): the stable path menger's window live-reloads from -------
+
+
+def test_render_window_scene_path_is_current_scala_under_the_session_dir(tmp_path):
+    assert render_window_scene_path(tmp_path) == tmp_path / "current.scala"
+
+
+def test_sync_render_window_scene_copies_the_ordinal_content_to_current_scala(tmp_path):
+    ordinal = tmp_path / "001.scala"
+    ordinal.write_text("object A:\n  val x = 1\n")
+
+    result = sync_render_window_scene(ordinal, tmp_path)
+
+    assert result == tmp_path / "current.scala"
+    assert result.read_text() == "object A:\n  val x = 1\n"
+
+
+def test_sync_render_window_scene_overwrites_a_previous_current_scala(tmp_path):
+    ordinal1 = tmp_path / "001.scala"
+    ordinal1.write_text("object A:\n  val x = 1\n")
+    sync_render_window_scene(ordinal1, tmp_path)
+
+    ordinal2 = tmp_path / "002.scala"
+    ordinal2.write_text("object A:\n  val x = 2\n")
+    result = sync_render_window_scene(ordinal2, tmp_path)
+
+    assert result.read_text() == "object A:\n  val x = 2\n"
+
+
+def test_sync_render_window_scene_leaves_no_temp_file_behind(tmp_path):
+    ordinal = tmp_path / "001.scala"
+    ordinal.write_text("object A:\n  val x = 1\n")
+
+    sync_render_window_scene(ordinal, tmp_path)
+
+    leftovers = [p for p in tmp_path.iterdir() if p.name not in {"001.scala", "current.scala"}]
+    assert leftovers == []
+
+
+# --- usability review 2026-10, session 3: F61 startup failure exits with status 0 -------------
+
+
+def test_crash_report_treats_a_zero_exit_after_a_startup_failure_as_a_crash(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
+        "12:00:01 ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: "
+        "sponge-recursive-ias requires level in [1, 14)\n"
+    )
+
+    report = crash_report(FakePopen(returncode=0), scene_file)
+
+    assert report is not None
+    assert report.startswith("exit 0: ")
+    assert "sponge-recursive-ias requires level in [1, 14)" in report
+
+
+# --- wait_for_window_event (usability review 2026-10, session 3: F57/F61) ---------------------
+
+
+class _Clock:
+    """Deterministic time: `sleep` advances `now`, so a wait never really sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def _wait(scene_file, process, offset, wanted, timeout=5.0, clock=None):
+    clock = clock or _Clock()
+    return wait_for_window_event(
+        scene_file, process, offset, wanted, timeout,
+        poll_interval=0.5, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+
+
+def test_wait_reports_a_reload_the_window_logged_after_the_offset(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log = log_paths(scene_file)[1]
+    log.write_text("old: Reloaded scene from file (1 object(s))\n")
+    offset = log_size(scene_file)
+    log.write_text(
+        log.read_text() + "12:00:05 INFO  menger.engines.PreviewEngine - "
+        "Reloaded animated scene from file (duration 6.0s)\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), offset, RELOAD_EVENTS)
+
+    assert event == WindowEvent("reloaded")
+
+
+def test_wait_ignores_what_was_logged_before_the_offset(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("old: Reloaded scene from file (1 object(s))\n")
+
+    event = _wait(
+        scene_file, FakePopen(still_running=True), log_size(scene_file), RELOAD_EVENTS, timeout=2.0
+    )
+
+    assert event is None  # nothing new within the timeout
+
+
+def test_wait_reports_a_failed_reload_with_its_reason(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "WARN  menger.engines.PreviewEngine - Failed to reload /x/current.scala, keeping the "
+        "current scene: compile error\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
+
+    assert event == WindowEvent("reload_failed", "compile error")
+
+
+def test_wait_reports_a_scene_kind_change_that_needs_a_restart(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "WARN  menger.engines.InteractiveEngine - /x/current.scala changed to an animated "
+        "scene; live reload only supports static scenes -- restart the window to pick it up\n"
+    )
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
+
+    assert event == WindowEvent("kind_changed")
+
+
+def test_wait_reports_a_window_that_is_up(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "INFO  menger.engines.PreviewEngine - Watching scene file for live reload: /x\n"
+    )
+
+    assert _wait(scene_file, FakePopen(still_running=True), 0, LAUNCH_EVENTS) == WindowEvent("up")
+
+
+def test_wait_reports_a_startup_failure_even_when_not_asked_for_it(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text(
+        "ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: boom\n"
+    )
+
+    event = _wait(scene_file, FakePopen(returncode=0), 0, LAUNCH_EVENTS)
+
+    assert event.kind == "startup_failed"
+    assert event.detail.endswith("boom")
+
+
+def test_wait_reports_an_exited_process_without_a_marker(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("INFO  Loading scene\n")
+
+    assert _wait(scene_file, FakePopen(returncode=1), 0, RELOAD_EVENTS) == WindowEvent("exited", "1")
+
+
+def test_wait_without_a_log_has_nothing_to_wait_for(tmp_path):
+    assert _wait(tmp_path / "001.scala", FakePopen(still_running=True), 0, RELOAD_EVENTS) == (
+        WindowEvent("unavailable")
+    )
+
+
+def test_wait_gives_up_after_the_timeout(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    log_paths(scene_file)[1].write_text("INFO  Loading scene\n")
+    clock = _Clock()
+
+    event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS, 3.0, clock)
+
+    assert event is None
+    assert clock.now >= 3.0
