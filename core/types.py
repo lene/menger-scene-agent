@@ -33,7 +33,9 @@ from gauntlet.types import Finding
 # conventions (session 3).
 # 1.5.0 adds `val durationSeconds` (`duration` deprecated) and `Projection4DSpec.wScale` to the
 # conventions (menger#65).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.5.0"
+# 1.6.0 adds procedural preset 11 xyz_rgb_local and the transparent-shadow convention
+# (optix-jni#61, optix-jni 0.4.6).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.6.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

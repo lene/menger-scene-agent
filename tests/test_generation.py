@@ -477,3 +477,15 @@ def test_system_prompt_carries_the_session_3_rules():
         "plainly satisfies the request as worded",
     ):
         assert phrase in system_prompt, phrase
+
+
+def test_system_prompt_uses_local_colouring_and_transparent_shadows():
+    # optix-jni#61 / manifest 1.6.0: xyz_rgb_local replaces moving objects to the positive
+    # octant (F63); coloured shadows need transparentShadows (F67).
+    adapter = FakeModelAdapter(result="object S:\n  val scene = Scene()\n")
+    revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    system_prompt = adapter.last_request.system_prompt
+    assert "xyz_rgb_local (11)" in system_prompt
+    assert "render = Some(RenderSettings(transparentShadows = true))" in system_prompt
+    assert "positive octant" not in system_prompt
