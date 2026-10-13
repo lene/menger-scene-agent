@@ -27,11 +27,11 @@ from gauntlet.types import Finding
 _STAGE = "clean_code"
 
 # The corpus's own scenes run 26-248 lines (dsl-corpus.json's ParametricScenes.scala is the
-# outlier at 248; poc-run/*.scala sit at 53); 150 catches a runaway file while allowing the
-# corpus's own legitimate multi-object outlier as a documented exception -- see review round
-# 1's note: the original "150, generous headroom above 34-92" rationale was itself based on
-# a stale corpus figure and would have flagged a real corpus example.
-_LINE_COUNT_CEILING = 150
+# longest at 248; poc-run/*.scala sit at 53). The bound is the longest corpus scene plus a
+# quarter (248 * 1.25 = 310): it still catches a runaway file. It was 150, which rejected valid
+# animations that grew over a session (usability review 2026-10, session 4, F100: 8a's 162
+# lines and 8b's 157, the first rejection losing a decline behind the repair's syntax error).
+_LINE_COUNT_CEILING = 310
 
 # Matches TODO/FIXME/XXX as a whole word, case-insensitively (review round 1: a lowercase
 # "todo" is exactly the same leftover-placeholder signal as "TODO" and must not evade this

@@ -35,11 +35,11 @@ def test_file_within_the_line_count_bound_is_not_flagged():
 
 
 def test_file_over_the_line_count_bound_is_flagged():
-    scene = "object Foo:\n" + "  // padding line\n" * 200
+    scene = "object Foo:\n" + "  // padding line\n" * 400
 
     findings = check_clean_code(scene)
 
-    length_findings = [f for f in findings if "150-line" in f.message or "bound" in f.message]
+    length_findings = [f for f in findings if "310-line" in f.message or "bound" in f.message]
     assert len(length_findings) == 1
     assert length_findings[0].stage == "clean_code"
     assert length_findings[0].field is None
@@ -170,13 +170,12 @@ def test_poc_run_turn2_refined_scala_has_no_clean_code_findings():
 
 # --- Verification: the full 32-scene reference corpus (review round 1) --------------------
 #
-# `ParametricScenes.scala` is the corpus's own documented outlier (dsl-surface.md: "one
-# 248-line outlier holding several objects") -- a demonstration file holding multiple scene
-# definitions, not a single-scene template. It legitimately exceeds the 150-line ceiling; a
-# single generated scene imitating just *one* of its patterns should not.
+# `ParametricScenes.scala` is the corpus's longest scene (dsl-surface.md: "one 248-line
+# outlier holding several objects"). The bound is derived from it (248 * 1.25 = 310, session
+# 4, F100), so the whole corpus passes.
 
 
-def test_full_corpus_passes_except_the_documented_length_outlier():
+def test_full_corpus_passes():
     import json
 
     corpus = json.load(open("reference/dsl-corpus.json"))
@@ -186,5 +185,4 @@ def test_full_corpus_passes_except_the_documented_length_outlier():
     flagged = {s["name"]: check_clean_code(s["source"]) for s in scenes}
     flagged = {name: f for name, f in flagged.items() if f}
 
-    assert set(flagged) == {"ParametricScenes"}
-    assert "150-line" in flagged["ParametricScenes"][0].message
+    assert flagged == {}
