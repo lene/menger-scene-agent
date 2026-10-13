@@ -105,7 +105,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.tickets import write_draft
 from core.consult import answer_consult
 from core.generation import validate_artifacts
-from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, run_turn
+from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, open_items, run_turn
 from core.types import ConsultError, RenderWindowOutcome, RenderWindowResult, TurnResult
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
@@ -165,6 +165,10 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "the first /retry explains nothing has changed and requires a second /retry (still "
             "unchanged) before actually resending -- never auto-retried, per PRD FR7. With "
             "nothing failed, reports there is nothing to retry.\n"
+            "\n"
+            "/open: lists every warning and Not done item that still holds for the current "
+            "scene. A turn prints only the new ones and counts the rest as \"earlier ... still "
+            "apply\".\n"
             "\n"
             "needs_clarification: when a turn is rejected for being too ambiguous, your "
             "next line is automatically threaded back into the original request (not sent "
@@ -371,6 +375,21 @@ def _replay_history(store: SceneStore) -> None:
             print(_format_history_entry(entry, store.session_dir))
 
 
+def _format_open_items(scene_text: Optional[str], manifest: dict) -> str:
+    """`/open`: every warning and Not done item that holds for the current scene. Each turn
+    prints only the new ones (usability review 2026-10, session 4, F91), so this is where the
+    user sees them all again."""
+    if scene_text is None:
+        return "Open: no scene yet."
+    warnings, not_done = open_items(scene_text, manifest)
+    if not warnings and not not_done:
+        return "Open: no warnings or Not done items for the current scene."
+    lines = ["Open for the current scene:"]
+    lines += [f"  Warning: {w}" for w in warnings]
+    lines += [f"  Not done: {part}" for part in not_done]
+    return "\n".join(lines)
+
+
 def _format_turn_result(
     result: TurnResult,
     scene_path: Optional[Path] = None,
@@ -405,6 +424,14 @@ def _format_turn_result(
             text += f"\n  Warning: {warning}"
     for part in result.not_done:
         text += f"\n  Not done: {part}"  # F81: not only in a doc comment
+    for part in result.stale_not_done:
+        # F91: its nearest is gone from the scene, so the line no longer told the truth.
+        text += f"\n  Note: removed the outdated Not done line: {part}"
+    if result.carried_over:
+        # F91: reported on an earlier turn, still true -- counted instead of repeated.
+        text += (
+            f"\n  ({result.carried_over} earlier warning(s) / Not done item(s) still apply)"
+        )
     if candidate_path is not None:
         text += f"\n  Candidate kept: {candidate_path}"
     return text
@@ -1135,6 +1162,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if retry_result is not None and resent_prompt is not None:
                     # The resend settles a pending request like any turn (F71).
                     clarification_state = _next_clarification_state(retry_result, resent_prompt)
+                continue
+
+            if line.strip() == "/open":
+                print(_format_open_items(store.current_scene(), manifest))
                 continue
 
             # F48: abandon a pending clarification/threaded rejection, so the next line starts

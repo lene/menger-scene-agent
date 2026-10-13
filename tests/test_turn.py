@@ -18,7 +18,7 @@ import pytest
 import core.turn as turn_module
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.scene_store import SceneStore, SceneStoreError
-from core.turn import check_hand_edit, removed_properties, run_turn
+from core.turn import check_hand_edit, open_items, removed_properties, run_turn
 from core.types import (
     EXPECTED_MANIFEST_SCHEMA_VERSION,
     TurnResult,
@@ -1520,3 +1520,75 @@ def test_parts_the_scene_could_not_do_are_reported_not_hidden_in_a_comment(tmp_p
         "extrusion along w -- nearest: switch to a Tesseract",
         "a penteract (5D) -- nearest: none, the DSL is 4D at most",
     ]
+
+
+# --- usability review 2026-10, session 4 (F91): report each warning and Not done once --------
+
+_HIDDEN_ORB_SCENE = (
+    "object Hidden:\n  val scene = Scene(objects = List(\n"
+    "    Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Chrome)),\n"
+    "    Sphere(pos = Vec3(0f, 0f, 0f), size = 0.5f)\n"
+    "  ))\n"
+)
+
+
+def test_a_scene_warning_the_previous_scene_had_is_counted_not_repeated(tmp_path, monkeypatch):
+    # Session 4, 4.14c: the film warning was printed on 8 turns although nothing about it
+    # changed.
+    _validator_sequence(monkeypatch, ["ok"])
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "make the orb a little bigger", _HIDDEN_ORB_SCENE, VALID_MANIFEST, VALID_CORPUS,
+        _SequenceAdapter([_HIDDEN_ORB_SCENE.replace("size = 0.5f", "size = 0.6f")]), store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.warnings == []
+    assert result.carried_over == 1
+
+
+def test_only_new_not_done_parts_are_reported(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["ok"])
+    old_line = "// NOT DONE: a glowing orb -- nearest: an emissive sphere\n"
+    new_line = "// NOT DONE: bell-curve falloff -- nearest: nested spheres\n"
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "let the glow fall off like a bell curve", old_line + CLEAN_SCENE_TEXT, VALID_MANIFEST,
+        VALID_CORPUS, _SequenceAdapter([old_line + new_line + CLEAN_SCENE_TEXT]), store,
+        _SCRIPT_PATH,
+    )
+
+    assert result.not_done == ["bell-curve falloff -- nearest: nested spheres"]
+    assert result.carried_over == 1
+
+
+def test_a_not_done_line_whose_nearest_material_is_gone_is_removed(tmp_path, monkeypatch):
+    # Session 4, 8b: "nearest: Material.Chrome" was reported on nine turns after chrome and
+    # steel had both left the scene.
+    _validator_sequence(monkeypatch, ["ok"])
+    stale = "// NOT DONE: steel material -- nearest: Material.Chrome (a grey metal)\n"
+    kept = "// NOT DONE: ruby material -- nearest: Material.Glass tinted red\n"
+    scene = stale + kept + (
+        "object Gems:\n  val ruby = Material.Glass\n  val scene = Scene()\n"
+    )
+    store = _make_store(tmp_path)
+
+    result = run_turn(
+        "glass, diamond, ruby, gold", None, VALID_MANIFEST, VALID_CORPUS,
+        _SequenceAdapter([scene]), store, _SCRIPT_PATH,
+    )
+
+    assert result.stale_not_done == ["steel material -- nearest: Material.Chrome (a grey metal)"]
+    assert "steel material" not in store.current_scene()
+
+
+def test_open_items_lists_everything_still_open_for_a_scene():
+    scene = "// NOT DONE: a glowing orb -- nearest: an emissive sphere\n" + _HIDDEN_ORB_SCENE
+
+    warnings, not_done = open_items(scene, VALID_MANIFEST)
+
+    assert len(warnings) == 1 and "Sphere" in warnings[0]
+    assert not_done == ["a glowing orb -- nearest: an emissive sphere"]

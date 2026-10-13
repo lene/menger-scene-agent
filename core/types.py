@@ -296,8 +296,13 @@ class TurnResult:
     # move). Reported, not rejected -- same spirit as `removed_properties`.
     warnings: List[str] = field(default_factory=list)
     # Parts of the request the accepted scene does not do, each "<part> -- nearest: <alt>",
-    # from the scene's `// NOT DONE:` lines (session 3, F81: they hid in a doc comment).
+    # from the scene's `// NOT DONE:` lines (session 3, F81: they hid in a doc comment). Only
+    # the ones the previous scene did not already have (session 4, F91).
     not_done: List[str] = field(default_factory=list)
+    # `// NOT DONE:` lines removed because the material they name as nearest is gone (F91).
+    stale_not_done: List[str] = field(default_factory=list)
+    # Scene warnings and Not done parts the previous turn already reported, still true (F91).
+    carried_over: int = 0
 
 
 # `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):

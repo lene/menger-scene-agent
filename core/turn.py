@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 from adapters.model import ModelAdapter
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -77,6 +77,54 @@ _LOCAL_CHECKS = (check_allowlist, check_resource_bounds, check_clean_code, check
 # A part of the request the scene does not do, as generation_rules.md tells the model to mark
 # it: `// NOT DONE: <part> -- nearest: <alternative>` (F81).
 _NOT_DONE = re.compile(r"^[ \t]*//[ \t]*NOT DONE:(.+)$", re.MULTILINE)
+_NOT_DONE_LINE = re.compile(r"^[ \t]*//[ \t]*NOT DONE:(.+)\n?", re.MULTILINE)
+
+# A material preset a `// NOT DONE` line names as its nearest (`Material.Chrome`).
+_MATERIAL_TOKEN = re.compile(r"\bMaterial\.[A-Z]\w*")
+
+
+def not_done_parts(scene_text: Optional[str]) -> List[str]:
+    """The scene's `// NOT DONE:` parts, stripped."""
+    return [m.strip() for m in _NOT_DONE.findall(scene_text or "")]
+
+
+def scene_warnings(facts, scene_text: str, manifest: dict) -> List[str]:
+    """Warnings that are properties of a scene itself, not of a turn's changes: an occluded
+    object (F23), a slow level or glass on a 4D sponge (F36, #4c), an animated camera that ends
+    up looking at nothing (F83)."""
+    return (
+        occlusion_warnings(facts)
+        + caveat_warnings(
+            facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
+        )
+        + camera_gaze_warnings(facts, strip_comments_and_strings(scene_text))
+    )
+
+
+def open_items(scene_text: str, manifest: dict) -> Tuple[List[str], List[str]]:
+    """Everything still open for a scene, for the REPL's `/open` (usability review 2026-10,
+    session 4: warnings are now reported once, so the user needs a way to see them all
+    again): its scene warnings and its Not done parts."""
+    facts = extract_scene_facts(strip_comments_and_strings(scene_text))
+    return scene_warnings(facts, scene_text, manifest), not_done_parts(scene_text)
+
+
+def drop_stale_not_done(scene_text: str) -> Tuple[str, List[str]]:
+    """Removes `// NOT DONE` lines whose named material nearest is no longer in the code (8b:
+    "nearest: Material.Chrome" stayed after chrome and steel were both dropped, and was
+    reported as true on nine more turns -- usability review 2026-10, session 4, F91). A line
+    that names no material is kept: only the model can tell whether it still applies."""
+    code = strip_comments_and_strings(scene_text)
+    dropped: List[str] = []
+
+    def keep_or_drop(match: "re.Match[str]") -> str:
+        tokens = _MATERIAL_TOKEN.findall(match.group(1))
+        if tokens and not any(re.search(rf"\b{re.escape(t)}\b", code) for t in tokens):
+            dropped.append(match.group(1).strip())
+            return ""
+        return match.group(0)
+
+    return _NOT_DONE_LINE.sub(keep_or_drop, scene_text), dropped
 
 # A named argument in a scene file: `proceduralType = 8`, `edgeRadius = Some(0.005f)`.
 # `==` is excluded so comparisons don't count.
@@ -329,27 +377,31 @@ def run_turn(
                 extract_scene_facts(strip_comments_and_strings(first_candidate)), new_facts
             )
         ] if rounds_done else []
-        turn_warnings = (
-            facts_diff(
-                extract_scene_facts(strip_comments_and_strings(prior_scene)), new_facts, prompt
-            )
+        prior_facts = (
+            extract_scene_facts(strip_comments_and_strings(prior_scene))
             if prior_scene is not None
-            else []
+            else None
         )
-        # F23: unlike facts_diff (a revise-only before/after comparison), an occlusion is a
-        # property of the current scene alone, so this runs on every accepted turn, generate()
-        # included.
-        turn_warnings = turn_warnings + occlusion_warnings(new_facts)
-        # F36, #4c: caveats about the current scene the user should hear even when the request
-        # asked for exactly this (a slow level, glass on a 4D sponge).
-        turn_warnings = turn_warnings + caveat_warnings(
-            new_facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
+        turn_warnings = facts_diff(prior_facts, new_facts, prompt) if prior_facts else []
+
+        # F91: a scene warning or a Not done part the previous scene already had was reported
+        # then; it is counted, not repeated (session 4: one warning printed 8 times).
+        current_warnings = scene_warnings(new_facts, scene_text, manifest)
+        earlier_warnings = (
+            set(scene_warnings(prior_facts, prior_scene, manifest))
+            if prior_scene is not None and prior_facts is not None
+            else set()
         )
-        # F83: an animated camera that ends up looking at nothing hides what happens then.
-        turn_warnings = turn_warnings + camera_gaze_warnings(
-            new_facts, strip_comments_and_strings(scene_text)
+        new_scene_warnings = [w for w in current_warnings if w not in earlier_warnings]
+        turn_warnings = repair_warnings + turn_warnings + new_scene_warnings
+
+        scene_text, stale_not_done = drop_stale_not_done(scene_text)
+        earlier_not_done = set(not_done_parts(prior_scene))
+        current_not_done = not_done_parts(scene_text)
+        new_not_done = [p for p in current_not_done if p not in earlier_not_done]
+        carried_over = (len(current_warnings) - len(new_scene_warnings)) + (
+            len(current_not_done) - len(new_not_done)
         )
-        turn_warnings = repair_warnings + turn_warnings
 
         _emit("reading back")
         readback_result = semantic_readback(
@@ -387,7 +439,9 @@ def run_turn(
             ordinal=ordinal,
             removed_properties=removed_properties(prior_scene, scene_text),
             warnings=turn_warnings,
-            not_done=[m.strip() for m in _NOT_DONE.findall(scene_text)],
+            not_done=new_not_done,
+            stale_not_done=stale_not_done,
+            carried_over=carried_over,
         )
     finally:
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted

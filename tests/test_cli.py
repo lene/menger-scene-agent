@@ -2577,6 +2577,47 @@ def test_not_done_parts_are_printed():
     assert "\n  Not done: extrusion along w -- nearest: a Tesseract" in cli._format_turn_result(result)
 
 
+def test_carried_over_and_removed_not_done_lines_are_printed_once_each():
+    # Usability review 2026-10, session 4 (F91): earlier items are counted, not repeated.
+    result = TurnResult(
+        tag="accepted", messages=[], ordinal=3, readback_summary="a sponge",
+        stale_not_done=["steel -- nearest: Material.Chrome"], carried_over=2,
+    )
+
+    text = cli._format_turn_result(result)
+
+    assert "\n  Note: removed the outdated Not done line: steel -- nearest: Material.Chrome" in text
+    assert "\n  (2 earlier warning(s) / Not done item(s) still apply)" in text
+    assert "Warning:" not in text
+
+
+def test_open_lists_the_current_scenes_warnings_and_not_done(monkeypatch, tmp_path, capsys):
+    # Session 4: with each item printed once, /open shows them all again on demand.
+    _repl_env(monkeypatch, tmp_path)
+    _refuse_run_turn(monkeypatch)
+    monkeypatch.setattr(cli, "open_items", lambda scene, manifest: (
+        ["glass on a TesseractSponge renders chaotically"], ["a glowing orb -- nearest: a sphere"]
+    ))
+    monkeypatch.setattr(cli.SceneStore, "current_scene", lambda self: "object A:\n  val x = 1\n")
+    monkeypatch.setattr("builtins.input", _scripted_input(["/open"]))
+
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "Open for the current scene:",
+        "  Warning: glass on a TesseractSponge renders chaotically",
+        "  Not done: a glowing orb -- nearest: a sphere",
+    ]
+
+
+def test_open_without_a_scene_says_so(monkeypatch, tmp_path, capsys):
+    _repl_env(monkeypatch, tmp_path)
+    _refuse_run_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/open"]))
+
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out.splitlines() == ["Open: no scene yet."]
+
+
 def test_a_not_done_part_of_an_accepted_turn_writes_a_ticket_draft(monkeypatch, tmp_path, capsys):
     # F81: a part the scene could not do gets a ticket draft, like a full decline (F49).
     monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
