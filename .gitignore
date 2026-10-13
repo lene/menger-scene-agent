@@ -6,3 +6,5 @@ __pycache__/
 graphify-out/
 sessions/
 target/
+# lean-ctx's local index (agent tool, machine-local)
+.lean-ctx/
