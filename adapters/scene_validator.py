@@ -16,6 +16,7 @@ a separate, deferred story (see `_bmad-output/implementation-artifacts/deferred-
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -43,6 +44,17 @@ _WIRE_TAG_TO_VALIDATION_TAG = {
     "lint-findings": "lint_findings",
     "refused": "refused",
 }
+
+# Usability review 2026-10, session 4 (F99): the validator image is labelled with the sha256 of
+# the manifest it was built with, and run-sandboxed.sh refuses one that differs from ours -- a
+# stale image re-tagged by CI had passed for current. AD-9: resolved relative to this package,
+# like gauntlet/resource_bounds.py's manifest path. None (no check) if the file is missing.
+_REFERENCE_MANIFEST = Path(__file__).resolve().parent.parent / "reference" / "dsl-manifest.json"
+REFERENCE_MANIFEST_SHA256: Optional[str] = (
+    hashlib.sha256(_REFERENCE_MANIFEST.read_bytes()).hexdigest()
+    if _REFERENCE_MANIFEST.is_file()
+    else None
+)
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
 # ValidationError's message, so a pathological or adversarial response can't blow up the
@@ -77,6 +89,8 @@ def validate_scene(
     cmd = [str(script_path), str(scene_file)]
     if image is not None:
         cmd += ["--image", image]
+    if REFERENCE_MANIFEST_SHA256 is not None:
+        cmd += ["--expect-manifest-sha256", REFERENCE_MANIFEST_SHA256]
 
     try:
         completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)

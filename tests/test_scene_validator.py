@@ -5,12 +5,15 @@ exception -- this suite never invokes real Docker or a real `run-sandboxed.sh`."
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
+from pathlib import Path
 from typing import Any, List
 
 import pytest
 
+from adapters import scene_validator
 from adapters.scene_validator import validate_scene
 from core.types import ValidationError, ValidationFinding, ValidationResult
 
@@ -375,6 +378,9 @@ def test_subprocess_launch_failure_returns_a_typed_error_not_an_exception(monkey
 
 
 def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
+    # The command also carries the agent's manifest hash (session 4, F99); pinned to None here
+    # so this test is about the positional arguments only.
+    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", None)
     payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -384,12 +390,34 @@ def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
 
 
 def test_builds_the_command_with_an_image_tag_when_given(monkeypatch):
+    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", None)
     payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     validate_scene(_SCENE_FILE, _SCRIPT_PATH, image="menger-scene-validator:test")
 
     assert calls == [[_SCRIPT_PATH, _SCENE_FILE, "--image", "menger-scene-validator:test"]]
+
+
+def test_the_command_carries_the_agent_manifest_hash(monkeypatch):
+    # Usability review 2026-10, session 4 (F99): run-sandboxed.sh refuses an image built from a
+    # different manifest; a stale image re-tagged by CI had passed for current.
+    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", "ab" * 32)
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
+
+    validate_scene(_SCENE_FILE, _SCRIPT_PATH)
+
+    assert calls == [[_SCRIPT_PATH, _SCENE_FILE, "--expect-manifest-sha256", "ab" * 32]]
+
+
+def test_the_manifest_hash_is_the_sha256_of_the_reference_manifest():
+    expected = hashlib.sha256(
+        (Path(scene_validator.__file__).resolve().parent.parent / "reference"
+         / "dsl-manifest.json").read_bytes()
+    ).hexdigest()
+
+    assert scene_validator.REFERENCE_MANIFEST_SHA256 == expected
 
 
 def test_subprocess_run_is_invoked_with_capture_output_text_and_timeout_kwargs(monkeypatch):
