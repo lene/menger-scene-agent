@@ -103,6 +103,24 @@ def _patch_popen(monkeypatch, fake_popen: FakePopen) -> List[Any]:
     return calls
 
 
+def test_the_window_runs_in_its_own_session(monkeypatch):
+    # Usability review 2026-10, session 4 (F88): the terminal's Ctrl-C interrupted the turn
+    # and also killed the window, which shared the REPL's process group.
+    seen: List[dict] = []
+    fake = FakePopen(still_running=True)
+    import adapters.render_window as render_window
+
+    def recording_popen(cmd, **kwargs):
+        seen.append(kwargs)
+        return fake
+
+    monkeypatch.setattr(render_window.subprocess, "Popen", recording_popen)
+
+    refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
+
+    assert seen[0].get("start_new_session") is True
+
+
 # --- No prior process, launch succeeds -------------------------------------------------------
 
 

@@ -101,7 +101,12 @@ def refresh_render_window(
     stdout_log, stderr_log = log_paths(scene_file)
     try:
         with open(stdout_log, "w") as out, open(stderr_log, "w") as err:
-            process = subprocess.Popen(cmd, stdout=out, stderr=err, text=True)
+            # Its own session: the terminal's Ctrl-C (SIGINT to the foreground process group)
+            # interrupts the turn, not the window (usability review 2026-10, session 4, F88).
+            # The REPL still closes it on exit (`close_render_window`).
+            process = subprocess.Popen(
+                cmd, stdout=out, stderr=err, text=True, start_new_session=True
+            )
     except OSError as e:
         return RenderWindowError(
             kind="launch_failed",
