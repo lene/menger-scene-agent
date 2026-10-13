@@ -255,6 +255,21 @@ def test_volume_filling_level_above_the_ceiling_is_still_flagged():
     assert "exceeds the resource-bound ceiling of 5" in findings[0].message
 
 
+def test_a_too_high_level_names_the_sponge_type_that_accepts_it():
+    # Usability review 2026-10, session 4 (F87): the repair lowered 5.8 to VolumeFilling's 5,
+    # a level the window could not build then, although RecursiveIAS accepts it.
+    findings = check_resource_bounds(_sponge_scene("VolumeFilling", "5.8f"))
+
+    assert "spongeType RecursiveIAS (1 to 13) accepts 5.8" in findings[0].message
+    assert "rather than lowering a value the user asked for" in findings[0].message
+
+
+def test_no_hint_when_no_sponge_type_accepts_the_level():
+    findings = check_resource_bounds(_sponge_scene("RecursiveIAS", "14f"))
+
+    assert "accepts" not in findings[0].message
+
+
 def test_recursive_ias_level_below_its_minimum_is_flagged():
     findings = check_resource_bounds(_sponge_scene("RecursiveIAS", "0f"))
 

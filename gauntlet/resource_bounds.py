@@ -138,6 +138,7 @@ def check_resource_bounds(scene_text: str) -> list[Finding]:
                     message = (
                         f"{type_name}'s '{field}' = {args[field]} exceeds the "
                         f"resource-bound ceiling of {high:g} (defense-in-depth, AD-4 rule 3)"
+                        + _alternatives_hint(type_name, field, value, args)
                     )
                 elif low is not None and value < low:
                     message = (
@@ -174,3 +175,30 @@ def _bounds_for(
         return None, default_ceiling
     low, high, _ = field_bounds(manifest_field, subtype)
     return low, high
+
+
+def _alternatives_hint(type_name: str, field: str, value: float, args: dict[str, str]) -> str:
+    """For a value above its subtype's ceiling, the other subtypes whose range admits it, as a
+    repair hint (usability review 2026-10, session 4, F87: level 5.8 on VolumeFilling was
+    repaired by lowering it, although RecursiveIAS accepts 1 to 13). Empty if there are none."""
+    manifest_field = _SUBTYPE_FIELDS.get((type_name, field))
+    if manifest_field is None:
+        return ""
+    discriminator = discriminator_of(manifest_field)
+    current = subtype_of(args.get(discriminator)) if discriminator else None
+    by_value = (manifest_field.get("limitsBy") or {}).get("values") or {}
+    fitting = []
+    for subtype in by_value:
+        if subtype == current:
+            continue
+        low, high, _ = field_bounds(manifest_field, subtype)
+        if (low is None or value >= low) and (high is None or value <= high):
+            fitting.append(
+                f"{subtype} ({(low or 0):g} to {high:g})" if high is not None else subtype
+            )
+    if not fitting:
+        return ""
+    return (
+        f"; {discriminator} {', '.join(fitting)} accepts {value:g} -- switch to it, or ask, "
+        "rather than lowering a value the user asked for"
+    )
