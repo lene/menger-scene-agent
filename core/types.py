@@ -35,7 +35,10 @@ from gauntlet.types import Finding
 # conventions (menger#65).
 # 1.6.0 adds procedural preset 11 xyz_rgb_local and the transparent-shadow convention
 # (optix-jni#61, optix-jni 0.4.6).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.6.0"
+# 1.7.0 adds a level limit per 3D sponge type and drops the deprecated CubeSponge, plus notes on
+# edge-tube level limits, caustics visibility, the 4D projection size and the preview keys
+# (session 4, menger#64/#68/#76).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.7.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[
