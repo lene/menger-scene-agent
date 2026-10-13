@@ -2591,6 +2591,21 @@ def test_carried_over_and_removed_not_done_lines_are_printed_once_each():
     assert "Warning:" not in text
 
 
+def test_value_changes_and_unasked_choices_are_printed():
+    # Session 4 (F90, F93): the change list comes from evaluated values, not the readback.
+    result = TurnResult(
+        tag="accepted", messages=[], ordinal=2, readback_summary="a sponge",
+        changes=["duration: 10 s -> 20 s"], notes=["chose for the sponge, unasked: size 2.5"],
+    )
+    nothing = TurnResult(tag="accepted", messages=[], ordinal=3, changes=[])
+
+    assert "\n  Changed: duration: 10 s -> 20 s\n  Note: chose for the sponge, unasked: size 2.5" in (
+        cli._format_turn_result(result)
+    )
+    assert "\n  Changed: no value (only code layout or comments)" in cli._format_turn_result(nothing)
+    assert "Changed:" not in cli._format_turn_result(TurnResult(tag="accepted", messages=[], ordinal=1))
+
+
 def test_open_lists_the_current_scenes_warnings_and_not_done(monkeypatch, tmp_path, capsys):
     # Session 4: with each item printed once, /open shows them all again on demand.
     _repl_env(monkeypatch, tmp_path)
@@ -2607,6 +2622,29 @@ def test_open_lists_the_current_scenes_warnings_and_not_done(monkeypatch, tmp_pa
         "  Warning: glass on a TesseractSponge renders chaotically",
         "  Not done: a glowing orb -- nearest: a sphere",
     ]
+
+
+def test_a_cut_off_line_is_asked_about_and_joined_with_the_next(monkeypatch, tmp_path, capsys):
+    # Session 4, 8b: a copy-paste split "... cycles steel," from "  glass, diamond, ruby,
+    # gold"; the agent invented the rest. Now it asks, without a model call, and joins.
+    _repl_env(monkeypatch, tmp_path)
+    sent = []
+
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
+        sent.append(prompt)
+        store_arg.accept("object A:\n  val x = 1\n", prompt)
+        return TurnResult(tag="accepted", messages=[], ordinal=1)
+
+    monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    monkeypatch.setattr(
+        "builtins.input", _scripted_input(["the material cycles steel,", "glass and gold"])
+    )
+
+    assert cli.main([]) == 0
+    out = capsys.readouterr().out
+    assert 'looks cut off after "the material cycles steel,"' in out
+    assert len(sent) == 1
+    assert sent[0].startswith("the material cycles steel,") and "glass and gold" in sent[0]
 
 
 def test_open_without_a_scene_says_so(monkeypatch, tmp_path, capsys):
@@ -2663,3 +2701,49 @@ def test_a_rejection_puts_reasons_and_the_nearest_on_their_own_lines():
     assert cli._format_turn_result(TurnResult(tag="local_finding", messages=["bad thing"])) == (
         "Rejected (local finding): bad thing"
     )
+
+
+def test_long_lines_wrap_at_words_under_their_label_on_a_terminal(monkeypatch):
+    # Session 4 (F103): "multiline output is printed all on one line with random word breaks".
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda *a: cli.os.terminal_size((40, 24)))
+    text = "  Readback: a level-2 glass sponge with a dark background and two lights"
+
+    wrapped = cli._wrap_for_terminal(text).splitlines()
+
+    assert all(len(line) <= 40 for line in wrapped)
+    assert wrapped[1].startswith(" " * len("  Readback: ")) and wrapped[1].strip()
+    assert " ".join(w.strip() for w in wrapped).replace("Readback:  ", "Readback: ") == text.strip()
+
+
+def test_output_is_not_wrapped_off_a_terminal(monkeypatch):
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: False, raising=False)
+    text = "  Readback: " + "word " * 40
+
+    assert cli._wrap_for_terminal(text) == text
+
+
+def test_the_window_watcher_reports_a_crash_while_waiting_once(monkeypatch, tmp_path, capsys):
+    # Session 4, 3.6 (F88): the window ran out of memory minutes after the turn, unreported.
+    import time
+
+    class _Crashed:
+        pid = 4242
+
+        def poll(self):
+            return 1
+
+    store = SceneStore.create_session(tmp_path)
+    store.accept("object A:\n  val x = 1\n", "first")
+    monkeypatch.setattr(cli, "crash_report", lambda process, path: "java.lang.OutOfMemoryError")
+    watcher = cli._WindowWatcher(store, poll_seconds=0.01)
+    process = _Crashed()
+
+    watcher.watch(process)
+    time.sleep(0.2)
+    watcher.stop()
+
+    assert capsys.readouterr().out.count("Render window: crashed - java.lang.OutOfMemoryError") == 1
+    assert watcher.already_reported(process)
+    assert cli._report_render_crash(store, process, watcher) is None
+    assert "crashed" not in capsys.readouterr().out

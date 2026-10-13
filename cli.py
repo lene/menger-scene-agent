@@ -79,8 +79,11 @@ import os
 import re
 import readline  # noqa: F401 -- side-effect only: wires GNU readline into input() (arrow
                   # keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
+import shutil
 import subprocess
 import sys
+import textwrap
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -105,6 +108,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.tickets import write_draft
 from core.consult import answer_consult
 from core.generation import validate_artifacts
+from core.prompt_checks import cut_off_reason
 from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, open_items, run_turn
 from core.types import ConsultError, RenderWindowOutcome, RenderWindowResult, TurnResult
 
@@ -375,6 +379,35 @@ def _replay_history(store: SceneStore) -> None:
             print(_format_history_entry(entry, store.session_dir))
 
 
+_LABELLED_LINE = re.compile(r"^(\s*)([A-Z][\w ()]*: )")
+
+
+def _wrap_for_terminal(text: str) -> str:
+    """Wraps long lines at word boundaries to the terminal's width, continuation lines indented
+    under the text after a "  Label: " prefix (usability review 2026-10, session 4, F103: the
+    terminal broke readbacks and warnings in the middle of words). Paths and other long words
+    are never split. Only for a terminal; a pipe or a log keeps whole lines."""
+    if not sys.stdout.isatty():
+        return text
+    width = shutil.get_terminal_size().columns
+    wrapped = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            wrapped.append(line)
+            continue
+        label = _LABELLED_LINE.match(line)
+        indent = len(label.group(0)) if label else len(line) - len(line.lstrip())
+        wrapped.append(textwrap.fill(
+            line, width, subsequent_indent=" " * indent,
+            break_long_words=False, break_on_hyphens=False,
+        ))
+    return "\n".join(wrapped)
+
+
+# Once per REPL process: the validator image is older than result schema 1.1.0 (session 4).
+_SNAPSHOT_HINT_SHOWN: list[bool] = []
+
+
 def _format_open_items(scene_text: Optional[str], manifest: dict) -> str:
     """`/open`: every warning and Not done item that holds for the current scene. Each turn
     prints only the new ones (usability review 2026-10, session 4, F91), so this is where the
@@ -414,6 +447,14 @@ def _format_turn_result(
         text = _rejection_line(result.tag, *result.messages)
     if result.readback_summary:
         text += f"\n  Readback: {result.readback_summary}"
+    if result.changes is not None:
+        # Session 4 (F90): from the evaluated values, not the model's restatement.
+        listed = "; ".join(result.changes) if result.changes else (
+            "no value (only code layout or comments)"
+        )
+        text += f"\n  Changed: {listed}"
+    for note in result.notes:
+        text += f"\n  Note: {note}"
     if result.removed_properties:
         # F29: a turn that dropped earlier settings must say so, not do it silently.
         text += "\n  Note: this turn removed " + ", ".join(result.removed_properties)
@@ -490,13 +531,63 @@ def _format_hand_edit_result(result: TurnResult) -> str:
     return text
 
 
+class _WindowWatcher:
+    """Reports a render window crash while the REPL waits for input (usability review 2026-10,
+    session 4, F88: 3.6's out-of-memory crash came minutes after the turn and was never
+    reported, because the check ran only between turns). A daemon thread polls the window the
+    loop last handed it; each window (by object identity) is reported at most once, here or by
+    `_report_render_crash`."""
+
+    POLL_SECONDS = 2.0
+
+    def __init__(self, store: SceneStore, poll_seconds: float = POLL_SECONDS) -> None:
+        self._store = store
+        self._poll_seconds = poll_seconds
+        self._process: Optional[subprocess.Popen[str]] = None
+        self._reported: set[int] = set()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        threading.Thread(target=self._run, name="render-window-watcher", daemon=True).start()
+
+    def watch(self, process: Optional[subprocess.Popen[str]]) -> None:
+        with self._lock:
+            self._process = process
+
+    def already_reported(self, process: Optional[subprocess.Popen[str]]) -> bool:
+        with self._lock:
+            return process is not None and id(process) in self._reported
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._poll_seconds):
+            try:
+                with self._lock:
+                    process = self._process
+                if process is None or id(process) in self._reported or process.poll() is None:
+                    continue
+                scene_path = self._store.current_scene_path()
+                report = crash_report(process, scene_path) if scene_path is not None else None
+                with self._lock:
+                    self._reported.add(id(process))
+                if report is not None:
+                    print(f"\nRender window: crashed - {report}", flush=True)
+            except Exception:  # noqa: BLE001 -- the watcher must never kill the REPL
+                pass
+
+
 def _report_render_crash(
-    store: SceneStore, render_process: Optional[subprocess.Popen[str]]
+    store: SceneStore,
+    render_process: Optional[subprocess.Popen[str]],
+    watcher: Optional[_WindowWatcher] = None,
 ) -> Optional[subprocess.Popen[str]]:
     """Prints a crashed render window's cause once and stops tracking it (usability review
     2026-09, F12: a crash used to be visible only in render.stderr.log). A window the user
     closed cleanly just stops being tracked. Must not kill the REPL."""
     if render_process is None:
+        return None
+    if watcher is not None and watcher.already_reported(render_process):
         return None
     try:
         scene_path = store.current_scene_path()
@@ -861,7 +952,14 @@ def _execute_turn(
         print("Turn interrupted (Ctrl-C).")
         return None, store.current_scene(), render_process
 
-    print(_format_turn_result(result, *_turn_paths(store, result, prompt)))
+    print(_wrap_for_terminal(_format_turn_result(result, *_turn_paths(store, result, prompt))))
+    if result.snapshots_missing and not _SNAPSHOT_HINT_SHOWN:
+        _SNAPSHOT_HINT_SHOWN.append(True)
+        print(
+            "  Note: the validator image predates scene snapshots, so changes and camera "
+            "checks fall back to parsing the scene text; rebuild it: "
+            "menger/docker/scene-validator/build.sh"
+        )
     if result.tag == "unsupported":
         _write_ticket_draft(store, result.messages[0] if result.messages else "", prompt)
     for part in result.not_done:
@@ -1073,12 +1171,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # being sent alone -- threaded the same way `retry_state` is.
     clarification_state: Optional[_ClarificationState] = None
     frame_failures_reported = 0
+    watcher = _WindowWatcher(store)
 
     # The window must not outlive the REPL, however the loop ends -- Ctrl-D, or a Ctrl-C
     # that escapes mid-turn (usability review 2026-09, W4).
     try:
         while True:
-            render_process = _report_render_crash(store, render_process)
+            render_process = _report_render_crash(store, render_process, watcher)
+            watcher.watch(render_process)
             frame_failures_reported = _report_frame_build_failures(store, frame_failures_reported)
             try:
                 # F48: a visible marker while the next line is threaded onto a pending request.
@@ -1165,7 +1265,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
 
             if line.strip() == "/open":
-                print(_format_open_items(store.current_scene(), manifest))
+                print(_wrap_for_terminal(_format_open_items(store.current_scene(), manifest)))
                 continue
 
             # F48: abandon a pending clarification/threaded rejection, so the next line starts
@@ -1191,6 +1291,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             # an unrelated fresh request typed instead" -- the former is assumed, always. A
             # user who wants to abandon it types /drop first (F48); the "(continuing) >"
             # prompt and the hint after the rejection say so.
+            # Session 4 (F93, F103): a line that looks like half a request gets a question
+            # before any model call (decided by user 2026-10-13: "Ask the model to clarify");
+            # the answer is threaded into it like any clarification.
+            cut_off = cut_off_reason(line) if clarification_state is None else None
+            if cut_off is not None:
+                clarification_state = _ClarificationState(pending_prompt=line, reason=cut_off)
+                print(_rejection_line("needs_clarification", cut_off))
+                print("  Your next line continues this request; /drop abandons it.")
+                continue
+
             dispatched_prompt = (
                 _build_clarification_prompt(clarification_state, line)
                 if clarification_state is not None
@@ -1240,6 +1350,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # confirmation.
                 retry_state = _next_retry_state(result, dispatched_prompt, scene_before_turn)
     finally:
+        watcher.stop()
         close_render_window(render_process)
 
     return 0

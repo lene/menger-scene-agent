@@ -10,7 +10,9 @@ exists" is a real filesystem check, matching tests/test_scene_store.py's own pat
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -173,7 +175,12 @@ def test_clean_pass_renderer_non_ok_is_rejected_with_tag_and_messages(tmp_path, 
     )
 
     assert result.tag == wire_tag
-    assert result.messages == ["renderer says no"]
+    # The fake model returns the same scene for the repair, so a repairable rejection stops at
+    # once and says so (session 4, F100); `refused` is never repaired.
+    repaired_note = ["The automatic repair returned the same scene, so it was stopped."]
+    assert result.messages == ["renderer says no"] + (
+        repaired_note if wire_tag == "compile_errors" else []
+    )
     assert _ordinal_paths(store) == []
     assert not _staging_path(store).exists()
     entries = _history_entries(store)
@@ -231,7 +238,8 @@ def test_a_finding_the_validator_also_lists_in_messages_is_reported_once(tmp_pat
         FakeModelAdapter(result=CLEAN_SCENE_TEXT), _make_store(tmp_path), _SCRIPT_PATH,
     )
 
-    assert result.messages == ["scene-build: 24-cell: Incompatible 4D projection"]
+    # Once, not twice; the fake model's identical repair adds its own note (F100).
+    assert result.messages.count("scene-build: 24-cell: Incompatible 4D projection") == 1
 
 
 # --- validate_scene() returns a ValidationError: timeout/malformed/subprocess_failed -------
@@ -1402,9 +1410,14 @@ def _validator_sequence(monkeypatch, tags: List[str]) -> None:
     monkeypatch.setattr(turn_module, "semantic_readback", lambda *a, **kw: "a simple scene")
 
 
+# Distinct repair answers: a repair that returns the same scene ends the loop at once (F100).
+def _repaired(i: int) -> str:
+    return CLEAN_SCENE_TEXT.replace("Scene()", f"Scene() // repair {i}")
+
+
 def test_a_compile_error_is_repaired_with_the_error_fed_back(tmp_path, monkeypatch):
     _validator_sequence(monkeypatch, ["compile_errors", "ok"])
-    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT, _repaired(1)])
     store = _make_store(tmp_path)
     stages: List[str] = []
 
@@ -1422,7 +1435,7 @@ def test_a_compile_error_is_repaired_with_the_error_fed_back(tmp_path, monkeypat
 
 def test_repair_stops_after_the_bound_and_keeps_every_candidate(tmp_path, monkeypatch):
     _validator_sequence(monkeypatch, ["compile_errors"])
-    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT, _repaired(1), _repaired(2)])
     store = _make_store(tmp_path)
 
     result = run_turn(
@@ -1470,7 +1483,9 @@ def test_a_repair_that_changes_a_value_says_so(tmp_path, monkeypatch):
     _validator_sequence(monkeypatch, ["compile_errors", "ok"])
     first = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5.8f)))\n"
     repaired = "object S:\n  val scene = Scene(objects = List(Sponge(level = 5f)))\n"
-    adapter = _SequenceAdapter([first, repaired])
+    # 5.8 first trips the local level bound (repair 1 -> 5), then the scripted compile error
+    # needs a second, different repair (an identical one ends the loop, F100).
+    adapter = _SequenceAdapter([first, repaired, repaired.replace("5f)))", "5f))) // fixed")])
     store = _make_store(tmp_path)
 
     result = run_turn(
@@ -1592,3 +1607,152 @@ def test_open_items_lists_everything_still_open_for_a_scene():
 
     assert len(warnings) == 1 and "Sphere" in warnings[0]
     assert not_done == ["a glowing orb -- nearest: an emissive sphere"]
+
+
+# --- usability review 2026-10, session 4 (F90, F89): evaluated-value changes and checks -------
+
+_SNAPSHOT_FIXTURES = Path(__file__).parent / "fixtures" / "snapshots"
+_REAL_MANIFEST = _json.loads(
+    (Path(__file__).resolve().parent.parent / "reference" / "dsl-manifest.json").read_text()
+)
+
+
+def _fixture(name: str) -> dict:
+    return _json.loads((_SNAPSHOT_FIXTURES / f"{name}.json").read_text())
+
+
+def _validator_with_snapshots(monkeypatch, *fixtures: str) -> None:
+    """Every validation is ok and returns the next fixture's snapshots (the last repeats)."""
+    calls = []
+
+    def fake(*a, **kw):
+        calls.append(1)
+        data = _fixture(fixtures[min(len(calls) - 1, len(fixtures) - 1)])
+        return ValidationResult(
+            tag="ok", messages=[], findings=[],
+            snapshots=data["snapshots"], camera_path=data["cameraPath"],
+        )
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake)
+    monkeypatch.setattr(turn_module, "semantic_readback", lambda *a, **kw: "a scene")
+
+
+def test_value_changes_come_from_the_validator_snapshots(tmp_path, monkeypatch):
+    # Session 4 Task 2: the readback said "Nothing the facts cover changed".
+    store = _make_store(tmp_path)
+    prior = "object A:\n  val scene = Scene()\n"
+    ordinal = store.accept(prior, "first")
+    store.write_snapshots(ordinal, _fixture("task2-001")["snapshots"])
+    _validator_with_snapshots(monkeypatch, "task2-002")
+
+    result = run_turn(
+        "slower, and start it already at level 1", prior, _REAL_MANIFEST, VALID_CORPUS,
+        _SequenceAdapter(["object A:\n  val scene = Scene() // slower\n"]), store, _SCRIPT_PATH,
+    )
+
+    assert result.tag == "accepted"
+    assert result.changes == [
+        "duration: 10 s -> 20 s",
+        "tesseract-sponge-surface level: animated from 0.5 to 2 -> animated from 1 to 2",
+    ]
+    assert store.current_snapshots() == _fixture("task2-002")["snapshots"]
+
+
+def test_a_scene_check_finding_gets_a_repair_round(tmp_path, monkeypatch):
+    # Session 4, 4.9: green under a kept xyz_rgb_local; the repair drops the procedural.
+    store = _make_store(tmp_path)
+    prior = "object A:\n  val scene = Scene()\n"
+    store.write_snapshots(store.accept(prior, "first"), _fixture("t4-015")["snapshots"])
+    _validator_with_snapshots(monkeypatch, "t4-016", "t4-015")
+    adapter = _SequenceAdapter([
+        "object A:\n  val scene = Scene() // green\n",
+        "object A:\n  val scene = Scene() // green, no procedural\n",
+    ])
+
+    result = run_turn(
+        "make the sponge glow green", prior, _REAL_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH, repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+    assert "proceduralType 11" in adapter.requests[1].user_prompt
+
+
+def test_an_unfixed_scene_check_finding_is_a_warning_not_a_rejection(tmp_path, monkeypatch):
+    store = _make_store(tmp_path)
+    prior = "object A:\n  val scene = Scene()\n"
+    store.write_snapshots(store.accept(prior, "first"), _fixture("t4-015")["snapshots"])
+    _validator_with_snapshots(monkeypatch, "t4-016")
+    same = "object A:\n  val scene = Scene() // green\n"
+
+    result = run_turn(
+        "make the sponge glow green", prior, _REAL_MANIFEST, VALID_CORPUS,
+        _SequenceAdapter([same]), store, _SCRIPT_PATH, repair_rounds=2,
+    )
+
+    assert result.tag == "accepted"
+    assert any("proceduralType 11" in w for w in result.warnings)
+
+
+def test_a_failed_repair_loop_keeps_the_first_attempts_not_done(tmp_path, monkeypatch):
+    # Session 4, 8a turn 7: the penteract decline was lost behind the repair's syntax error.
+    _validator_sequence(monkeypatch, ["compile_errors"])
+    first = "// NOT DONE: a 5D penteract -- nearest: none, the DSL is 4D\n" + CLEAN_SCENE_TEXT
+    adapter = _SequenceAdapter([first, _repaired(1), _repaired(2)])
+
+    result = run_turn(
+        "extrude it into a penteract", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        _make_store(tmp_path), _SCRIPT_PATH, repair_rounds=2,
+    )
+
+    assert result.tag == "compile_errors"
+    assert "The first attempt said: Not done: a 5D penteract -- nearest: none, the DSL is 4D" in result.messages
+
+
+def test_an_unchanged_scene_gets_one_more_round_that_can_decline(tmp_path, monkeypatch):
+    # Session 4, 4.3: an impossible request came back unchanged ("No change made ...
+    # rephrase it") instead of declined.
+    _validator_sequence(monkeypatch, ["ok"])
+    prior = CLEAN_SCENE_TEXT
+    adapter = _SequenceAdapter([
+        prior,
+        ModelError(kind="unsupported", message="pre-projection colouring -- nearest: local colouring"),
+    ])
+
+    result = run_turn(
+        "colour by the 4D coordinates", prior, VALID_MANIFEST, VALID_CORPUS, adapter,
+        _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert result.tag == "unsupported"
+    assert "unchanged" in adapter.requests[1].user_prompt
+    assert result.messages == ["pre-projection colouring -- nearest: local colouring"]
+
+
+def test_an_unchanged_scene_that_stays_unchanged_says_no_change_made(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["ok"])
+
+    result = run_turn(
+        "keep it as it is", CLEAN_SCENE_TEXT, VALID_MANIFEST, VALID_CORPUS,
+        _SequenceAdapter([CLEAN_SCENE_TEXT]), _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert result.tag == "unchanged"
+
+
+def test_a_not_done_line_without_a_nearest_is_a_note_not_a_ticket(tmp_path, monkeypatch):
+    # Session 4, 8b turn 2: a glass caveat filed as "Not done", with a nonsense ticket draft.
+    _validator_sequence(monkeypatch, ["ok"])
+    scene = (
+        "// NOT DONE: diamond, glass on this sponge -- glass renders chaotically; requested as asked\n"
+        "// NOT DONE: ruby material -- nearest: red-tinted Glass\n" + CLEAN_SCENE_TEXT
+    )
+
+    result = run_turn(
+        "glass, diamond, ruby", None, VALID_MANIFEST, VALID_CORPUS, _SequenceAdapter([scene]),
+        _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert result.not_done == ["ruby material -- nearest: red-tinted Glass"]
+    assert any("glass renders chaotically" in n for n in result.notes)

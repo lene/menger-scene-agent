@@ -181,6 +181,11 @@ class ValidationResult:
     findings: List[ValidationFinding] = field(default_factory=list)
     scene: Optional[str] = None
     schema_version: str = ""
+    # Result schema 1.1.0 (usability review 2026-10, session 4): the evaluated scene at each
+    # checked time, and an animated scene's camera every 0.05 s, as the JSON objects menger's
+    # `SceneSnapshot` writes. Empty from an older validator image. Read by core/snapshot_facts.
+    snapshots: List[dict] = field(default_factory=list)
+    camera_path: List[dict] = field(default_factory=list)
 
 
 # validate_scene() returns either the renderer's typed tagged result, or a typed error --
@@ -306,6 +311,14 @@ class TurnResult:
     stale_not_done: List[str] = field(default_factory=list)
     # Scene warnings and Not done parts the previous turn already reported, still true (F91).
     carried_over: int = 0
+    # What this turn changed, in evaluated values (session 4, F90); `None` when either turn
+    # has no validator snapshots (an older image, a first turn, a hand-edited prior), `[]` when
+    # no value changed.
+    changes: Optional[List[str]] = None
+    # Values chosen without being asked (F93): shown, not repaired.
+    notes: List[str] = field(default_factory=list)
+    # The validator returned no snapshots: an image older than result schema 1.1.0.
+    snapshots_missing: bool = False
 
 
 # `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):

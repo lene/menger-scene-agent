@@ -169,6 +169,7 @@ def semantic_readback(
     adapter: ModelAdapter,
     request: Optional[str] = None,
     prior_scene: Optional[str] = None,
+    changes: Optional[list[str]] = None,
 ) -> ReadbackResult:
     """Stage 5 of the validation gauntlet: restate what `scene_text` describes in one
     plain-language sentence, so a misreading of the original request surfaces here rather
@@ -189,13 +190,25 @@ def semantic_readback(
     Usability review 2026-10, session 3 (F62): readbacks omitted the change just made, so
     `request` and the computed `scene_changes` against `prior_scene` go in as `<request>` and
     `<changes>` blocks for the summary to lead with. The turn's warnings no longer go in
-    (F80a: the CLI prints them as their own lines, so they appeared twice)."""
+    (F80a: the CLI prints them as their own lines, so they appeared twice).
+
+    Usability review 2026-10, session 4 (F90): `changes`, when given, are the evaluated-value
+    changes from the validator's snapshots (`core.snapshot_facts`) and replace the text-parsed
+    `scene_changes`, which missed colours, materials, caustics and camera paths and so produced
+    "Nothing the facts cover changed" for real changes. An empty list means no value changed."""
     facts = extract_scene_facts(strip_comments_and_strings(scene_text))
     turn_block = ""
     if request is not None and prior_scene is not None:
-        prior_facts = extract_scene_facts(strip_comments_and_strings(prior_scene))
-        changes = scene_changes(prior_facts, facts)
-        listed = "\n".join(f"- {c}" for c in changes) if changes else "- nothing the facts cover changed"
+        if changes is None:
+            prior_facts = extract_scene_facts(strip_comments_and_strings(prior_scene))
+            changes = scene_changes(prior_facts, facts)
+            nothing = (
+                "- no change in the parsed facts (they do not cover colours, materials, "
+                "caustics or camera paths: describe the scene without claiming nothing changed)"
+            )
+        else:
+            nothing = "- no evaluated value changed (only code layout or comments)"
+        listed = "\n".join(f"- {c}" for c in changes) if changes else nothing
         turn_block = f"<request>\n{request}\n</request>\n\n<changes>\n{listed}\n</changes>\n\n"
     user_prompt = (
         "Here is the scene file's source text, verbatim, between <scene> tags, and "

@@ -24,6 +24,8 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
+from core.prompt_checks import unknown_material_hint
+from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
 from core.scene_facts import (
     camera_gaze_warnings,
     caveat_warnings,
@@ -88,6 +90,42 @@ def not_done_parts(scene_text: Optional[str]) -> List[str]:
     return [m.strip() for m in _NOT_DONE.findall(scene_text or "")]
 
 
+def split_not_done(parts: List[str]) -> Tuple[List[str], List[str]]:
+    """(real Not done parts, caveats): a part without "-- nearest:" is not the
+    `<part> -- nearest: <alternative>` form generation_rules.md asks for, but a remark the model
+    filed there (session 4, 8b: "diamond, glass on this sponge -- ... renders as chaotic
+    fragmented refraction; requested as asked", with its own ticket draft). Shown as a note,
+    no ticket (F92)."""
+    real = [p for p in parts if "-- nearest:" in p]
+    return real, [p for p in parts if "-- nearest:" not in p]
+
+
+def _generation_failure(store: SceneStore, prompt: str, error: GenerationError) -> TurnResult:
+    """The tag for a `GenerationError` (stories 15, 18; F16): a timeout, the model's own
+    question or decline, or any other failure -- each distinct end to end."""
+    tag = {
+        "needs_clarification": "needs_clarification",
+        "unsupported": "unsupported",
+        "model_call_timeout": "generation_timeout",
+    }.get(error.kind, "generation_failed")
+    messages = _record_rejected_safely(store, prompt, f"{tag}: {error.message}", [error.message])
+    return TurnResult(tag=tag, messages=messages)
+
+
+def _with_first_attempt(rejection: TurnResult, first_candidate: str, rounds_done: int) -> TurnResult:
+    """A rejection after repair rounds keeps what the first attempt said it could not do (F100:
+    8a's "there is no 5D object, so a penteract cannot be built" was lost behind the repair's
+    syntax error)."""
+    parts = not_done_parts(first_candidate) if rounds_done else []
+    if not parts:
+        return rejection
+    return TurnResult(
+        tag=rejection.tag,
+        messages=rejection.messages + [f"The first attempt said: Not done: {p}" for p in parts],
+        findings=rejection.findings,
+    )
+
+
 def scene_warnings(facts, scene_text: str, manifest: dict) -> List[str]:
     """Warnings that are properties of a scene itself, not of a turn's changes: an occluded
     object (F23), a slow level or glass on a 4D sponge (F36, #4c), an animated camera that ends
@@ -106,7 +144,8 @@ def open_items(scene_text: str, manifest: dict) -> Tuple[List[str], List[str]]:
     session 4: warnings are now reported once, so the user needs a way to see them all
     again): its scene warnings and its Not done parts."""
     facts = extract_scene_facts(strip_comments_and_strings(scene_text))
-    return scene_warnings(facts, scene_text, manifest), not_done_parts(scene_text)
+    real, caveats = split_not_done(not_done_parts(scene_text))
+    return scene_warnings(facts, scene_text, manifest) + caveats, real
 
 
 def drop_stale_not_done(scene_text: str) -> Tuple[str, List[str]]:
@@ -247,10 +286,14 @@ def run_turn(
             pass
 
     _emit("generating")
+    # F93: a material with no preset is a question, not a silent approximation. Only the
+    # model's copy of the request carries the hint; history and tickets keep the user's words.
+    hint = unknown_material_hint(prompt, manifest)
+    model_prompt = f"{prompt}\n\n({hint})" if hint else prompt
     generation_result = (
-        generate(prompt, manifest, corpus, adapter)
+        generate(model_prompt, manifest, corpus, adapter)
         if prior_scene is None
-        else revise(prompt, prior_scene, manifest, corpus, adapter)
+        else revise(model_prompt, prior_scene, manifest, corpus, adapter)
     )
 
     if isinstance(generation_result, GenerationError):
@@ -271,23 +314,25 @@ def run_turn(
         # usability review 2026-09 (F16, msa#3): same reasoning again for "unsupported" -- a
         # request the DSL genuinely cannot satisfy at all, distinct from "needs_clarification"
         # (see TurnTag's own docstring for why `cli.py` treats the two differently).
-        if generation_result.kind == "needs_clarification":
-            tag = "needs_clarification"
-        elif generation_result.kind == "unsupported":
-            tag = "unsupported"
-        elif generation_result.kind == "model_call_timeout":
-            tag = "generation_timeout"
-        else:
-            tag = "generation_failed"
-        messages = _record_rejected_safely(
-            store,
-            prompt,
-            f"{tag}: {generation_result.message}",
-            [generation_result.message],
-        )
-        return TurnResult(tag=tag, messages=messages)
+        return _generation_failure(store, prompt, generation_result)
 
     scene_text = generation_result
+
+    if prior_scene is not None and scene_text.split() == prior_scene.split() and repair_rounds > 0:
+        # Session 4, 4.3 (F92): an impossible request came back as the unchanged scene, and
+        # the user got "No change made ... rephrase it" instead of a decline. One more round
+        # asks for the change, a decline with a nearest, or a question.
+        _emit("repairing (local finding)")
+        retried = revise(
+            f"{prompt}\n\nYou returned the current scene unchanged. If the request can be done, "
+            "make the change. If it cannot be done at all, respond UNSUPPORTED naming what is "
+            "not possible and the nearest thing that is. If it is unclear, respond "
+            "NEEDS_CLARIFICATION with your question.",
+            prior_scene, manifest, corpus, adapter,
+        )
+        if isinstance(retried, GenerationError):
+            return _generation_failure(store, prompt, retried)
+        scene_text = retried
 
     if prior_scene is not None and scene_text.split() == prior_scene.split():
         # F76 (recurrence of F56): the model returned the current scene. Not a new turn: say
@@ -300,6 +345,13 @@ def run_turn(
         return TurnResult(tag="unchanged", messages=messages)
 
     staging_path = store.session_dir / _STAGING_FILENAME
+    # The prior turn's evaluated scene, if it is the scene this turn revises (session 4, F90).
+    prior_snapshots = (
+        store.current_snapshots()
+        if prior_scene is not None and prior_scene == store.current_scene()
+        else []
+    )
+    checks = CheckResult()
     try:
         # F47 (PRD FR-7 amendment 2026-10-02): a compile/lint failure of the agent's own
         # candidate gets up to `repair_rounds` revisions with the failure fed back; each round
@@ -309,6 +361,7 @@ def run_turn(
         repair_reasons: List[str] = []
         while True:
             _emit("validating")
+            from_checks = False  # the rejection below comes from the scene checks
             local_findings = _run_local_checks(scene_text)
             if local_findings:
                 # Always: "a renderer request is never made when a local finding exists" --
@@ -342,28 +395,58 @@ def run_turn(
                     return TurnResult(tag=outcome.kind, messages=messages)
 
                 if outcome.tag == "ok":
-                    break
-                # `_validation_messages(outcome)` can itself be empty (a bare non-"ok" tag
-                # with neither `messages` nor `findings` populated, e.g. a bare "refused") --
-                # fall back to the tag itself so `TurnResult.messages` is never empty on a
-                # non-accepted tag (review round, patch-level fix; mirrors the fallback used
-                # for the `record_rejected()` reason string on this same branch).
-                feedback = _validation_messages(outcome) or [outcome.tag]
+                    # Session 4 (F89, F102): checks on the evaluated scene; their findings go
+                    # back to the model like a local finding, what is left becomes a warning.
+                    checks = check_turn(
+                        prior_snapshots, outcome.snapshots, outcome.camera_path, prompt, manifest
+                    )
+                    if not checks.findings or rounds_done >= repair_rounds:
+                        break
+                    feedback = list(checks.findings)
+                    rejection_tag = "local_finding"
+                    from_checks = True
+                else:
+                    from_checks = False
+                    # `_validation_messages(outcome)` can itself be empty (a bare non-"ok" tag
+                    # with neither `messages` nor `findings` populated, e.g. a bare
+                    # "refused") -- fall back to the tag itself so `TurnResult.messages` is
+                    # never empty on a non-accepted tag (review round, patch-level fix;
+                    # mirrors the fallback used for the `record_rejected()` reason string).
+                    feedback = _validation_messages(outcome) or [outcome.tag]
+                    rejection_tag = outcome.tag
                 messages = _record_rejected_safely(
-                    store, prompt, "; ".join(feedback) or outcome.tag, feedback, scene_text
+                    store, prompt, "; ".join(feedback) or rejection_tag, feedback, scene_text
                 )
-                rejection = TurnResult(tag=outcome.tag, messages=messages)
+                rejection = TurnResult(tag=rejection_tag, messages=messages)
 
             if rejection.tag not in _REPAIRABLE_TAGS or rounds_done >= repair_rounds:
-                return rejection
+                return _with_first_attempt(rejection, first_candidate, rounds_done)
             _emit(_REPAIRABLE_TAGS[rejection.tag])
             repaired = revise(
                 f"{prompt}\n\nThe scene below is your previous attempt at this request; it was "
                 f"rejected with: {'; '.join(feedback)}. Fix exactly that and change nothing else.",
                 scene_text, manifest, corpus, adapter,
             )
+            unrepaired = isinstance(repaired, GenerationError) or repaired.split() == scene_text.split()
+            if unrepaired and from_checks:
+                # The scene itself validated; a scene-check finding the repair could not fix is
+                # shown as a warning, never a reason to reject a valid scene.
+                break
             if isinstance(repaired, GenerationError):
-                return rejection
+                return _with_first_attempt(rejection, first_candidate, rounds_done)
+            if repaired.split() == scene_text.split():
+                # F100: a repair that changes nothing cannot fix anything; stop at once (8a turn
+                # 7 spent its last round on an identical file).
+                return _with_first_attempt(
+                    TurnResult(
+                        tag=rejection.tag,
+                        messages=rejection.messages
+                        + ["The automatic repair returned the same scene, so it was stopped."],
+                        findings=rejection.findings,
+                    ),
+                    first_candidate,
+                    rounds_done,
+                )
             scene_text = repaired
             repair_reasons.extend(feedback)
             rounds_done += 1
@@ -382,7 +465,18 @@ def run_turn(
             if prior_scene is not None
             else None
         )
-        turn_warnings = facts_diff(prior_facts, new_facts, prompt) if prior_facts else []
+        snapshots = outcome.snapshots
+        # F90: with both turns' evaluated scenes, changes and unrequested-change warnings are
+        # values; without (an older image, a hand-edited prior), the text-parsed facts.
+        has_snapshots = bool(prior_snapshots) and bool(snapshots)
+        if has_snapshots:
+            turn_warnings = unrequested_changes(prior_snapshots, snapshots, prompt, manifest)
+            changes: Optional[List[str]] = snapshot_changes(prior_snapshots, snapshots, manifest)
+        else:
+            turn_warnings = facts_diff(prior_facts, new_facts, prompt) if prior_facts else []
+            changes = None
+        # F89/F102 findings the repair rounds did not fix, and the checks' own warnings.
+        turn_warnings = turn_warnings + checks.findings + checks.warnings
 
         # F91: a scene warning or a Not done part the previous scene already had was reported
         # then; it is counted, not repeated (session 4: one warning printed 8 times).
@@ -398,14 +492,16 @@ def run_turn(
         scene_text, stale_not_done = drop_stale_not_done(scene_text)
         earlier_not_done = set(not_done_parts(prior_scene))
         current_not_done = not_done_parts(scene_text)
-        new_not_done = [p for p in current_not_done if p not in earlier_not_done]
+        new_not_done, caveats = split_not_done(
+            [p for p in current_not_done if p not in earlier_not_done]
+        )
         carried_over = (len(current_warnings) - len(new_scene_warnings)) + (
-            len(current_not_done) - len(new_not_done)
+            len(current_not_done) - len(new_not_done) - len(caveats)
         )
 
         _emit("reading back")
         readback_result = semantic_readback(
-            scene_text, adapter, request=prompt, prior_scene=prior_scene
+            scene_text, adapter, request=prompt, prior_scene=prior_scene, changes=changes
         )
         if isinstance(readback_result, ReadbackError):
             # I/O & Edge-Case Matrix: "turn is NOT accepted without its summary -- treated
@@ -432,6 +528,8 @@ def run_turn(
             reason = f"storage_failed: {e}"
             messages = _record_rejected_safely(store, prompt, reason, [reason])
             return TurnResult(tag="storage_failed", messages=messages)
+        if snapshots:
+            store.write_snapshots(ordinal, snapshots)
         return TurnResult(
             tag="accepted",
             messages=[],
@@ -442,6 +540,9 @@ def run_turn(
             not_done=new_not_done,
             stale_not_done=stale_not_done,
             carried_over=carried_over,
+            changes=changes,
+            notes=checks.notes + [f"the scene notes: {c}" for c in caveats],
+            snapshots_missing=not snapshots,
         )
     finally:
         # Unconditional (Boundaries & Constraints: "The staging file is always deleted

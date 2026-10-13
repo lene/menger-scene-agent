@@ -20,7 +20,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from core.types import (
     ValidationError,
@@ -191,5 +191,15 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
         )
 
     return ValidationResult(
-        tag=tag, messages=messages, findings=findings, scene=scene, schema_version=schema_version
+        tag=tag, messages=messages, findings=findings, scene=scene, schema_version=schema_version,
+        snapshots=_list_of_objects(payload.get("snapshots")),
+        camera_path=_list_of_objects(payload.get("cameraPath")),
     )
+
+
+def _list_of_objects(value: object) -> List[dict]:
+    """Snapshots are advisory (they feed change reports and checks, not the verdict), so a
+    malformed list is dropped rather than failing the whole result."""
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        return []
+    return value

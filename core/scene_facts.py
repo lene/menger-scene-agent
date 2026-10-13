@@ -428,7 +428,9 @@ _ASKED_FOR = {
     "material": ("material", "made of", "made from", "glass", "gold", "chrome", "copper",
                  "metal", "aluminium", "aluminum", "silver", "steel", "wood", "stone", "marble",
                  "plastic", "matte", "diamond", "water", "film", "transparent", "opaque"),
-    "camera": ("camera", "view", "zoom", "frame", "angle", "closer", "further"),
+    "camera": ("camera", "view", "zoom", "frame", "angle", "closer", "further",
+               # a flight moves the camera (session 4, 8b)
+               "fly", "flight", "flies", "flying", "through", "tunnel", "turn into", "look along"),
     "projection": ("rotate", "rotation", "turn", "spin", "tilt", "4d", "projection"),
 }
 

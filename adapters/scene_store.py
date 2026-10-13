@@ -206,6 +206,30 @@ class SceneStore:
             return None
         return self._ordinal_path(ordinal)
 
+    def _snapshots_path(self, ordinal: int) -> Path:
+        return self.session_dir / f"{ordinal:0{_ORDINAL_WIDTH}d}.snapshots.json"
+
+    def write_snapshots(self, ordinal: int, snapshots: List[dict]) -> None:
+        """Keeps an accepted turn's evaluated scene (the validator's `snapshots`) next to its
+        file, so the next turn can report what changed in values (usability review 2026-10,
+        session 4, F90). Advisory: a failed write only loses that comparison."""
+        try:
+            self._snapshots_path(ordinal).write_text(json.dumps(snapshots), encoding="utf-8")
+        except OSError:
+            pass
+
+    def current_snapshots(self) -> List[dict]:
+        """The current turn's stored snapshots, or `[]` (none stored, e.g. an older session,
+        an older validator image, or a hand edit)."""
+        ordinal = self._last_ordinal()
+        if ordinal is None:
+            return []
+        try:
+            data = json.loads(self._snapshots_path(ordinal).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
     def read_ordinal(self, n: int) -> str:
         """Reads one prior ordinal's real content back from disk -- used both by
         `current_scene()` and to restore an earlier turn (Boundaries & Constraints: restoring
