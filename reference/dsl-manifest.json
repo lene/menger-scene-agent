@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.9.0",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.6",
+  "optixJniVersion": "0.4.7",
   "minDriverVersion": "580.65",
   "conventions": [
     "Units: positions and sizes are world units; `pos` is an object's centre; 3D `rotation` angles are radians, but the 4D rotation angles of `Projection4DSpec` (`rotXW`, `rotYW`, `rotZW`) are DEGREES (usability review 2026-10, session 3, F74).",
