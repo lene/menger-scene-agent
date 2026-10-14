@@ -134,7 +134,7 @@ def test_no_prior_process_launch_succeeds_returns_running_handle(monkeypatch):
 
     assert isinstance(result, RenderWindowResult)
     assert result.process is fake
-    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame"]]
     # The caller-supplied grace_period must be the exact value passed through to the
     # underlying wait() call, not e.g. a default or a mangled value.
     assert fake.wait_calls == [_GRACE_PERIOD]
@@ -149,7 +149,7 @@ def test_no_prior_process_accepts_path_objects_for_scene_file_and_launcher_path(
     )
 
     assert isinstance(result, RenderWindowResult)
-    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame"]]
 
 
 def test_builds_command_with_display_only_when_render_lock_path_not_given(monkeypatch):
@@ -160,7 +160,7 @@ def test_builds_command_with_display_only_when_render_lock_path_not_given(monkey
         _SCENE_FILE, _LAUNCHER_PATH, display=":1", grace_period=_GRACE_PERIOD
     )
 
-    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--display", ":1"]]
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame", "--display", ":1"]]
 
 
 def test_builds_command_with_render_lock_path_only_when_display_not_given(monkeypatch):
@@ -175,7 +175,7 @@ def test_builds_command_with_render_lock_path_only_when_display_not_given(monkey
     )
 
     assert calls == [
-        [_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--render-lock-path", "/fake/render.lock"]
+        [_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame", "--render-lock-path", "/fake/render.lock"]
     ]
 
 
@@ -196,6 +196,8 @@ def test_builds_command_with_display_and_render_lock_path_when_given(monkeypatch
             _LAUNCHER_PATH,
             "--scene",
             _SCENE_FILE,
+            "--playback",
+            "every-frame",
             "--display",
             ":1",
             "--render-lock-path",
@@ -219,7 +221,7 @@ def test_still_running_previous_process_is_terminated_before_fresh_launch(monkey
     assert previous.terminated is True
     assert isinstance(result, RenderWindowResult)
     assert result.process is fresh
-    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE]]
+    assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame"]]
     # The same grace_period the caller supplied must reach the previous_process termination
     # wait, not a default or a different value.
     assert previous.wait_calls == [_GRACE_PERIOD]

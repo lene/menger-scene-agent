@@ -38,7 +38,9 @@ from gauntlet.types import Finding
 # 1.7.0 adds a level limit per 3D sponge type and drops the deprecated CubeSponge, plus notes on
 # edge-tube level limits, caustics visibility, the 4D projection size and the preview keys
 # (session 4, menger#64/#68/#76).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.7.0"
+# 1.8.0 adds the window playback modes and the idle pause to the animation convention
+# (session 4, menger#71/#75).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.8.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

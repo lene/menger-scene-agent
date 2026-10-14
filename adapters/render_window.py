@@ -88,7 +88,12 @@ def refresh_render_window(
         if still_running:
             _terminate(previous_process, grace_period)
 
-    cmd: List[str] = [str(launcher_path), "--scene", str(scene_file)]
+    cmd: List[str] = [
+        str(launcher_path), "--scene", str(scene_file),
+        # Every frame rendered, looping (usability review 2026-10, session 4, F95): the default
+        # real-time mode skipped whole phases when a frame was slow.
+        "--playback", "every-frame",
+    ]
     if display is not None:
         cmd += ["--display", display]
     if render_lock_path is not None:
