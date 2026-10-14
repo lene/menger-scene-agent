@@ -112,6 +112,7 @@ def answer_consult(
     corpus: dict,
     adapter: ModelAdapter,
     prior_scene: Optional[str] = None,
+    window_state: Optional[str] = None,
 ) -> ConsultResult:
     """A consult turn (spec-ai-scene-agent story 19, PRD FR10): answers `question` in prose,
     grounded in the DSL capability manifest/example corpus and, when `prior_scene` is not
@@ -138,5 +139,12 @@ def answer_consult(
             f"Question: {question}\n\n"
             "Answer the question, following the system prompt's rules exactly. There is no "
             "current scene in this session yet -- answer from the manifest/corpus alone."
+        )
+    if window_state:
+        # Session 4, 4.11 (F96): the window's own values, not just the file's.
+        user_prompt += (
+            f"\n\nThe render window currently shows: {window_state}. For a question about what "
+            "the window shows (its 4D rotation, camera), answer from these values; the scene "
+            "file alone does not know them."
         )
     return _complete(system_prompt, user_prompt, adapter)

@@ -140,6 +140,41 @@ def render_window_scene_path(session_dir: Union[str, Path]) -> Path:
     return Path(session_dir) / "current.scala"
 
 
+def read_window_state(session_dir: Union[str, Path]) -> Optional[dict]:
+    """What the render window currently shows -- its camera, the 4D rotation added with
+    Shift+drag, and (animated scenes) the time and play state -- as menger writes it to
+    `<current.scala>.window-state.json` (usability review 2026-10, session 4, F96). `None` when
+    there is no such file or it is unreadable (no window, or an older menger)."""
+    path = Path(str(render_window_scene_path(session_dir)) + ".window-state.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _vec(value: object) -> str:
+    return "(" + ", ".join(f"{round(float(v), 3):g}" for v in value) + ")"  # type: ignore[union-attr]
+
+
+def describe_window_state(state: dict) -> str:
+    """The window state as one sentence for the model: camera, 4D rotation (degrees, added on
+    top of the scene file's own projection), playback."""
+    parts = [
+        f"camera at {_vec(state['cameraEye'])} looking at {_vec(state['cameraLookAt'])}",
+        "4D rotation added in the window: "
+        f"rotXW {round(float(state['rotXW']), 2):g}, rotYW {round(float(state['rotYW']), 2):g}, "
+        f"rotZW {round(float(state['rotZW']), 2):g} degrees (in addition to the file's own "
+        "Projection4DSpec rotations)",
+    ]
+    if state.get("t") is not None:
+        parts.append(
+            f"animation at t = {round(float(state['t']), 2):g} s, "
+            + ("playing" if state.get("playing") else "paused")
+        )
+    return "; ".join(parts)
+
+
 def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[str, Path]) -> Path:
     """Copies the just-accepted ordinal's content into `render_window_scene_path()`,
     atomically (write-to-temp, flush, fsync, `os.replace()`). Unlike `SceneStore`'s own

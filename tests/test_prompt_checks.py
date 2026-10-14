@@ -49,3 +49,11 @@ def test_a_material_without_a_preset_asks_for_the_approximation():
 
 def test_preset_materials_need_no_hint():
     assert unknown_material_hint("make it glass, then gold, then diamond", _MANIFEST) is None
+
+
+def test_a_request_about_what_the_window_shows_is_recognised():
+    from core.prompt_checks import refers_to_window
+
+    assert refers_to_window("ok, keep them like that for further prompts")
+    assert refers_to_window("use the current view")
+    assert not refers_to_window("make it glass")

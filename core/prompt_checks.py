@@ -54,3 +54,26 @@ def unknown_material_hint(prompt: str, manifest: dict) -> Optional[str]:
         "request already says how to approximate it, respond with NEEDS_CLARIFICATION asking "
         "which approximation the user wants, naming the nearest presets (session 4, F93)."
     )
+
+
+# A request that points at what the render window shows ("keep them like that", "the current
+# view", "this angle"): the window's own state (4D rotation, camera) is then part of the
+# context. Session 4, 4.11/4.12 (F96): "keep them like that" had nothing to keep.
+_WINDOW_WORDS = re.compile(
+    r"\b(window|view|like that|as it is|as is|this angle|current(ly)?|rotation|projection|"
+    r"where i|what i see)\b",
+    re.IGNORECASE,
+)
+
+
+def refers_to_window(prompt: str) -> bool:
+    return _WINDOW_WORDS.search(prompt) is not None
+
+
+def window_state_hint(description: str) -> str:
+    """The instruction that carries the window's state into a generation prompt."""
+    return (
+        f"The render window currently shows: {description}. If the request refers to what the "
+        "window shows (\"keep them like that\", \"this angle\"), write exactly these values "
+        "into the scene file; otherwise ignore them (session 4, F96)."
+    )

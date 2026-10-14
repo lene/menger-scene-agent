@@ -24,7 +24,7 @@ from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
 from core.readback import semantic_readback
-from core.prompt_checks import unknown_material_hint
+from core.prompt_checks import refers_to_window, unknown_material_hint, window_state_hint
 from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
 from core.scene_facts import (
     camera_gaze_warnings,
@@ -252,6 +252,7 @@ def run_turn(
     *,
     on_stage: Optional[Callable[[StageName], None]] = None,
     repair_rounds: int = MAX_REPAIR_ROUNDS,
+    window_state: Optional[str] = None,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -290,6 +291,10 @@ def run_turn(
     # model's copy of the request carries the hint; history and tickets keep the user's words.
     hint = unknown_material_hint(prompt, manifest)
     model_prompt = f"{prompt}\n\n({hint})" if hint else prompt
+    if window_state and refers_to_window(prompt):
+        # F96: "keep them like that" -- the window's own state (a description of the file
+        # `<current.scala>.window-state.json`, passed by the REPL) is context for the model.
+        model_prompt += f"\n\n({window_state_hint(window_state)})"
     generation_result = (
         generate(model_prompt, manifest, corpus, adapter)
         if prior_scene is None

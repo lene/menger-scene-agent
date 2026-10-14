@@ -711,3 +711,33 @@ def test_wait_gives_up_after_the_timeout(tmp_path):
 
     assert event is None
     assert clock.now >= 3.0
+
+
+# --- usability review 2026-10, session 4 (F96): the window's own state ------------------------
+
+_WINDOW_STATE = {
+    "cameraEye": [0, 0, 5], "cameraLookAt": [0, 0, 0], "cameraUp": [0, 1, 0],
+    "rotXW": -61.49998, "rotYW": 1.2, "rotZW": 0, "t": 3.5, "playing": False,
+}
+
+
+def test_the_window_state_next_to_current_scala_is_read_and_described(tmp_path):
+    import json
+
+    from adapters.render_window import describe_window_state, read_window_state
+
+    (tmp_path / "current.scala.window-state.json").write_text(json.dumps(_WINDOW_STATE))
+
+    text = describe_window_state(read_window_state(tmp_path))
+
+    assert "camera at (0, 0, 5) looking at (0, 0, 0)" in text
+    assert "rotXW -61.5, rotYW 1.2, rotZW 0 degrees" in text
+    assert "animation at t = 3.5 s, paused" in text
+
+
+def test_no_window_state_file_is_none(tmp_path):
+    from adapters.render_window import read_window_state
+
+    assert read_window_state(tmp_path) is None
+    (tmp_path / "current.scala.window-state.json").write_text("not json")
+    assert read_window_state(tmp_path) is None

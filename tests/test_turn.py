@@ -1756,3 +1756,29 @@ def test_a_not_done_line_without_a_nearest_is_a_note_not_a_ticket(tmp_path, monk
 
     assert result.not_done == ["ruby material -- nearest: red-tinted Glass"]
     assert any("glass renders chaotically" in n for n in result.notes)
+
+
+def test_the_windows_state_reaches_the_model_when_the_request_refers_to_it(tmp_path, monkeypatch):
+    # Session 4, 4.12: "keep them like that" had nothing to keep.
+    _validator_sequence(monkeypatch, ["ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+
+    run_turn(
+        "ok, keep them like that", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+        _make_store(tmp_path), _SCRIPT_PATH, window_state="4D rotation added in the window: rotXW 30",
+    )
+    asked = adapter.requests[0].user_prompt
+
+    assert "The render window currently shows: 4D rotation added in the window: rotXW 30" in asked
+
+
+def test_the_windows_state_is_left_out_of_an_unrelated_request(tmp_path, monkeypatch):
+    _validator_sequence(monkeypatch, ["ok"])
+    adapter = _SequenceAdapter([CLEAN_SCENE_TEXT])
+
+    run_turn(
+        "make it glass", None, VALID_MANIFEST, VALID_CORPUS, adapter, _make_store(tmp_path),
+        _SCRIPT_PATH, window_state="rotXW 30",
+    )
+
+    assert "render window currently shows" not in adapter.requests[0].user_prompt

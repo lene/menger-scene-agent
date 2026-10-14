@@ -198,3 +198,18 @@ def test_model_invalid_output_error_maps_to_typed_consult_error():
     assert isinstance(result, ConsultError)
     assert result.kind == "invalid_model_output"
     assert result.message == "model refused"
+
+
+def test_a_consult_gets_the_render_windows_state(monkeypatch):
+    # Session 4, 4.11 (F96): "what are the 4D rot/projection parameters now?" was answered from
+    # the file alone, as if it were the window's state.
+    adapter = FakeModelAdapter(result="rotXW is 30")
+
+    answer_consult(
+        "what are the 4D rot parameters now?", MANIFEST, CORPUS, adapter, "object A:\n  val x = 1\n",
+        window_state="4D rotation added in the window: rotXW 30",
+    )
+
+    assert "The render window currently shows: 4D rotation added in the window: rotXW 30" in (
+        adapter.requests[0].user_prompt
+    )

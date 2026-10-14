@@ -97,8 +97,10 @@ from adapters.render_window import (
     WindowEvent,
     close_render_window,
     crash_report,
+    describe_window_state,
     frame_build_failures,
     log_size,
+    read_window_state,
     refresh_render_window,
     render_window_scene_path,
     sync_render_window_scene,
@@ -402,6 +404,22 @@ def _wrap_for_terminal(text: str) -> str:
             break_long_words=False, break_on_hyphens=False,
         ))
     return "\n".join(wrapped)
+
+
+def _window_state_text(store: SceneStore) -> Optional[str]:
+    """The render window's current state as a sentence, or `None` (no window, or menger older
+    than the state file; usability review 2026-10, session 4, F96)."""
+    try:
+        state = read_window_state(store.session_dir)
+        return describe_window_state(state) if state is not None else None
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _window_state_kwargs(store: SceneStore) -> dict:
+    """`{"window_state": text}` when a window state exists, else nothing."""
+    text = _window_state_text(store)
+    return {"window_state": text} if text is not None else {}
 
 
 # Once per REPL process: the validator image is older than result schema 1.1.0 (session 4).
@@ -938,6 +956,7 @@ def _execute_turn(
             store,
             script_path,
             on_stage=on_stage,
+            **_window_state_kwargs(store),
         )
         _end_stage_line()
     except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
@@ -1228,7 +1247,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     continue
                 try:
                     consult_result = answer_consult(
-                        question, manifest, corpus, adapter, prior_scene
+                        question, manifest, corpus, adapter, prior_scene,
+                        **_window_state_kwargs(store),
                     )
                 except KeyboardInterrupt:  # F51: abandons the question, not the REPL
                     print("Consult interrupted (Ctrl-C).")
