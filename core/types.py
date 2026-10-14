@@ -40,7 +40,9 @@ from gauntlet.types import Finding
 # (session 4, menger#64/#68/#76).
 # 1.8.0 adds the window playback modes and the idle pause to the animation convention
 # (session 4, menger#71/#75).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.8.0"
+# 1.9.0 notes the render cost of fractional levels in refractive materials (both levels are
+# rendered and mixed) and that edge tubes of a fractional level blend (menger#69/#70).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "1.9.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

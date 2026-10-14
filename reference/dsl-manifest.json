@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.8.0",
+  "schemaVersion": "1.9.0",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.4.6",
   "minDriverVersion": "580.65",
@@ -174,7 +174,7 @@
           "name": "level",
           "type": "float",
           "default": null,
-          "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. Cost grows ~20x per level. Limits depend on `spongeType` (see `limitsBy`): VolumeFilling and SurfaceUnfolding go up to 5 (a VolumeFilling level 5 is a 13M-triangle mesh, about 10 s to build); RecursiveIAS covers levels 1 to 13.",
+          "description": "Recursion depth; fractional levels blend between the two neighbouring integer levels. In a refractive material (glass, water, diamond, film) the renderer renders both levels and mixes the images, so each such object doubles the renders per frame (two objects 4, up to 16) (menger#69). Cost grows ~20x per level. Limits depend on `spongeType` (see `limitsBy`): VolumeFilling and SurfaceUnfolding go up to 5 (a VolumeFilling level 5 is a 13M-triangle mesh, about 10 s to build); RecursiveIAS covers levels 1 to 13.",
           "min": 0,
           "max": 5,
           "warnAt": 3,
@@ -854,7 +854,7 @@
           "name": "edgeRadius",
           "type": "scala.Option<java.lang.Object>",
           "default": "None",
-          "description": "Draws the edges as tubes of this radius. With edge tubes the level is truncated to an integer (a fractional level steps, it does not blend), and they fit only up to level 2: one tube per edge, so level 3 needs 130177 instances, more than the 65536 the renderer has (usability review 2026-10, session 4, F94; menger#70)."
+          "description": "Draws the edges as tubes of this radius. A fractional level blends the tubes of its two levels up to 2.x; edge tubes fit only up to level 2: one tube per edge, so level 3 needs 130177 instances, more than the 65536 the renderer has, and from 2.x the level stays at its integer part (usability review 2026-10, session 4, F94; menger#70)."
         },
         {
           "name": "edgeMaterial",
