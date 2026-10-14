@@ -51,7 +51,7 @@ provider's extra too:
 
 ```bash
 uv sync --extra gemini              # Gemini only
-uv sync --extra openai-compatible   # DeepSeek, OpenAI, Kimi/Moonshot
+uv sync --extra openai-compatible   # DeepSeek, OpenAI, Kimi/Moonshot, a LiteLLM proxy
 uv sync --all-extras                # everything
 ```
 
@@ -80,10 +80,31 @@ different provider's key sits right there in the environment.
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `openai-compatible` |
 | OpenAI / ChatGPT | `openai` | `OPENAI_API_KEY` | `openai-compatible` |
 | Kimi (Moonshot AI) | `kimi` | `MOONSHOT_API_KEY` | `openai-compatible` |
+| A LiteLLM proxy | `litellm` | `LITELLM_API_KEY` and `LITELLM_BASE_URL` | `openai-compatible` |
 
 Only the selected provider's key needs to be set. An unrecognized provider name raises
 `UnknownProviderError`; a selected provider with no key set raises `MissingAPIKeyError` —
 both from `adapters/model.py`, both before any network call.
+
+**Choosing the model.** `MENGER_AGENT_MODEL` names the model to use with the selected
+provider (any provider, e.g. `deepseek-reasoner`); unset, each provider uses its default
+(Anthropic `claude-opus-5`, Gemini `gemini-3.1-pro-preview`, DeepSeek `deepseek-chat`, OpenAI
+`gpt-5`, Kimi `kimi-k2`, LiteLLM `claude-sonnet-5.5`). The agent prints `Model: <provider>
+<model>` at startup, next to the `Session:` line.
+
+**LiteLLM.** Any OpenAI-compatible LiteLLM proxy works; its model names are the proxy's own
+(`MENGER_AGENT_MODEL`). In fish:
+
+```fish
+set -Ux LITELLM_BASE_URL https://<your-litellm-host>/v1
+set -Ux LITELLM_API_KEY <your key>
+set -x MENGER_AGENT_MODEL_PROVIDER litellm
+set -x MENGER_AGENT_MODEL claude-opus-5.5   # optional: one of the proxy's models
+```
+
+**Tests that call a real model API** run only with `MENGER_AGENT_LIVE_TESTS=1` and the
+provider's key set (`tests/live_api.py`), so a key in the environment alone does not spend
+credit on every test run.
 
 Adding a further OpenAI-compatible vendor (same request/response shape as OpenAI's own chat
 completions API) costs one `_ProviderSpec` table entry in

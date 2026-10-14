@@ -8,9 +8,6 @@ like Scala scene text, or plausible prose, as appropriate per test."""
 from __future__ import annotations
 
 import difflib
-import os
-
-import pytest
 
 from adapters.artifacts import load_corpus, load_manifest
 from adapters.gemini_model import GeminiModelAdapter
@@ -18,6 +15,7 @@ from adapters.scene_store import SceneStore
 from core.generation import generate, revise
 from core.readback import semantic_readback
 from core.types import GenerationError, ReadbackError
+from tests.live_api import skip_unless_live
 
 TURN_1_PROMPT = (
     "a tesseract sponge that gets more intricate as it turns, about ten seconds, "
@@ -39,10 +37,7 @@ object MarkerScene:
   )
 """
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GEMINI_API_KEY"),
-    reason="GEMINI_API_KEY not set -- skipping the real Gemini API integration test",
-)
+pytestmark = skip_unless_live("GEMINI_API_KEY")
 
 
 def test_generate_turn_1_prompt_against_the_real_gemini_api():

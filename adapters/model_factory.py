@@ -20,51 +20,65 @@ from typing import Callable, Dict, Optional
 from adapters.model import ModelAdapter, UnknownProviderError
 
 
-def _build_anthropic(timeout: Optional[float]) -> ModelAdapter:
+# Each builder passes `model` on only when one was chosen, so every adapter keeps its own
+# default otherwise.
+def _model_kwargs(model: Optional[str]) -> Dict[str, str]:
+    return {"model": model} if model else {}
+
+
+def _build_anthropic(timeout: Optional[float], model: Optional[str]) -> ModelAdapter:
     from adapters.model import AnthropicModelAdapter
 
-    return AnthropicModelAdapter(timeout=timeout)
+    return AnthropicModelAdapter(timeout=timeout, **_model_kwargs(model))
 
 
-def _build_gemini(timeout: Optional[float]) -> ModelAdapter:
+def _build_gemini(timeout: Optional[float], model: Optional[str]) -> ModelAdapter:
     from adapters.gemini_model import GeminiModelAdapter
 
-    return GeminiModelAdapter(timeout=timeout)
+    return GeminiModelAdapter(timeout=timeout, **_model_kwargs(model))
 
 
-def _build_deepseek(timeout: Optional[float]) -> ModelAdapter:
-    from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
+def _openai_compatible(provider: str) -> Callable[[Optional[float], Optional[str]], ModelAdapter]:
+    def build(timeout: Optional[float], model: Optional[str]) -> ModelAdapter:
+        from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 
-    return OpenAICompatibleModelAdapter(provider="deepseek", timeout=timeout)
+        return OpenAICompatibleModelAdapter(provider=provider, timeout=timeout, model=model)
 
-
-def _build_openai(timeout: Optional[float]) -> ModelAdapter:
-    from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
-
-    return OpenAICompatibleModelAdapter(provider="openai", timeout=timeout)
+    return build
 
 
-def _build_kimi(timeout: Optional[float]) -> ModelAdapter:
-    from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
-
-    return OpenAICompatibleModelAdapter(provider="kimi", timeout=timeout)
-
-
-_FACTORIES: Dict[str, Callable[[Optional[float]], ModelAdapter]] = {
+_FACTORIES: Dict[str, Callable[[Optional[float], Optional[str]], ModelAdapter]] = {
     "anthropic": _build_anthropic,
     "gemini": _build_gemini,
-    "deepseek": _build_deepseek,
-    "openai": _build_openai,
-    "kimi": _build_kimi,
+    "deepseek": _openai_compatible("deepseek"),
+    "openai": _openai_compatible("openai"),
+    "kimi": _openai_compatible("kimi"),
+    # Any OpenAI-compatible LiteLLM proxy: its URL and key come from the environment, its model
+    # names are the proxy's own (decided by user 2026-10-14).
+    "litellm": _openai_compatible("litellm"),
 }
 
 # Preserves today's zero-config behavior exactly: a caller with no argument and no env var
 # set gets Anthropic, same as every existing `AnthropicModelAdapter()` call site.
 DEFAULT_PROVIDER = "anthropic"
 _ENV_VAR = "MENGER_AGENT_MODEL_PROVIDER"
+# The model to use with the selected provider (e.g. one of a LiteLLM proxy's model names);
+# unset, each provider uses its own default.
+_MODEL_ENV_VAR = "MENGER_AGENT_MODEL"
 
 
-def get_model_adapter(provider: Optional[str] = None, timeout: Optional[float] = None) -> ModelAdapter:
+def selected_provider(provider: Optional[str] = None) -> str:
+    """The provider `get_model_adapter(provider)` resolves to: the argument, else
+    `MENGER_AGENT_MODEL_PROVIDER`, else `DEFAULT_PROVIDER` (lower-case, stripped)."""
+    resolved = provider if provider is not None else os.environ.get(_ENV_VAR)
+    return (resolved or DEFAULT_PROVIDER).strip().lower()
+
+
+def get_model_adapter(
+    provider: Optional[str] = None,
+    timeout: Optional[float] = None,
+    model: Optional[str] = None,
+) -> ModelAdapter:
     """Resolves and constructs a `ModelAdapter` for the selected provider.
 
     Precedence (mirrors `AnthropicModelAdapter.__init__`'s own arg-beats-env-var shape, so
@@ -88,9 +102,13 @@ def get_model_adapter(provider: Optional[str] = None, timeout: Optional[float] =
     infinite `timeout` is a programmer error rejected before any network call, the same
     precondition every adapter (`AnthropicModelAdapter`, `GeminiModelAdapter`,
     `OpenAICompatibleModelAdapter`) enforces itself.
+
+    `model` picks the model the same way: the argument, else `MENGER_AGENT_MODEL` if set to a
+    non-empty value (whitespace-stripped, case kept -- model names are the vendor's), else the
+    provider's own default.
     """
-    resolved = provider if provider is not None else os.environ.get(_ENV_VAR)
-    resolved = (resolved or DEFAULT_PROVIDER).strip().lower()
+    resolved = selected_provider(provider)
+    chosen_model = model if model is not None else (os.environ.get(_MODEL_ENV_VAR) or "").strip()
 
     build = _FACTORIES.get(resolved)
     if build is None:
@@ -98,4 +116,4 @@ def get_model_adapter(provider: Optional[str] = None, timeout: Optional[float] =
             f"Unknown model provider '{resolved}' -- valid values: "
             f"{', '.join(sorted(_FACTORIES))}"
         )
-    return build(timeout)
+    return build(timeout, chosen_model or None)

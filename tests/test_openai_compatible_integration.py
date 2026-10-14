@@ -19,39 +19,36 @@ from adapters.artifacts import load_corpus, load_manifest
 from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 from core.generation import generate
 from core.types import GenerationError
+from tests.live_api import skip_unless_live
 
 TURN_1_PROMPT = (
     "a tesseract sponge that gets more intricate as it turns, about ten seconds, "
     "glass, dark background"
 )
 
+# Per provider, everything it needs from the environment. LiteLLM also needs its proxy's URL
+# and calls MENGER_AGENT_MODEL if that is set, else its default model.
 _PROVIDER_ENV_VARS = {
-    "deepseek": "DEEPSEEK_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "kimi": "MOONSHOT_API_KEY",
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "kimi": ("MOONSHOT_API_KEY",),
+    "litellm": ("LITELLM_API_KEY", "LITELLM_BASE_URL"),
 }
-
-
-def _skip_reason(env_var: str) -> str:
-    return f"{env_var} not set -- skipping the real API integration test"
 
 
 @pytest.mark.parametrize(
     "provider",
     [
-        pytest.param(
-            provider,
-            marks=pytest.mark.skipif(
-                not os.environ.get(env_var), reason=_skip_reason(env_var)
-            ),
-        )
-        for provider, env_var in _PROVIDER_ENV_VARS.items()
+        pytest.param(provider, marks=skip_unless_live(*env_vars))
+        for provider, env_vars in _PROVIDER_ENV_VARS.items()
     ],
 )
 def test_generate_turn_1_prompt_against_the_real_api(provider):
     manifest = load_manifest("reference/dsl-manifest.json")
     corpus = load_corpus("reference/dsl-corpus.json")
-    adapter = OpenAICompatibleModelAdapter(provider=provider)
+    adapter = OpenAICompatibleModelAdapter(
+        provider=provider, model=os.environ.get("MENGER_AGENT_MODEL") or None
+    )
 
     result = generate(TURN_1_PROMPT, manifest, corpus, adapter)
 

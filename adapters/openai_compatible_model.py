@@ -32,6 +32,8 @@ class _ProviderSpec:
     base_url: str
     api_key_env: str
     default_model: str
+    # Read the base URL from this environment variable instead (a self-hosted proxy).
+    base_url_env: Optional[str] = None
 
 
 # Default model ids are each vendor's current flagship chat model as of this writing --
@@ -41,6 +43,11 @@ _PROVIDERS: dict[str, _ProviderSpec] = {
     "deepseek": _ProviderSpec("DeepSeek", "https://api.deepseek.com", "DEEPSEEK_API_KEY", "deepseek-chat"),
     "openai": _ProviderSpec("OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5"),
     "kimi": _ProviderSpec("Kimi/Moonshot", "https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2"),
+    # A LiteLLM proxy: no fixed URL, its model names are the proxy's own (default decided by
+    # user 2026-10-14).
+    "litellm": _ProviderSpec(
+        "LiteLLM", "", "LITELLM_API_KEY", "claude-sonnet-5.5", base_url_env="LITELLM_BASE_URL"
+    ),
 }
 
 
@@ -75,6 +82,15 @@ class OpenAICompatibleModelAdapter:
                 f"{spec.api_key_env} is not set -- the {spec.name} model adapter refuses to "
                 "construct without it, before making any network call."
             )
+        base_url = (
+            (os.environ.get(spec.base_url_env) or "").strip() if spec.base_url_env else spec.base_url
+        )
+        if not base_url:
+            # Not a key, but the same construction-time failure the CLI already reports cleanly.
+            raise MissingAPIKeyError(
+                f"{spec.base_url_env} is not set -- the {spec.name} model adapter needs the "
+                "proxy's base URL (e.g. https://<host>/v1), before making any network call."
+            )
         # A programmer-error precondition, not a modeled runtime outcome (mirrors
         # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
         # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
@@ -86,12 +102,17 @@ class OpenAICompatibleModelAdapter:
         # `timeout` is only forwarded when explicitly set -- passing `timeout=None` to the
         # SDK client disables its own default timeout rather than leaving it alone (see
         # `adapters/model.py`'s `AnthropicModelAdapter.__init__` for the same reasoning).
-        client_kwargs: dict[str, object] = {"api_key": key, "base_url": spec.base_url}
+        client_kwargs: dict[str, object] = {"api_key": key, "base_url": base_url}
         if timeout is not None:
             client_kwargs["timeout"] = timeout
         self._client = openai.OpenAI(**client_kwargs)
         self._model = model or spec.default_model
         self._provider_name = spec.name
+
+    @property
+    def model_name(self) -> str:
+        """The model this adapter calls, for the CLI's startup line."""
+        return self._model
 
     def complete(self, request: ModelRequest) -> ModelResult:
         import openai

@@ -162,6 +162,11 @@ class AnthropicModelAdapter:
         self._client = anthropic.Anthropic(**client_kwargs)
         self._model = model
 
+    @property
+    def model_name(self) -> str:
+        """The model this adapter calls, for the CLI's startup line."""
+        return self._model
+
     def complete(self, request: ModelRequest) -> ModelResult:
         import anthropic
 

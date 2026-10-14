@@ -90,7 +90,7 @@ from typing import List, Optional, Tuple
 
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
-from adapters.model_factory import get_model_adapter
+from adapters.model_factory import get_model_adapter, selected_provider
 from adapters.render_window import (
     LAUNCH_EVENTS,
     RELOAD_EVENTS,
@@ -1167,6 +1167,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # F50: where this session's files are, fresh or resumed. On stderr with the other status
     # lines ("... <stage>"); stdout carries the turn results.
     print(f"Session: {store.session_dir}", file=sys.stderr)
+    # Which model this session talks to, so a session can be compared with others (a LiteLLM
+    # proxy offers many). Adapters without the property (test fakes) print "unknown".
+    print(
+        f"Model: {selected_provider()} {getattr(adapter, 'model_name', 'unknown')}",
+        file=sys.stderr,
+    )
 
     if args.session_id is not None:
         _replay_history(store)

@@ -310,8 +310,11 @@ def test_stage_callback_output_appears_before_final_turn_result_line(
     # "Turn N: tag" result line.
     # F50: the session line opens the session, on stderr with the other status lines.
     # Session 3 wish (msa#21): the stages share one line.
-    assert captured.err.splitlines()[1:] == ["... generating, validating, reading back"]
+    # 2026-10-14: the model in use follows the session line (its provider comes from the
+    # environment, so only the prefix is fixed).
+    assert captured.err.splitlines()[2:] == ["... generating, validating, reading back"]
     assert captured.err.splitlines()[0].startswith("Session: ")
+    assert captured.err.splitlines()[1].startswith("Model: ")
     # story 21: the render-refresh status line follows the turn result line on stdout.
     assert _file_names(captured.out.splitlines()) == [
         "Turn 1: accepted → 001.scala", "Render window: refreshed"
