@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -65,10 +66,10 @@ def refresh_render_window(
     Constraints) -- `launcher_path` not existing/executable, or the launcher producing
     unexpected output, are both typed errors, never an unhandled `OSError`/exception.
 
-    `grace_period` is intentionally reused for both waits this function performs: the
-    new-process launch-success check below, and (via `_terminate`) the wait for a still-running
-    `previous_process` to exit. This is a single knob for now, not an oversight -- there is no
-    story-level need yet for the two to differ independently.
+    `grace_period` bounds the new-process launch-success check only. Terminating a still-running
+    `previous_process` waits `_TERMINATE_GRACE_SECONDS`: the contained window removes its
+    container on SIGTERM, which takes longer than a launch check (review 2026-10-14, menger#104
+    -- the two used to be one knob).
 
     Note on ordering: a still-running `previous_process` is terminated *before* the new launch
     is attempted or confirmed. If the new launch subsequently fails (`refused`, `launch_failed`,
@@ -88,7 +89,7 @@ def refresh_render_window(
             # already gone" -- this function must never raise.
             still_running = False
         if still_running:
-            _terminate(previous_process, grace_period)
+            _terminate(previous_process, _TERMINATE_GRACE_SECONDS)
 
     cmd: List[str] = [
         str(launcher_path), "--scene", str(scene_file),
@@ -229,13 +230,13 @@ def log_paths(scene_file: Union[str, Path]) -> Tuple[Path, Path]:
 
 
 def close_render_window(
-    process: Optional[subprocess.Popen[str]], grace_period: float = 1.5
+    process: Optional[subprocess.Popen[str]], grace_period: Optional[float] = None
 ) -> None:
     """Closes and reaps the session's render window when the REPL exits. Without this the
     window outlived the REPL, kept holding the GPU and the render lock, and lingered as a
     zombie once closed (usability review 2026-09, W4). `None` is a no-op."""
     if process is not None:
-        _terminate(process, grace_period)
+        _terminate(process, _TERMINATE_GRACE_SECONDS if grace_period is None else grace_period)
 
 
 def crash_report(
@@ -379,6 +380,29 @@ def frame_build_failures(scene_file: Union[str, Path]) -> List[str]:
     ]
 
 
+# How long a SIGTERMed window gets before SIGKILL: the contained window's wrapper removes its
+# container on SIGTERM (`docker kill` + `docker rm`), which takes longer than the 1.5 s launch
+# check; killed mid-cleanup, the container would keep running (menger#104).
+_TERMINATE_GRACE_SECONDS = 10.0
+
+# Only a real child's process group is signalled -- never whatever a test passed in its place.
+_REAL_POPEN = subprocess.Popen
+
+
+def _signal_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+    """Best effort: a real window's process group, else the process itself."""
+    if isinstance(process, _REAL_POPEN):
+        try:
+            os.killpg(process.pid, sig)
+            return
+        except OSError:  # no such group: already gone, or not a session leader
+            pass
+    try:
+        (process.terminate if sig == signal.SIGTERM else process.kill)()
+    except Exception:  # noqa: BLE001 -- already gone
+        pass
+
+
 def _terminate(process: subprocess.Popen[str], grace_period: float) -> None:
     """Terminates a caller-supplied `previous_process`, escalating to `kill()` if it doesn't
     exit promptly -- never left as an orphaned/zombie process (Boundaries & Constraints:
@@ -390,24 +414,22 @@ def _terminate(process: subprocess.Popen[str], grace_period: float) -> None:
     along the way is treated as "it's probably already gone, proceed" rather than escaping to
     the caller. The final wait (after `kill()`) is bounded by `grace_period` too, and proceeds
     regardless of whether it actually confirms the process's death.
+
+    The window runs in its own session (`start_new_session=True`), so its process group is the
+    window and everything it started -- the contained window's wrapper script and its `docker`
+    client among them. The group is signalled, not just the PID (review 2026-10-14, menger#104):
+    SIGTERM lets the wrapper's trap remove the container; signalling only the wrapper's PID, or
+    killing outright, could leave the container running and holding the GPU.
     """
-    try:
-        process.terminate()
-    except Exception:
-        pass
+    _signal_group(process, signal.SIGTERM)
 
     try:
         process.wait(timeout=grace_period)
         return
-    except subprocess.TimeoutExpired:
+    except Exception:  # noqa: BLE001 -- timed out, or a racy wait: either way, escalate below
         pass
-    except Exception:
-        return
 
-    try:
-        process.kill()
-    except Exception:
-        pass
+    _signal_group(process, signal.SIGKILL)
 
     try:
         process.wait(timeout=grace_period)

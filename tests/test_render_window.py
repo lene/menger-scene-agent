@@ -222,9 +222,10 @@ def test_still_running_previous_process_is_terminated_before_fresh_launch(monkey
     assert isinstance(result, RenderWindowResult)
     assert result.process is fresh
     assert calls == [[_LAUNCHER_PATH, "--scene", _SCENE_FILE, "--playback", "every-frame"]]
-    # The same grace_period the caller supplied must reach the previous_process termination
-    # wait, not a default or a different value.
-    assert previous.wait_calls == [_GRACE_PERIOD]
+    # Termination has its own grace (menger#104): the contained window needs longer to remove its
+    # container than a launch check takes.
+    from adapters.render_window import _TERMINATE_GRACE_SECONDS
+    assert previous.wait_calls == [_TERMINATE_GRACE_SECONDS]
 
 
 def test_already_exited_previous_process_is_not_terminated(monkeypatch):
@@ -746,3 +747,59 @@ def test_no_window_state_file_is_none(tmp_path):
     (tmp_path / "window").mkdir()
     (tmp_path / "window" / "current.scala.window-state.json").write_text("not json")
     assert read_window_state(tmp_path) is None
+
+
+# Review 2026-10-14 (menger#104): the window's whole process group goes, not just its PID -- the
+# contained window is a wrapper script whose children (the docker client) must not survive it.
+def test_close_render_window_ends_the_windows_whole_process_group(tmp_path):
+    import os
+    import signal as _signal
+
+    from adapters.render_window import close_render_window
+
+    child_pid_file = tmp_path / "child.pid"
+    window = subprocess.Popen(
+        ["sh", "-c", f"sleep 60 & echo $! > {child_pid_file}; wait"],
+        start_new_session=True, text=True,
+    )
+    try:
+        for _ in range(100):
+            if child_pid_file.exists() and child_pid_file.read_text().strip():
+                break
+            time.sleep(0.05)
+        child_pid = int(child_pid_file.read_text())
+
+        close_render_window(window, grace_period=5)
+
+        assert window.poll() is not None
+        for _ in range(100):  # the orphaned `sleep` is reaped by init; give it a moment
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("the window's child process survived")
+    finally:
+        try:
+            os.killpg(window.pid, _signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def test_sighup_and_sigterm_unwind_through_the_repls_cleanup():
+    import signal as _signal
+
+    import cli
+
+    previous = {s: _signal.getsignal(s) for s in (_signal.SIGHUP, _signal.SIGTERM)}
+    try:
+        cli._exit_on_termination_signals()
+        for sig in previous:
+            handler = _signal.getsignal(sig)
+            with pytest.raises(SystemExit) as exited:
+                handler(sig, None)
+            assert exited.value.code == 128 + sig
+    finally:
+        for sig, handler in previous.items():
+            _signal.signal(sig, handler)

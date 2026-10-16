@@ -81,6 +81,7 @@ import readline  # noqa: F401 -- side-effect only: wires GNU readline into input
 
 # keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
@@ -1142,6 +1143,21 @@ def _record_consult_safely(
         print(f"Consult history: storage_failed - could not record consult turn: {e}")
 
 
+def _exit_on_termination_signals() -> None:
+    """SIGHUP (terminal closed) and SIGTERM (`kill`) exit through the REPL's `finally`, which
+    closes the render window; by default they ended the agent at once and left the window --
+    in its own session, so untouched by the terminal's hangup -- holding the GPU (menger#104).
+    Only from the main thread, where Python allows handlers (tests may call `main` elsewhere)."""
+    if threading.current_thread() is not threading.main_thread():
+        return
+
+    def _exit(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, _exit)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
 
@@ -1216,7 +1232,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     watcher = _WindowWatcher(store)
 
     # The window must not outlive the REPL, however the loop ends -- Ctrl-D, or a Ctrl-C
-    # that escapes mid-turn (usability review 2026-09, W4).
+    # that escapes mid-turn (usability review 2026-09, W4), or a closed terminal or `kill`:
+    # SIGHUP and SIGTERM unwind through the `finally` below too (review 2026-10-14, menger#104).
+    _exit_on_termination_signals()
     try:
         while True:
             render_process = _report_render_crash(store, render_process, watcher)
