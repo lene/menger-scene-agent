@@ -22,6 +22,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Union
 
+from adapters.child_env import child_environment
 from core.types import (
     ValidationError,
     ValidationFinding,
@@ -93,7 +94,9 @@ def validate_scene(
         cmd += ["--expect-manifest-sha256", REFERENCE_MANIFEST_SHA256]
 
     try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        completed = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, env=child_environment()
+        )
     except subprocess.TimeoutExpired as e:
         return ValidationError(
             kind="timeout",

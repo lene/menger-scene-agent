@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 
+from adapters.child_env import child_environment
 from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
@@ -110,7 +111,8 @@ def refresh_render_window(
             # interrupts the turn, not the window (usability review 2026-10, session 4, F88).
             # The REPL still closes it on exit (`close_render_window`).
             process = subprocess.Popen(
-                cmd, stdout=out, stderr=err, text=True, start_new_session=True
+                cmd, stdout=out, stderr=err, text=True, start_new_session=True,
+                env=child_environment(),
             )
     except OSError as e:
         return RenderWindowError(
