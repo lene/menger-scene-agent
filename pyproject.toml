@@ -16,7 +16,12 @@ menger-scene-agent = "cli:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0,<9.0.0",
+    # <9 held 8.4.2, which pip-audit flags (PYSEC-2026-1845; review 2026-10-14, msa#40).
+    "pytest>=9.0.0,<10.0.0",
+    "pytest-cov>=7.0.0,<8.0.0",
+    "ruff>=0.14.0,<1.0.0",
+    "mypy>=1.18.0,<2.0.0",
+    "pip-audit>=2.9.0,<3.0.0",
 ]
 # Per-provider model-adapter SDKs (adapters/model_factory.py). Optional, not `dependencies`:
 # the default provider is Anthropic, so a user who never selects another backend shouldn't
@@ -39,6 +44,23 @@ all-providers = [
 # and let it resolve `from core...` / `from adapters...` imports via this.
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# pyflakes, the pycodestyle errors ruff enables by default, import order, bugbear. Stated here
+# so CI and every machine lint alike (an ambient user config had added ~360 style findings).
+select = ["E4", "E7", "E9", "F", "I", "B"]
+# zip(strict=...) needs a decision per call site; the lengths are equal by construction today.
+ignore = ["B905"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# Errors present when the gate was introduced are listed in mypy-baseline.txt; the `types`
+# suite fails on any error not in it (scripts/mypy-ratchet.py).
 
 [tool.setuptools]
 # `reference/` (JSON data, not Python) and `gauntlet/` sit alongside `core/`/`adapters/` at

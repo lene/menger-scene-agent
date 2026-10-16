@@ -1,8 +1,8 @@
 name: CI
 
-# Unit suite on every push and PR. The live-model tests skip without their API keys, and nothing
-# here needs menger, Docker or a GPU (the gauntlet's renderer side is faked in the tests).
-# A push-event run is also what menger-toplevel's absence-of-run watchdog matches HEAD against.
+# The gate's suites (scripts/suites/*.sh, selected by qa-manifest.yaml) run here exactly as in
+# the pre-push hook, on the locked dependency set (review 2026-10-14, msa#29, #40). The job
+# named `test` is the required status check of the `main` ruleset -- keep the name.
 
 on:
   push:
@@ -17,13 +17,50 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      - name: Install (locked)
+        run: uv sync --locked --all-extras --dev
+      - name: Suite parity
+        run: ./scripts/suites/parity.sh
+      - name: Lint (ruff)
+        run: ./scripts/suites/lint.sh
+      - name: Types (mypy ratchet)
+        run: ./scripts/suites/types.sh
+      - name: Unit tests + coverage ratchet
+        run: ./scripts/suites/unit.sh
+      - name: Dependency audit
+        run: ./scripts/suites/audit.sh
 
-      - name: Install
-        run: pip install -e ".[dev,gemini,openai-compatible]"
+  python-versions:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11"]   # 3.12 runs in `test`; requires-python is >=3.10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --all-extras --dev
+      - run: uv run --locked pytest -q
 
-      - name: Unit tests
-        run: python -m pytest -q
+  policy:
+    name: Policy (test-justification, issue-link)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute QA_RANGES and run policy suite
+        run: |
+          set -euo pipefail
+          . ./standards/hooks/lib.sh
+          RANGES=$(push_ranges < /dev/null)
+          export QA_RANGES="$RANGES"
+          ./scripts/suites/policy.sh

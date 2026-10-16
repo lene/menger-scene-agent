@@ -1,0 +1,35 @@
+#!/bin/sh
+# Pre-push hook (Sprint 36 C1): thin wrapper. Change detection is unchanged
+# (standards/hooks/lib.sh); this hook's only job is to compute CHANGED_FILES/QA_RANGES/
+# QA_REMOTE and hand them to standards/scripts/qa-runner.sh, which reads ./qa-manifest.yaml
+# to decide which suites are relevant at push tier (replacing the old hardcoded HAS_SCALA
+# grep block) and runs each one (scripts/suites/*.sh), which decides its own
+# PASS/FAIL/SKIP — an honest per-suite summary (every relevant suite runs and self-reports;
+# an irrelevant one is labeled SKIP without its script ever starting).
+#
+# Detect changed files. The inline loop this replaces read only git's pre-push
+# protocol from stdin, so running the hook by hand — no stdin — produced an empty
+# file set, skipped every check below and exited 0 regardless of the diff. See
+# standards/hooks/lib.sh for the three invocation contexts and why a TTY test
+# alone does not cover them.
+if [ -r ./standards/hooks/lib.sh ]; then
+  . ./standards/hooks/lib.sh
+  retry_with_backoff "git fetch origin" git fetch origin --quiet || true
+  RANGES=$(push_ranges); _rc=$?
+  [ "$_rc" -eq 2 ] && exit 0   # push only deletes a branch
+  # unquoted on purpose: split the newline-separated ranges into arguments
+  CHANGED_FILES=$(changed_files $RANGES)
+  assert_detection "$CHANGED_FILES" || exit 1
+else
+  # Branch predating standards enrollment: degrade to the same branch-vs-main
+  # comparison rather than silently skipping.
+  BASE=$(git merge-base origin/main HEAD 2>/dev/null)
+  CHANGED_FILES=$(git diff --name-only "${BASE:-HEAD}" HEAD)
+  RANGES="${BASE:-HEAD}..HEAD"
+fi
+
+export CHANGED_FILES
+export QA_RANGES="$RANGES"
+export QA_REMOTE="$1"
+
+./standards/scripts/qa-runner.sh --tier push
