@@ -17,7 +17,9 @@ a separate, deferred story (see `_bmad-output/implementation-artifacts/deferred-
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -57,6 +59,11 @@ REFERENCE_DSL_REVISION: Optional[str] = DSL_REVISION or None
 # ValidationError's message, so a pathological or adversarial response can't blow up the
 # error message itself.
 _STDOUT_PREVIEW_LENGTH = 500
+# The tail of the validator's stderr that goes to the session log: all of it in practice, but
+# bounded against a scene that makes the validator print without end.
+_LOGGED_STDERR_CHARS = 65536
+
+logger = logging.getLogger(__name__)
 
 
 def validate_scene(
@@ -89,11 +96,13 @@ def validate_scene(
     if REFERENCE_DSL_REVISION is not None:
         cmd += ["--expect-dsl-revision", REFERENCE_DSL_REVISION]
 
+    started = time.monotonic()
     try:
         completed = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=child_environment()
         )
     except subprocess.TimeoutExpired as e:
+        logger.warning("validator timed out after %.1fs: %s", time.monotonic() - started, cmd)
         return ValidationError(
             kind="timeout",
             message=f"scene validator subprocess '{script_path}' exceeded its timeout",
@@ -115,6 +124,12 @@ def validate_scene(
             f"not be decoded as text: {e}",
             cause=e,
         )
+
+    # The whole stderr goes to the session log (msa#31): error messages keep only a preview.
+    logger.info("validator exit %d after %.1fs: %s", completed.returncode,
+                time.monotonic() - started, cmd)
+    if completed.stderr:
+        logger.info("validator stderr:\n%s", completed.stderr[-_LOGGED_STDERR_CHARS:])
 
     if completed.returncode == _TIMEOUT_EXIT_CODE:
         # run-sandboxed.sh's own wall-clock timeout: exit 124, no JSON on stdout at all.

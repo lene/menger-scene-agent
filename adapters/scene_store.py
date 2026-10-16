@@ -52,10 +52,10 @@ import re
 import tempfile
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Mapping, Optional, Union
 
 # Zero-padded to 3 digits per the Consistency Conventions table ("scene files zero-padded
 # ordinal (`001.scala`)"). The regex accepts 3-or-more digits so a session that somehow grows
@@ -102,6 +102,10 @@ class SceneStore:
     error instead of a clear one)."""
 
     session_dir: Path
+    # Who wrote the entries (review 2026-10-14, msa#31): agent version, provider, model, DSL
+    # revision of this run (`adapters.provenance.history_provenance`). Every history entry
+    # carries it and a `ts`, so a resumed session that switched model stays reconstructable.
+    provenance: Mapping[str, Optional[str]] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
         if not self.session_dir.is_dir():
@@ -291,6 +295,8 @@ class SceneStore:
         single buffered `write()` of one complete line is the atomic primitive here (see
         module docstring) rather than temp-then-rename, which does not compose with
         "append"."""
+        entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                 "provenance": dict(self.provenance), **entry}
         try:
             line = json.dumps(entry, sort_keys=True) + "\n"
             is_new_file = not self.history_path.exists()

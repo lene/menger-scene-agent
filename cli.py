@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import readline  # noqa: F401 -- side-effect only: wires GNU readline into input() (arrow
@@ -86,13 +87,21 @@ import subprocess
 import sys
 import textwrap
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter, selected_provider
+from adapters.provenance import (
+    MODEL_CALLS_FILENAME,
+    RecordingModelAdapter,
+    collect_provenance,
+    configure_session_logging,
+    history_provenance,
+    write_session_json,
+)
 from adapters.render_window import (
     LAUNCH_EVENTS,
     RELOAD_EVENTS,
@@ -120,6 +129,7 @@ from core.types import ConsultError, RenderWindowOutcome, RenderWindowResult, Tu
 # location (never CWD) -- same reasoning `adapters/artifacts.py`'s docstring already gives
 # for owning this I/O (Design Notes: "Manifest/corpus paths are not injected").
 _SCRIPT_DIR = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 _MANIFEST_PATH = _SCRIPT_DIR / "reference" / "dsl-manifest.json"
 _CORPUS_PATH = _SCRIPT_DIR / "reference" / "dsl-corpus.json"
 
@@ -977,8 +987,10 @@ def _execute_turn(
             **_window_state_kwargs(store),
         )
         _end_stage_line()
+        logger.info("turn: %s, ordinal %s", result.tag, result.ordinal)
     except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
         _end_stage_line()
+        logger.exception("turn error")
         print(f"Turn error: {e}")
         return None, prior_scene, render_process
     except KeyboardInterrupt:
@@ -1204,10 +1216,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"Session: {store.session_dir}", file=sys.stderr)
     # Which model this session talks to, so a session can be compared with others (a LiteLLM
     # proxy offers many). Adapters without the property (test fakes) print "unknown".
-    print(
-        f"Model: {selected_provider()} {getattr(adapter, 'model_name', 'unknown')}",
-        file=sys.stderr,
+    model_name = getattr(adapter, "model_name", "unknown")
+    print(f"Model: {selected_provider()} {model_name}", file=sys.stderr)
+
+    # Provenance (review 2026-10-14, msa#31): session.json, agent.log, every model call, and
+    # the run's identity on every history entry, so a session can be reconstructed.
+    configure_session_logging(store.session_dir)
+    provenance = collect_provenance(
+        manifest, _MANIFEST_PATH, selected_provider(), model_name, script_path,
+        render_launcher_path,
     )
+    write_session_json(store.session_dir, provenance)
+    store = replace(store, provenance=history_provenance(provenance))
+    adapter = RecordingModelAdapter(adapter, store.session_dir / MODEL_CALLS_FILENAME)
 
     if args.session_id is not None:
         _replay_history(store)

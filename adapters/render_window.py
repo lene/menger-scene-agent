@@ -22,6 +22,7 @@ workspace root).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -46,6 +47,10 @@ from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResul
 # RenderWindowError's message, so a pathological or adversarial response can't blow up the
 # error message itself. Mirrors `adapters.scene_validator._STDOUT_PREVIEW_LENGTH`.
 _STDOUT_PREVIEW_LENGTH = 500
+# Earlier launches' window logs kept next to the current one (render.stderr.1.log ...).
+_KEPT_LOGS = 5
+
+logger = logging.getLogger(__name__)
 
 # The only wire tag this adapter ever expects on a fast exit -- story 8's `Main` only ever
 # reports `refused` before opening the window; any other tag (including `ok`) on a *fast* exit
@@ -113,6 +118,9 @@ def refresh_render_window(
     # so once it had written ~64 KB (e.g. a per-frame error with a stack trace) its next write
     # blocked forever -- a hung window, and a hidden error.
     stdout_log, stderr_log = log_paths(scene_file)
+    # Earlier launches' logs are kept, not overwritten (review 2026-10-14, msa#31).
+    _rotate(stdout_log)
+    _rotate(stderr_log)
     # The previous launch's events would otherwise answer this launch's first wait.
     with suppress(OSError):
         events_path(scene_file).unlink()
@@ -132,6 +140,7 @@ def refresh_render_window(
             cause=e,
         )
 
+    logger.info("render window launched, pid %s: %s", getattr(process, "pid", None), cmd)
     try:
         process.wait(timeout=grace_period)
     except subprocess.TimeoutExpired:
@@ -234,6 +243,19 @@ def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[st
     return target
 
 
+def _rotate(log: Path, keep: int = _KEPT_LOGS) -> None:
+    """`render.stderr.log` -> `render.stderr.1.log` -> ... -> `.<keep>.log`, the oldest
+    dropped. Best effort: a log that cannot be moved is overwritten as before."""
+    def numbered(n: int) -> Path:
+        return log.with_name(f"{log.stem}.{n}{log.suffix}")
+    with suppress(OSError):
+        for n in range(keep - 1, 0, -1):
+            if numbered(n).exists():
+                numbered(n).replace(numbered(n + 1))
+        if log.exists():
+            log.replace(numbered(1))
+
+
 def log_paths(scene_file: Union[str, Path]) -> Tuple[Path, Path]:
     """Where a render window launched for `scene_file` writes its stdout and stderr: next to
     the scene, in its session directory. Overwritten by each launch."""
@@ -248,6 +270,7 @@ def close_render_window(
     window outlived the REPL, kept holding the GPU and the render lock, and lingered as a
     zombie once closed (usability review 2026-09, W4). `None` is a no-op."""
     if process is not None:
+        logger.info("closing render window, pid %s", getattr(process, "pid", None))
         _terminate(process, _TERMINATE_GRACE_SECONDS if grace_period is None else grace_period)
 
 
