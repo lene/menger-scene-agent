@@ -57,21 +57,56 @@ _ALLOWED_EXACT = ("menger.Projection4DSpec",)
 # failed this anchored-at-`$` regex outright, silently skipping the check entirely -- matched
 # against comment-stripped text (see `check_allowlist`), a trailing `//comment` is already
 # blanked to spaces by the time this runs, so only the semicolon needed handling here.
-_IMPORT_RE = re.compile(r"^[ \t]*import\s+([\w.]+(?:\.\{[^}]*\}|\._)?)[ \t]*;?[ \t]*$", re.MULTILINE)
+#
+# Review 2026-10-14 (menger-scene-agent#36): the old anchored regex knew only the Scala 2
+# wildcard `._`, so Scala 3's `import scala.sys.process.*` matched nothing and passed. Now every
+# `import` statement is captured whole and each comma-separated clause is reduced to its dotted
+# base path (dropping `._`, `.*`, `.given`, `.{...}` and ` as X`); a clause that does not reduce
+# to a plain dotted path is itself a finding -- the check fails closed, not open.
+_IMPORT_RE = re.compile(r"^[ \t]*import\s+([^;\n]+?)[ \t]*;?[ \t]*$", re.MULTILINE)
+_PACKAGE_RE = re.compile(r"^[ \t]*package\s+[\w.]+[ \t]*;?[ \t]*$", re.MULTILINE)
+_IMPORT_SELECTOR_RE =re.compile(r"(?:\.\{[^}]*\}|\._|\.\*|\.given\b.*|\s+as\s+\w+)$")
+_DOTTED_PATH_RE = re.compile(r"^(?:_root_\.)?[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$")
 
-# A fully-qualified reference used inline without an import: one or more lowercase package
-# segments, ending in a capitalized type/object name -- e.g. `java.io.File`,
-# `menger.Projection4DSpec`. Deliberately narrow (proportionate to AD-4's "syntactic, not
-# typer" rule): this cannot and does not attempt to resolve bare, unqualified identifiers.
-_QUALIFIED_REF_RE = re.compile(r"\b((?:[a-z][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9_]*)\b")
+# A qualified reference used inline without an import, rooted in a package namespace (not a
+# local value's member access like `scene.objects`): `java.io.File`, `scala.sys.process.Process`,
+# `_root_.java.lang.Runtime`. The old pattern required a capitalised last segment and missed
+# `scala.sys.process.stringToProcess` (#36).
+_PACKAGE_NAMESPACES = ("java", "javax", "jdk", "sun", "scala", "dotty", "menger", "com", "org",
+                       "io", "net", "examples")
+_QUALIFIED_REF_RE = re.compile(
+    r"(?<![\w.])((?:_root_\.)?(?:" + "|".join(_PACKAGE_NAMESPACES) + r")(?:\.[A-Za-z_]\w*)+)"
+)
+
+# Names every Scala file sees without an import (`java.lang._`, `scala._`, `Predef`) that reach
+# the process, the environment, threads or reflection. Unqualified, they are invisible to the
+# two checks above. This list is advisory -- the sandbox is the barrier, not this check -- but
+# it turns the obvious attempts into a repairable finding before any compile (#36).
+_IMPLICIT_DANGEROUS_RE = re.compile(
+    r"(?<![\w.])(System|Runtime|ProcessBuilder|Process|ProcessHandle|Thread|ClassLoader|Class|"
+    r"SecurityManager|sys|classOf|getClass)\b"
+)
 
 
-def _root_of(raw_target: str) -> str:
-    """Strips a trailing `.{...}` group or `._` wildcard, leaving the dotted base path
-    that is actually compared against `_ALLOWED_ROOTS`."""
-    stripped = re.sub(r"\.\{[^}]*\}$", "", raw_target)
-    stripped = re.sub(r"\._$", "", stripped)
-    return stripped
+def _root_of(raw_clause: str) -> str | None:
+    """The dotted base path of one import clause, or None if it is not one."""
+    stripped = _IMPORT_SELECTOR_RE.sub("", raw_clause.strip())
+    if not _DOTTED_PATH_RE.match(stripped):
+        return None
+    return stripped.removeprefix("_root_.")
+
+
+def _import_clauses(statement: str) -> list[str]:
+    """`a.b.{X, Y}, c.d.*` -> [`a.b.{X, Y}`, `c.d.*`]: commas inside braces don't split."""
+    clauses, depth, current = [], 0, ""
+    for char in statement:
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        if char == "," and depth == 0:
+            clauses.append(current)
+            current = ""
+        else:
+            current += char
+    return clauses + [current]
 
 
 def _is_allowed(path: str) -> bool:
@@ -104,9 +139,10 @@ def check_allowlist(scene_text: str) -> list[Finding]:
 
     for match in _IMPORT_RE.finditer(text):
         import_spans.append((match.start(), match.end()))
-        raw_target = match.group(1)
-        root_path = _root_of(raw_target)
-        if not _is_allowed(root_path):
+        for raw_target in (c.strip() for c in _import_clauses(match.group(1))):
+            root_path = _root_of(raw_target)
+            if root_path is not None and _is_allowed(root_path):
+                continue
             findings.append(
                 Finding(
                     stage=_STAGE,
@@ -120,14 +156,17 @@ def check_allowlist(scene_text: str) -> list[Finding]:
                 )
             )
 
+    # A `package` clause names where the scene lives, it reaches nothing.
+    import_spans += [(m.start(), m.end()) for m in _PACKAGE_RE.finditer(text)]
+
+    def outside_imports(start: int) -> bool:
+        return not any(span_start <= start < span_end for span_start, span_end in import_spans)
+
     seen_outside_imports: set[str] = set()
     for match in _QUALIFIED_REF_RE.finditer(text):
-        start = match.start()
-        if any(span_start <= start < span_end for span_start, span_end in import_spans):
-            continue  # already covered by the import-line pass above
-
-        candidate = match.group(1)
-        if candidate in seen_outside_imports or _is_allowed(candidate):
+        candidate = match.group(1).removeprefix("_root_.")
+        if (not outside_imports(match.start()) or candidate in seen_outside_imports
+                or _is_allowed(candidate)):
             continue
         seen_outside_imports.add(candidate)
         findings.append(
@@ -138,7 +177,24 @@ def check_allowlist(scene_text: str) -> list[Finding]:
                     f"package, and bypasses any `import menger.dsl._` wildcard"
                 ),
                 identifier=candidate,
-                line=line_of(scene_text, start),
+                line=line_of(scene_text, match.start()),
+            )
+        )
+
+    for match in _IMPLICIT_DANGEROUS_RE.finditer(text):
+        name = match.group(1)
+        if not outside_imports(match.start()) or name in seen_outside_imports:
+            continue
+        seen_outside_imports.add(name)
+        findings.append(
+            Finding(
+                stage=_STAGE,
+                message=(
+                    f"'{name}' reaches the process, environment, threads or reflection; a "
+                    "scene uses only the DSL"
+                ),
+                identifier=name,
+                line=line_of(scene_text, match.start()),
             )
         )
 

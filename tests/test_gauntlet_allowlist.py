@@ -194,3 +194,47 @@ def test_full_corpus_passes_except_the_documented_cross_import_case():
     assert set(flagged) == {"ReusableComponents"}
     identifiers = {f.identifier for f in flagged["ReusableComponents"]}
     assert identifiers == {"examples.dsl.common.Lighting._", "examples.dsl.common.Materials._"}
+
+
+# --- Review 2026-10-14, menger-scene-agent#36: Scala 3 imports and implicit names -----------
+
+HOSTILE_SNIPPETS = [
+    "import scala.sys.process.*",
+    "import scala.sys.process.{given, *}",
+    "import java.lang.Runtime as R",
+    "import menger.dsl.*, java.io.File",
+    "import _root_.java.net.URL",
+    "import scala.sys.process.given",
+    "import scala.sys.process.`*`",
+    "val p = scala.sys.process.stringToProcess(\"ls\")",
+    "val r = _root_.java.lang.Runtime.getRuntime",
+    "val e = System.getenv(\"HOME\")",
+    "val r = Runtime.getRuntime",
+    "val p = ProcessBuilder(\"ls\")",
+    "val c = Class.forName(\"x\")",
+    "sys.exit(1)",
+    "val t = Thread(() => ())",
+    "val l = getClass.getClassLoader",
+]
+
+
+def test_every_hostile_snippet_is_flagged():
+    for snippet in HOSTILE_SNIPPETS:
+        scene = f"import menger.dsl._\nobject Foo:\n  {snippet}\n"
+        assert check_allowlist(scene), snippet
+
+
+def test_scala3_wildcard_and_rename_of_allowed_roots_pass():
+    scene = (
+        "import menger.dsl.*\n"
+        "import menger.common.{Color as C, *}\n"
+        "import scala.math.Pi as P\n"
+        "object Foo:\n"
+        "  val scene = Scene(objects = List(Sphere(size = math.sin(P).toFloat)))\n"
+    )
+    assert check_allowlist(scene) == []
+
+
+def test_member_access_on_local_values_is_not_a_package_reference():
+    scene = "import menger.dsl._\nobject Foo:\n  val io = 1\n  val x = scene.objects.size + io\n"
+    assert check_allowlist(scene) == []
