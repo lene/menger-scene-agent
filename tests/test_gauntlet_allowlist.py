@@ -170,18 +170,15 @@ def test_poc_run_turn2_refined_scala_passes_cleanly():
     assert findings == []
 
 
-# --- Verification: the full 32-scene reference corpus (review round 1) --------------------
+# --- Verification: the full reference corpus ----------------------------------------------
 #
-# Run against every real corpus scene, not just the two poc-run fixtures, this check found
-# a real false positive: `ReusableComponents.scala` uses `import examples.dsl.common.
-# Lighting._` / `Materials._`, valid only inside the renderer's own example-source tree.
-# That import would not resolve for a standalone generated scene either -- this is a
-# correct rejection, not a bug, and `core/generation.py`'s system prompt now warns the
-# model against imitating this one scene's cross-file-import pattern (see
-# test_generation.py). All other 31 corpus scenes pass cleanly.
+# Every corpus scene must pass the allowlist: the corpus is what the model imitates. Until
+# review 2026-10-14 (menger#115) `ReusableComponents.scala` imported `examples.dsl.common.*`,
+# which resolves only inside menger's own example tree, and was the one documented rejection;
+# menger now ships it self-contained and pins that in CorpusExporterSuite.
 
 
-def test_full_corpus_passes_except_the_documented_cross_import_case():
+def test_full_corpus_passes_the_allowlist():
     import json
 
     corpus = json.load(open("reference/dsl-corpus.json"))
@@ -189,11 +186,7 @@ def test_full_corpus_passes_except_the_documented_cross_import_case():
     assert len(scenes) == 33  # + PolytopeGallery (usability review 2026-09, F17)
 
     flagged = {s["name"]: check_allowlist(s["source"]) for s in scenes}
-    flagged = {name: f for name, f in flagged.items() if f}
-
-    assert set(flagged) == {"ReusableComponents"}
-    identifiers = {f.identifier for f in flagged["ReusableComponents"]}
-    assert identifiers == {"examples.dsl.common.Lighting._", "examples.dsl.common.Materials._"}
+    assert {name: f for name, f in flagged.items() if f} == {}
 
 
 # --- Review 2026-10-14, menger-scene-agent#36: Scala 3 imports and implicit names -----------

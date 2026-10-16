@@ -103,18 +103,6 @@ def test_revise_forbids_removing_properties_the_request_does_not_mention():
     )
 
 
-def test_generate_system_prompt_warns_against_examples_dsl_cross_imports():
-    # gauntlet/allowlist.py (story 4, review round 1) correctly rejects
-    # `import examples.dsl.common.Lighting._` -- it resolves only inside the renderer's
-    # own example-source tree, never for a standalone generated scene. The system prompt
-    # must steer the model away from imitating that one corpus scene's import pattern.
-    adapter = FakeModelAdapter(result=SCENE_TEXT)
-
-    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
-
-    assert "examples.dsl" in adapter.last_request.system_prompt
-
-
 def test_generate_request_carries_no_prior_scene_marker():
     adapter = FakeModelAdapter(result=SCENE_TEXT)
 
