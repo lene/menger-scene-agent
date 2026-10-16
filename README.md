@@ -162,10 +162,59 @@ In the REPL:
 - Plain text -> a generate/revise turn: prints `Turn N: <outcome>`. On acceptance the render window launches (first turn) or reloads in place (later turns, via menger's own file watcher -- the window never flickers or relaunches after the first accepted turn).
 - `/ask <question>` or `/question <question>` -> a consult turn: prose answer grounded in the DSL manifest/corpus and current scene; never edits the scene, never consumes an ordinal.
 - `/retry` -> resends the prompt that most recently failed with a `generation_timeout`. Nothing pending -> reports nothing to retry. Scene changed since the failure (hand edit or another accepted turn) -> resends immediately. Unchanged -> first `/retry` explains nothing has changed and arms a confirmation gate; a second `/retry` (still unchanged) resends. Never auto-retried (PRD FR7).
-- The render window's own output (including render errors) goes to `render.stdout.log` / `render.stderr.log` in the session directory, overwritten on each refresh -- check there if the window shows nothing or stops responding.
+- The render window's own output (including render errors) goes to `render.stdout.log` / `render.stderr.log` in the session directory; the previous five launches are kept as `render.stderr.1.log` ... `.5.log` -- check there if the window shows nothing or stops responding.
 - Hand-editing: edit the current scene file on disk directly between turns. Each loop iteration checks for such an edit and either promotes it to a new ordinal, reports the lint violation that blocked it, or reports a storage failure.
 
 `uv run menger-scene-agent --help` prints this same reference.
+
+### What a session keeps
+
+Everything needed to reconstruct a session -- for a bug report, say -- is in its directory:
+
+| File | What |
+|---|---|
+| `session.json` | what the session was started with: agent and Python version, provider and model, manifest version, DSL revision and sha256, validator image id and DSL label, launcher paths |
+| `history.jsonl` | one entry per turn: prompt, outcome, file, readback; each with a timestamp (`ts`) and the run's agent version, provider, model and DSL revision |
+| `model-calls.jsonl` | every model call: the request, the raw response (before the scene is extracted) or the error, and its duration -- including each automatic repair round |
+| `agent.log` | the agent's log: validator runs with their full stderr, window launches, turn outcomes |
+| `NNN.scala`, `rejected-NNN.scala` | accepted scenes, and the candidates of rejected attempts |
+
+These files hold your prompts and the model's answers. Look through them before you attach
+them to a public issue.
+
+## Install
+
+The agent is paired with menger: it validates and renders through menger's two Docker images,
+so both must be built from a menger whose DSL matches the agent's manifest. A released agent
+names the menger release it was made with in its release notes.
+
+```bash
+# 1. menger, at the release the agent's notes name (0.9.0 or later)
+git clone https://github.com/lene/menger.git; cd menger; git checkout <menger-version>
+docker/scene-validator/build.sh          # builds menger-scene-validator and menger-render-window
+cd ..
+
+# 2. the agent, from its release tag
+git clone https://github.com/lene/menger-scene-agent.git; cd menger-scene-agent
+git checkout <agent-version>
+uv sync --extra openai-compatible        # or the extra for your provider, see "Setup"
+
+# 3. check that the two fit
+export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
+export MENGER_RENDER_LAUNCHER=../menger/docker/scene-validator/run-render-window.sh
+uv run menger-scene-agent --check
+```
+
+`--check` reports each part and what to do when one does not fit. It checks that both launcher
+scripts exist and are executable, and that both images exist, were built from menger 0.9.0 or
+later, and were built from the DSL in this agent's `reference/dsl-manifest.json`. It exits 0
+when everything fits. The images need the NVIDIA Container Toolkit and a licensed OptiX SDK at
+build time (see `../menger/docker/scene-validator/build.sh`).
+
+Releases: a `<version>` tag (bare, like menger's) whose version matches `pyproject.toml` and a dated
+`CHANGELOG.md` section publishes a GitHub release with that section as its notes
+(`.github/workflows/release.yml`). The agent runs from a checkout of the tag; there is no
+wheel or package-index release (a wheel would lack `reference/`).
 
 ## Refreshing the reference artifacts
 

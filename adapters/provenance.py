@@ -19,7 +19,6 @@ import importlib.metadata
 import json
 import logging
 import platform
-import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,18 +26,15 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 
 from adapters.model import ModelAdapter, ModelError, ModelRequest, ModelResult
+from adapters.preflight import DSL_REVISION_LABEL, VALIDATOR_IMAGE, image_labels
 
 SESSION_FILENAME = "session.json"
 MODEL_CALLS_FILENAME = "model-calls.jsonl"
 LOG_FILENAME = "agent.log"
-DEFAULT_VALIDATOR_IMAGE = "menger-scene-validator:latest"  # run-sandboxed.sh's default
-DSL_REVISION_LABEL = "menger.dsl-content-revision"
 
 # The provenance keys every history entry repeats: enough to tell which run wrote it, when a
 # resumed session switched model or agent version.
 HISTORY_KEYS = ("agent_version", "provider", "model", "dsl_revision")
-
-_DOCKER_TIMEOUT_SECONDS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -57,18 +53,8 @@ def agent_version() -> str:
 def _image_identity(image: str) -> Dict[str, Optional[str]]:
     """The validator image's id and DSL-revision label, or None for each when docker or the
     image is not there (provenance is a record, never a reason to fail a start)."""
-    try:
-        out = subprocess.run(
-            ["docker", "image", "inspect", image, "--format",
-             "{{.Id}} {{index .Config.Labels \"" + DSL_REVISION_LABEL + "\"}}"],
-            capture_output=True, text=True, timeout=_DOCKER_TIMEOUT_SECONDS, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return {"id": None, "dsl_revision": None}
-    if out.returncode != 0:
-        return {"id": None, "dsl_revision": None}
-    image_id, _, label = out.stdout.strip().partition(" ")
-    return {"id": image_id or None, "dsl_revision": label or None}
+    labels = image_labels(image) or {}
+    return {"id": labels.get("id"), "dsl_revision": labels.get(DSL_REVISION_LABEL)}
 
 
 def collect_provenance(
@@ -80,7 +66,7 @@ def collect_provenance(
     render_launcher: Union[str, Path],
     image: Optional[str] = None,
 ) -> dict:
-    validator_image = image or DEFAULT_VALIDATOR_IMAGE
+    validator_image = image or VALIDATOR_IMAGE
     return {
         "agent_version": agent_version(),
         "python": platform.python_version(),

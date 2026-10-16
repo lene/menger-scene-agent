@@ -94,6 +94,7 @@ from typing import List, Optional, Tuple
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
 from adapters.model import MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import get_model_adapter, selected_provider
+from adapters.preflight import report, run_checks
 from adapters.provenance import (
     MODEL_CALLS_FILENAME,
     RecordingModelAdapter,
@@ -214,6 +215,15 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "step outside the agent."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "check that this agent fits the installed menger -- both launcher scripts, both "
+            "images' menger version and DSL revision -- print the result and exit (0: all "
+            "fit, 1: something does not, with what to do)"
+        ),
     )
     parser.add_argument(
         "--session",
@@ -1174,6 +1184,13 @@ def _exit_on_termination_signals() -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
+
+    if args.check:
+        # msa#32: before the required-env checks below, so a fresh install can ask what is
+        # missing instead of failing on the first thing.
+        checks = run_checks(os.environ.get(_SCRIPT_PATH_ENV), os.environ.get(_RENDER_LAUNCHER_ENV))
+        print(report(checks))
+        return 0 if all(c.ok for c in checks) else 1
 
     # Always checked first: a missing script_path, missing render launcher path, or invalid
     # --session must exit before manifest/corpus loading, model adapter construction, or

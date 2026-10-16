@@ -1,0 +1,50 @@
+# A GitHub release for a version tag (review 2026-10-14, msa#32). Pushing the tag is the
+# release decision and stays with the maintainer; this workflow only checks the tag against the
+# repo, runs the tests and publishes the release notes; GitHub attaches the source archives. No
+# package index: the agent runs from a checkout of the tag (README "Install").
+name: Release
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]   # bare versions, like menger and optix-jni
+
+permissions:
+  contents: write   # create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest   # never the self-hosted runners: a tag can come from any branch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: The tag, pyproject.toml and CHANGELOG.md agree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          [ "$TAG" = "$version" ] \
+            || { echo "::error::tag $TAG but pyproject.toml has version $version"; exit 1; }
+          grep -qE "^## \[$version\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no dated '## [$version]' section"; exit 1; }
+      - run: uv sync --locked --all-extras --dev
+      - run: uv run --locked pytest -q
+      - name: Release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          awk -v v="$TAG" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        # Source only (GitHub attaches the archives): the agent runs from its checkout --
+        # a wheel would lack reference/, the manifest and corpus it reads at start.
+        run: gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
