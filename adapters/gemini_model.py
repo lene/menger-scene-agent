@@ -21,17 +21,23 @@ SDK, not the deprecated `google-generativeai` package.
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Optional
 
 from adapters.model import MissingAPIKeyError, ModelError, ModelRequest, ModelResult
+from adapters.model_common import (
+    MAX_OUTPUT_TOKENS,
+    call_error,
+    check_timeout,
+    empty_response,
+    truncated,
+    unparseable,
+)
 
 # Current-generation default; a caller can override via the `model` constructor argument.
 # gemini-2.5-pro was retired for new API keys (404 NOT_FOUND, "no longer available to new
 # users") -- the error response itself named gemini-3.1-pro-preview as the replacement.
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
-_MAX_TOKENS = 16000
 
 # The `FinishReason` values that mean "the model did not produce usable output," checked
 # explicitly below -- deliberately as narrow a set as Anthropic's own adapter checks
@@ -70,8 +76,7 @@ class GeminiModelAdapter:
         # A programmer-error precondition, not a modeled runtime outcome (mirrors
         # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
         # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
-        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
-            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
+        check_timeout(timeout)
         from google import genai  # imported lazily: keeps the SDK out of every module that
         from google.genai import types
 
@@ -124,7 +129,7 @@ class GeminiModelAdapter:
                 contents=request.user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=request.system_prompt,
-                    max_output_tokens=_MAX_TOKENS,
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
                     # No tools are ever passed, so automatic function calling never
                     # triggers -- disabling it explicitly just silences the SDK's
                     # log-once AFC advisory (google/genai/models.py) on every process.
@@ -134,11 +139,11 @@ class GeminiModelAdapter:
                 ),
             )
         except (TimeoutError, httpx.TimeoutException) as e:
-            return ModelError(kind="timeout", message=f"Gemini API call timed out: {e}", cause=e)
+            return call_error("timeout", "Gemini API call timed out", e)
         except errors.APIError as e:
-            return ModelError(kind="call_failed", message=f"Gemini API returned an error: {e}", cause=e)
+            return call_error("call_failed", "Gemini API returned an error", e)
         except Exception as e:  # noqa: BLE001 -- never let a raw exception escape the adapter
-            return ModelError(kind="call_failed", message=f"Gemini API call failed: {e}", cause=e)
+            return call_error("call_failed", "Gemini API call failed", e)
 
         try:
             # Prompt-level block: no candidate was ever generated at all. Has no Anthropic
@@ -157,11 +162,7 @@ class GeminiModelAdapter:
             finish_reason_name = str(finish_reason) if finish_reason is not None else None
 
             if finish_reason_name == "MAX_TOKENS":
-                return ModelError(
-                    kind="invalid_output",
-                    message=f"Model response was truncated at {_MAX_TOKENS} tokens "
-                    "before completing -- not usable scene text",
-                )
+                return truncated()
             if finish_reason_name in _REFUSAL_FINISH_REASONS:
                 return ModelError(
                     kind="invalid_output",
@@ -175,10 +176,8 @@ class GeminiModelAdapter:
             # Anthropic adapter uses, for any other unexpected attribute-access failure.
             raw_text = (response.text or "").strip()
         except Exception as e:  # noqa: BLE001 -- malformed/unexpected response shape
-            return ModelError(
-                kind="invalid_output", message=f"Could not parse the model response: {e}", cause=e
-            )
+            return unparseable(e)
 
         if not raw_text:
-            return ModelError(kind="invalid_output", message="Model returned an empty response")
+            return empty_response()
         return raw_text

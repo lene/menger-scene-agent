@@ -17,9 +17,17 @@ which provider is in play.
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Optional
+
+from adapters.model_common import (
+    MAX_OUTPUT_TOKENS,
+    call_error,
+    check_timeout,
+    empty_response,
+    truncated,
+    unparseable,
+)
 
 # The port, its request/result types and scene extraction live in core.ports (msa#34); they are
 # imported here so `from adapters.model import ...` keeps working for the adapters and tests.
@@ -60,7 +68,6 @@ class UnknownProviderError(RuntimeError):
 
 
 DEFAULT_MODEL = "claude-opus-5"
-_MAX_TOKENS = 16000
 # Server-side fallback: recommended by default for claude-opus-5 (claude-api skill) so a
 # transient refusal/overload on the primary model doesn't surface as a bare call failure.
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -98,8 +105,7 @@ class AnthropicModelAdapter:
         # A programmer-error precondition, not a modeled runtime outcome (mirrors
         # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
         # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
-        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
-            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
+        check_timeout(timeout)
         import anthropic  # imported lazily: keeps the SDK out of every module that merely
 
         # imports this file's type annotations without ever constructing this adapter.
@@ -124,7 +130,7 @@ class AnthropicModelAdapter:
         try:
             response = self._client.beta.messages.create(
                 model=self._model,
-                max_tokens=_MAX_TOKENS,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 system=request.system_prompt,
                 messages=[{"role": "user", "content": request.user_prompt}],
                 betas=[_FALLBACK_BETA],
@@ -134,23 +140,15 @@ class AnthropicModelAdapter:
             # Must come before `APIConnectionError` below -- `APITimeoutError` is a subclass
             # of it, so the broader except would otherwise shadow this one and every timeout
             # would be misreported as a generic network error.
-            return ModelError(
-                kind="timeout", message=f"Anthropic API call timed out: {e}", cause=e
-            )
+            return call_error("timeout", "Anthropic API call timed out", e)
         except anthropic.APIConnectionError as e:
-            return ModelError(
-                kind="call_failed", message=f"Network error calling Anthropic API: {e}", cause=e
-            )
+            return call_error("call_failed", "Network error calling Anthropic API", e)
         except anthropic.RateLimitError as e:
-            return ModelError(
-                kind="call_failed", message=f"Anthropic API rate limited: {e}", cause=e
-            )
+            return call_error("call_failed", "Anthropic API rate limited", e)
         except anthropic.APIStatusError as e:
-            return ModelError(
-                kind="call_failed", message=f"Anthropic API returned an error: {e}", cause=e
-            )
+            return call_error("call_failed", "Anthropic API returned an error", e)
         except Exception as e:  # noqa: BLE001 -- never let a raw exception escape the adapter
-            return ModelError(kind="call_failed", message=f"Anthropic API call failed: {e}", cause=e)
+            return call_error("call_failed", "Anthropic API call failed", e)
 
         try:
             stop_reason = getattr(response, "stop_reason", None)
@@ -160,21 +158,15 @@ class AnthropicModelAdapter:
                     message=f"Model refused the request: {getattr(response, 'stop_details', None)}",
                 )
             if stop_reason == "max_tokens":
-                return ModelError(
-                    kind="invalid_output",
-                    message=f"Model response was truncated at {_MAX_TOKENS} tokens "
-                    "before completing -- not usable scene text",
-                )
+                return truncated()
 
             text_blocks = [
                 block.text for block in response.content if getattr(block, "type", None) == "text"
             ]
             raw_text = "\n".join(text_blocks).strip()
         except Exception as e:  # noqa: BLE001 -- malformed/unexpected response shape
-            return ModelError(
-                kind="invalid_output", message=f"Could not parse the model response: {e}", cause=e
-            )
+            return unparseable(e)
 
         if not raw_text:
-            return ModelError(kind="invalid_output", message="Model returned an empty response")
+            return empty_response()
         return raw_text

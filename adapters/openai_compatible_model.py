@@ -16,7 +16,6 @@ integration path each of these vendors documents for third-party OpenAI-SDK comp
 
 from __future__ import annotations
 
-import math
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -28,8 +27,14 @@ from adapters.model import (
     ModelResult,
     UnknownProviderError,
 )
-
-_MAX_TOKENS = 16000
+from adapters.model_common import (
+    MAX_OUTPUT_TOKENS,
+    call_error,
+    check_timeout,
+    empty_response,
+    truncated,
+    unparseable,
+)
 
 
 @dataclass(frozen=True)
@@ -100,8 +105,7 @@ class OpenAICompatibleModelAdapter:
         # A programmer-error precondition, not a modeled runtime outcome (mirrors
         # `adapters/render_window.py`'s `grace_period <= 0` check): a zero, negative, NaN, or
         # infinite timeout would otherwise be forwarded straight to the SDK client unchecked.
-        if timeout is not None and not (math.isfinite(timeout) and timeout > 0):
-            raise ValueError(f"timeout must be a finite, positive number, got {timeout!r}")
+        check_timeout(timeout)
         import openai  # imported lazily: keeps the SDK out of every module that merely
 
         # imports this file's type annotations without ever constructing this adapter.
@@ -126,7 +130,7 @@ class OpenAICompatibleModelAdapter:
         try:
             response = self._client.chat.completions.create(
                 model=self._model,
-                max_tokens=_MAX_TOKENS,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 messages=[
                     {"role": "system", "content": request.system_prompt},
                     {"role": "user", "content": request.user_prompt},
@@ -136,31 +140,15 @@ class OpenAICompatibleModelAdapter:
             # Must come before `APIConnectionError` below -- `APITimeoutError` is a subclass
             # of it, so the broader except would otherwise shadow this one and every timeout
             # would be misreported as a generic network error.
-            return ModelError(
-                kind="timeout",
-                message=f"{self._provider_name} API call timed out: {e}",
-                cause=e,
-            )
+            return call_error("timeout", f"{self._provider_name} API call timed out", e)
         except openai.APIConnectionError as e:
-            return ModelError(
-                kind="call_failed",
-                message=f"Network error calling {self._provider_name} API: {e}",
-                cause=e,
-            )
+            return call_error("call_failed", f"Network error calling {self._provider_name} API", e)
         except openai.RateLimitError as e:
-            return ModelError(
-                kind="call_failed", message=f"{self._provider_name} API rate limited: {e}", cause=e
-            )
+            return call_error("call_failed", f"{self._provider_name} API rate limited", e)
         except openai.APIStatusError as e:
-            return ModelError(
-                kind="call_failed",
-                message=f"{self._provider_name} API returned an error: {e}",
-                cause=e,
-            )
+            return call_error("call_failed", f"{self._provider_name} API returned an error", e)
         except Exception as e:  # noqa: BLE001 -- never let a raw exception escape the adapter
-            return ModelError(
-                kind="call_failed", message=f"{self._provider_name} API call failed: {e}", cause=e
-            )
+            return call_error("call_failed", f"{self._provider_name} API call failed", e)
 
         try:
             choice = response.choices[0]
@@ -171,11 +159,7 @@ class OpenAICompatibleModelAdapter:
                     message=f"Model refused the request: finish_reason={finish_reason}",
                 )
             if finish_reason == "length":
-                return ModelError(
-                    kind="invalid_output",
-                    message=f"Model response was truncated at {_MAX_TOKENS} tokens "
-                    "before completing -- not usable scene text",
-                )
+                return truncated()
             if finish_reason == "tool_calls":
                 # This adapter never sends `tools=`, so a tool-call finish reason is an
                 # unexpected response shape, not a case to silently accept.
@@ -186,10 +170,8 @@ class OpenAICompatibleModelAdapter:
 
             raw_text = (choice.message.content or "").strip()
         except Exception as e:  # noqa: BLE001 -- malformed/unexpected response shape
-            return ModelError(
-                kind="invalid_output", message=f"Could not parse the model response: {e}", cause=e
-            )
+            return unparseable(e)
 
         if not raw_text:
-            return ModelError(kind="invalid_output", message="Model returned an empty response")
+            return empty_response()
         return raw_text
