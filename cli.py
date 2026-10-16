@@ -101,18 +101,11 @@ from adapters.provenance import (
     write_session_json,
 )
 from adapters.render_window import (
-    LAUNCH_EVENTS,
-    RELOAD_EVENTS,
-    WindowEvent,
     close_render_window,
     crash_report,
     describe_window_state,
-    frame_build_failures,
-    log_size,
     read_window_state,
     refresh_render_window,
-    render_window_scene_path,
-    sync_render_window_scene,
     wait_for_window_event,
 )
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -121,11 +114,11 @@ from core.consult import answer_consult
 from core.generation import validate_artifacts
 from core.prompt_checks import cut_off_reason
 from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, open_items, run_turn
-from core.types import ConsultError, RenderWindowResult, TurnResult
+from core.types import ConsultError, TurnResult
+from repl import window
 from repl.formatting import (
     _format_hand_edit_result,
     _format_history_entry,
-    _format_render_outcome,
     _format_turn_result,
     _rejection_line,
     _wrap_for_terminal,
@@ -137,6 +130,7 @@ from repl.state import (
     _next_retry_state,
     _RetryState,
 )
+from repl.window import WindowPorts, _report_frame_build_failures
 
 # AD-9: this package's own build-time artifacts, resolved relative to this script's own
 # location (never CWD) -- same reasoning `adapters/artifacts.py`'s docstring already gives
@@ -431,220 +425,33 @@ def _turn_paths(
     return None, None
 
 
-# Seconds the REPL waits for the render window to say what became of a reload or a launch: a
-# reload compiles the scene first (about 5 s), a launch also builds the first frame (usability
-# review 2026-10, session 3, F57/F61). Past them the window is reported as unconfirmed.
-_RELOAD_CONFIRM_SECONDS = 20.0
-_LAUNCH_CONFIRM_SECONDS = 25.0
+def _window_ports() -> WindowPorts:
+    """Built at call time from this module's names, the composition root's choice (tests
+    replace them)."""
+    return WindowPorts(refresh_render_window, wait_for_window_event, crash_report)
 
 
-class _WindowWatcher:
-    """Reports a render window crash while the REPL waits for input (usability review 2026-10,
-    session 4, F88: 3.6's out-of-memory crash came minutes after the turn and was never
-    reported, because the check ran only between turns). A daemon thread polls the window the
-    loop last handed it; each window (by object identity) is reported at most once, here or by
-    `_report_render_crash`."""
-
-    POLL_SECONDS = 2.0
-
-    def __init__(self, store: SceneStore, poll_seconds: float = POLL_SECONDS) -> None:
-        self._store = store
-        self._poll_seconds = poll_seconds
-        self._process: Optional[subprocess.Popen[str]] = None
-        self._reported: set[int] = set()
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        threading.Thread(target=self._run, name="render-window-watcher", daemon=True).start()
-
-    def watch(self, process: Optional[subprocess.Popen[str]]) -> None:
-        with self._lock:
-            self._process = process
-
-    def already_reported(self, process: Optional[subprocess.Popen[str]]) -> bool:
-        with self._lock:
-            return process is not None and id(process) in self._reported
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self._poll_seconds):
-            try:
-                with self._lock:
-                    process = self._process
-                if process is None or id(process) in self._reported or process.poll() is None:
-                    continue
-                scene_path = self._store.current_scene_path()
-                report = crash_report(process, scene_path) if scene_path is not None else None
-                with self._lock:
-                    self._reported.add(id(process))
-                if report is not None:
-                    print(f"\nRender window: crashed - {report}", flush=True)
-            except Exception:  # noqa: BLE001 -- the watcher must never kill the REPL
-                pass
+def _WindowWatcher(store: SceneStore, poll_seconds: float = window.WindowWatcher.POLL_SECONDS):
+    return window.WindowWatcher(_window_ports(), store, poll_seconds)
 
 
-def _report_render_crash(
-    store: SceneStore,
-    render_process: Optional[subprocess.Popen[str]],
-    watcher: Optional[_WindowWatcher] = None,
-) -> Optional[subprocess.Popen[str]]:
-    """Prints a crashed render window's cause once and stops tracking it (usability review
-    2026-09, F12: a crash used to be visible only in render.stderr.log). A window the user
-    closed cleanly just stops being tracked. Must not kill the REPL."""
-    if render_process is None:
-        return None
-    if watcher is not None and watcher.already_reported(render_process):
-        return None
-    try:
-        scene_path = store.current_scene_path()
-        report = crash_report(render_process, scene_path) if scene_path is not None else None
-        if report is not None:
-            print(f"Render window: crashed - {report}")
-            return None
-        return None if render_process.poll() is not None else render_process
-    except Exception:  # noqa: BLE001 -- a crash check must not kill the REPL
-        return render_process
+def _report_render_crash(store, render_process, watcher=None):
+    return window._report_render_crash(_window_ports(), store, render_process, watcher)
 
 
-def _report_frame_build_failures(store: SceneStore, reported: int) -> int:
-    """Prints each frame the render window failed to build since the last check (usability
-    review 2026-09, F44: menger keeps the last good frame on screen, which looked frozen) and
-    returns how many are reported now. A relaunch overwrites render.stderr.log, so a shorter
-    list than `reported` starts the count over. Must not kill the REPL."""
-    try:
-        # The window's logs sit next to the file it was launched against, not the ordinal.
-        failures = frame_build_failures(render_window_scene_path(store.session_dir))
-    except Exception:  # noqa: BLE001 -- a failure check must not kill the REPL
-        return reported
-    if len(failures) < reported:
-        reported = 0
-    for failure in failures[reported:]:
-        print(f"Render window: frame failed to build - {failure}")
-    return len(failures)
+def _launch_window(window_path, render_launcher_path, previous_process, note=""):
+    return window._launch_window(_window_ports(), window_path, render_launcher_path,
+                                 previous_process, note)
 
 
-def _launch_window(
-    window_path: Path,
-    render_launcher_path: str,
-    previous_process: Optional[subprocess.Popen[str]],
-    note: str = "",
-) -> Optional[subprocess.Popen[str]]:
-    """Launches (or relaunches) the window and waits until it reports that it is up -- or that
-    it could not build its first scene (menger then exits with status 0, which used to look
-    like a window the user had closed: F61). Returns the process to track, or None."""
-    outcome = refresh_render_window(window_path, render_launcher_path, previous_process=previous_process)
-    if not isinstance(outcome, RenderWindowResult):
-        print(_format_render_outcome(outcome))
-        return None
-    event = wait_for_window_event(window_path, outcome.process, 0, LAUNCH_EVENTS, _LAUNCH_CONFIRM_SECONDS)
-    if event is not None and event.kind in ("startup_failed", "exited"):
-        report = crash_report(outcome.process, window_path) or event.detail or "the window ended"
-        print(f"Render window: crashed - {report}")
-        return None
-    print(f"Render window: refreshed{note}")
-    return outcome.process
+def _after_reload(event, window_path, render_launcher_path, render_process):
+    return window._after_reload(_window_ports(), event, window_path, render_launcher_path,
+                                render_process)
 
 
-def _after_reload(
-    event: Optional[WindowEvent],
-    window_path: Path,
-    render_launcher_path: str,
-    render_process: Optional[subprocess.Popen[str]],
-) -> Optional[subprocess.Popen[str]]:
-    """Reports what became of a live reload from what the window said about it (F57): the old
-    "Render window: reloaded" was printed for any running process, including an animated window
-    that never reloaded."""
-    kind = event.kind if event is not None else "timeout"
-    if kind in ("reloaded", "unavailable"):
-        # "unavailable": no log to read (a window not started by this adapter) -- as before.
-        print("Render window: reloaded")  # the file is already on the "Turn N" line
-        return render_process
-    if kind == "reload_failed":
-        print(
-            f"Render window: reload failed - {event.detail}; the window keeps the previous scene"
-        )
-        return render_process
-    if kind == "kind_changed":
-        return _launch_window(
-            window_path,
-            render_launcher_path,
-            render_process,
-            note=" (the scene changed between static and animated)",
-        )
-    if kind in ("startup_failed", "exited"):
-        report = crash_report(render_process, window_path) or "the window ended"
-        print(f"Render window: crashed - {report}")
-        return None
-    print(
-        "Render window: file synced, but the window has not confirmed the reload "
-        "(an older menger build, or still compiling)"
-    )
-    return render_process
-
-
-def _accept_and_refresh_render(
-    store: SceneStore,
-    render_launcher_path: str,
-    render_process: Optional[subprocess.Popen[str]],
-) -> Optional[subprocess.Popen[str]]:
-    """Shared post-acceptance helper (story 17 -- factored out of the inline block story 21
-    introduced, so the hand-edit-accepted path and the normal run_turn()-accepted path both
-    call it instead of duplicating the refresh_render_window()/render_process-update dance).
-    Called after ANY accepted TurnResult (from run_turn() or from check_hand_edit()); prints
-    the one-line render status and returns the render_process value the caller should track
-    from here on.
-
-    F5 (usability review 2026-09): a render window launched against
-    `render_window_scene_path()` (a stable path, `sync_render_window_scene()`'d from the
-    just-accepted ordinal every turn) is watched and live-reloaded in place by menger itself
-    -- so once a window is confirmed running, subsequent turns only need the sync, never a
-    terminate-and-relaunch. `refresh_render_window()` (terminate the old process, launch a
-    new one) is still used for the session's first turn and to recover from a crashed/closed
-    window (`render_process` is `None` or has already exited) -- this coupling requires a
-    menger build with F5 support (this sprint's or later); there is no runtime capability
-    probe, so an older `menger-app` binary would simply never see its window update in
-    place (it would keep working, just showing the first turn's scene until the process is
-    replaced by some other path, e.g. a crash).
-
-    Guarded exactly like the call site it replaces: current_scene_path() does a fresh
-    filesystem scan (AD-13) and can theoretically raise SceneStoreError, and
-    refresh_render_window's own contract doesn't cover exceptions raised before it's even
-    called -- a single turn's post-processing must not be able to kill the whole REPL any
-    more than run_turn() itself can."""
-    try:
-        scene_path = store.current_scene_path()
-        if scene_path is None:
-            # Should never happen: an "accepted" tag is only ever returned after
-            # store.accept() has already written the ordinal this reads back -- but
-            # current_scene_path()'s own return type is Optional, so this is handled rather
-            # than silently trusted.
-            raise RuntimeError(
-                "accepted turn but current_scene_path() returned None -- this should be "
-                "impossible; SceneStore/run_turn's accept-then-report invariant may be "
-                "broken"
-            )
-        # Where the window's log ends now: only what it writes after the sync tells whether
-        # this reload worked (F57).
-        offset = log_size(render_window_scene_path(store.session_dir))
-        window_path = sync_render_window_scene(scene_path, store.session_dir)
-
-        try:
-            still_running = render_process is not None and render_process.poll() is None
-        except Exception:
-            # Best-effort, same convention as refresh_render_window()'s own previous_process
-            # check: a racy/unexpected poll() failure falls through to a fresh launch rather
-            # than risking a sync with no window to show it.
-            still_running = False
-        if still_running:
-            event = wait_for_window_event(
-                window_path, render_process, offset, RELOAD_EVENTS, _RELOAD_CONFIRM_SECONDS
-            )
-            return _after_reload(event, window_path, render_launcher_path, render_process)
-        return _launch_window(window_path, render_launcher_path, render_process)
-    except Exception as e:  # noqa: BLE001 -- a render-refresh failure must not kill the REPL
-        print(f"Render window: error - {e}")
-        return None
+def _accept_and_refresh_render(store, render_launcher_path, render_process):
+    return window._accept_and_refresh_render(_window_ports(), store, render_launcher_path,
+                                             render_process)
 
 
 def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:

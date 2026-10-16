@@ -46,7 +46,6 @@ adapters/openai_compatible_model.py: Argument 1 to "OpenAI" has incompatible typ
 adapters/openai_compatible_model.py: Argument 1 to "OpenAI" has incompatible type "**dict[str, object]"; expected "str | URL | None"  [arg-type]
 adapters/openai_compatible_model.py: Argument 1 to "OpenAI" has incompatible type "**dict[str, object]"; expected "str | URL | NotGiven | None"  [arg-type]
 adapters/scene_validator.py: Argument "tag" to "ValidationResult" has incompatible type "str"; expected "Literal['ok', 'compile_errors', 'lint_findings', 'refused']"  [arg-type]
-cli.py: Item "None" of "WindowEvent | None" has no attribute "detail"  [union-attr]
 core/consult.py: Argument "kind" to "ConsultError" has incompatible type "str"; expected "Literal['model_call_failed', 'invalid_model_output', 'model_call_timeout']"  [arg-type]
 core/generation.py: Argument "kind" to "GenerationError" has incompatible type "str"; expected "Literal['model_call_failed', 'invalid_model_output', 'stale_manifest', 'stale_corpus', 'model_call_timeout', 'needs_clarification', 'unsupported']"  [arg-type]
 core/readback.py: Argument "kind" to "ReadbackError" has incompatible type "str"; expected "Literal['model_call_failed', 'invalid_model_output']"  [arg-type]

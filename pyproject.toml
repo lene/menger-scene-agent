@@ -70,7 +70,7 @@ ignore_missing_imports = true
 # all -- this project is still run from source via `pythonpath` above, not imported as an
 # installed distribution, so this exists only to make the extras installable, not to change
 # how the code itself is normally run.
-packages = ["core", "adapters", "gauntlet", "evals"]
+packages = ["core", "adapters", "gauntlet", "evals", "repl"]
 # `cli.py` is a top-level script, not a package -- needed explicitly so the
 # `menger-scene-agent` console script (`cli:main`) resolves once installed.
 py-modules = ["cli"]
