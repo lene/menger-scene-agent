@@ -22,6 +22,7 @@ from adapters.render_window import (
     WindowEvent,
     close_render_window,
     crash_report,
+    events_path,
     frame_build_failures,
     log_paths,
     log_size,
@@ -274,9 +275,9 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
         "messages": ["render lock already held"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "1.1.0",
     }
-    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
     result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
@@ -287,8 +288,8 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
 
 
 def test_refused_with_no_previous_process_terminates_nothing(monkeypatch):
-    payload = {"tag": "refused", "messages": ["render lock already held"]}
-    fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
+    payload = {"tag": "refused", "messages": ["render lock already held"], "schemaVersion": "1.1.0"}
+    fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
     result = refresh_render_window(_SCENE_FILE, _LAUNCHER_PATH, grace_period=_GRACE_PERIOD)
@@ -519,16 +520,10 @@ def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_pat
 # --- frame_build_failures (usability review 2026-09, F44: menger#54's stderr marker) ----------
 
 
-def test_frame_build_failures_lists_the_marker_lines_without_the_marker(tmp_path):
+def test_frame_build_failures_lists_the_frame_failed_events(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
-        "12:00:01.250 ERROR menger.engines.WithPreview - FRAME-BUILD-FAILED t=0.25: "
-        "at least 27648 instances needed\n"
-        "\tat Main$.main(Main.scala:56)\n"
-        "12:00:02.000 ERROR menger.engines.InteractiveEngine - FRAME-BUILD-FAILED "
-        "rebuild after 4D rotation: boom\n"
-    )
+    _events(scene_file, ("up", ""), ("frame_failed", "t=0.25: at least 27648 instances needed"),
+            ("reloaded", "1 object(s)"), ("frame_failed", "rebuild after 4D rotation: boom"))
 
     assert frame_build_failures(scene_file) == [
         "t=0.25: at least 27648 instances needed",
@@ -583,22 +578,46 @@ def test_sync_render_window_scene_leaves_no_temp_file_behind(tmp_path):
 # --- usability review 2026-10, session 3: F61 startup failure exits with status 0 -------------
 
 
-def test_crash_report_treats_a_zero_exit_after_a_startup_failure_as_a_crash(tmp_path):
+def test_crash_report_names_the_startup_failure_the_window_reported(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "12:00:00 INFO  menger.dsl.SceneLoader$ - Loading scene\n"
-        "12:00:01 ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: "
-        "sponge-recursive-ias requires level in [1, 14)\n"
-    )
+    log_paths(scene_file)[1].write_text("12:00:01 ERROR menger.engines.PreviewEngine - boom\n")
+    _events(scene_file, ("startup_failed", "sponge-recursive-ias requires level in [1, 14)"))
 
-    report = crash_report(FakePopen(returncode=0), scene_file)
+    report = crash_report(FakePopen(returncode=1), scene_file)
 
-    assert report is not None
-    assert report.startswith("exit 0: ")
-    assert "sponge-recursive-ias requires level in [1, 14)" in report
+    assert report == "exit 1: sponge-recursive-ias requires level in [1, 14)"
+
+
+# A window whose first scene fails exits non-zero since menger#100, so exit 0 is a clean close.
+def test_crash_report_is_none_for_a_zero_exit(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    _events(scene_file, ("up", ""))
+
+    assert crash_report(FakePopen(returncode=0), scene_file) is None
 
 
 # --- wait_for_window_event (usability review 2026-10, session 3: F57/F61) ---------------------
+# The window reports itself in <scene>.events.jsonl (menger#82), not in log lines.
+
+
+def _events(scene_file, *events, version=1):
+    """Appends events as menger's WindowEvents writes them; the stderr log is created too, as for
+    a window this adapter launched."""
+    log = log_paths(scene_file)[1]
+    if not log.exists():
+        log.write_text("")
+    with open(events_path(scene_file), "a") as f:
+        for kind, detail in events:
+            f.write(json.dumps({"v": version, "kind": kind, "detail": detail, "time": "t"}) + "\n")
+
+
+def test_events_of_another_version_or_garbage_are_ignored(tmp_path):
+    scene_file = tmp_path / "001.scala"
+    _events(scene_file, ("up", ""), version=2)
+    with open(events_path(scene_file), "a") as f:
+        f.write("not json\n")
+
+    assert _wait(scene_file, FakePopen(still_running=True), 0, LAUNCH_EVENTS, 1.0) is None
 
 
 class _Clock:
@@ -624,22 +643,18 @@ def _wait(scene_file, process, offset, wanted, timeout=5.0, clock=None):
 
 def test_wait_reports_a_reload_the_window_logged_after_the_offset(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log = log_paths(scene_file)[1]
-    log.write_text("old: Reloaded scene from file (1 object(s))\n")
+    _events(scene_file, ("reloaded", "1 object(s)"))
     offset = log_size(scene_file)
-    log.write_text(
-        log.read_text() + "12:00:05 INFO  menger.engines.PreviewEngine - "
-        "Reloaded animated scene from file (duration 6.0s)\n"
-    )
+    _events(scene_file, ("reloaded", "duration 6.0s"))
 
     event = _wait(scene_file, FakePopen(still_running=True), offset, RELOAD_EVENTS)
 
-    assert event == WindowEvent("reloaded")
+    assert event == WindowEvent("reloaded", "duration 6.0s")
 
 
 def test_wait_ignores_what_was_logged_before_the_offset(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text("old: Reloaded scene from file (1 object(s))\n")
+    _events(scene_file, ("reloaded", "1 object(s)"))
 
     event = _wait(
         scene_file, FakePopen(still_running=True), log_size(scene_file), RELOAD_EVENTS, timeout=2.0
@@ -650,10 +665,7 @@ def test_wait_ignores_what_was_logged_before_the_offset(tmp_path):
 
 def test_wait_reports_a_failed_reload_with_its_reason(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "WARN  menger.engines.PreviewEngine - Failed to reload /x/current.scala, keeping the "
-        "current scene: compile error\n"
-    )
+    _events(scene_file, ("reload_failed", "compile error"))
 
     event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
 
@@ -662,32 +674,25 @@ def test_wait_reports_a_failed_reload_with_its_reason(tmp_path):
 
 def test_wait_reports_a_scene_kind_change_that_needs_a_restart(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "WARN  menger.engines.InteractiveEngine - /x/current.scala changed to an animated "
-        "scene; live reload only supports static scenes -- restart the window to pick it up\n"
-    )
+    _events(scene_file, ("kind_changed", "restart the window to pick it up"))
 
     event = _wait(scene_file, FakePopen(still_running=True), 0, RELOAD_EVENTS)
 
-    assert event == WindowEvent("kind_changed")
+    assert event == WindowEvent("kind_changed", "restart the window to pick it up")
 
 
 def test_wait_reports_a_window_that_is_up(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "INFO  menger.engines.PreviewEngine - Watching scene file for live reload: /x\n"
-    )
+    _events(scene_file, ("up", ""))
 
     assert _wait(scene_file, FakePopen(still_running=True), 0, LAUNCH_EVENTS) == WindowEvent("up")
 
 
 def test_wait_reports_a_startup_failure_even_when_not_asked_for_it(tmp_path):
     scene_file = tmp_path / "001.scala"
-    log_paths(scene_file)[1].write_text(
-        "ERROR menger.engines.PreviewEngine - Failed to create initial preview scene: boom\n"
-    )
+    _events(scene_file, ("startup_failed", "boom"))
 
-    event = _wait(scene_file, FakePopen(returncode=0), 0, LAUNCH_EVENTS)
+    event = _wait(scene_file, FakePopen(returncode=1), 0, LAUNCH_EVENTS)
 
     assert event.kind == "startup_failed"
     assert event.detail.endswith("boom")
@@ -720,6 +725,7 @@ def test_wait_gives_up_after_the_timeout(tmp_path):
 # --- usability review 2026-10, session 4 (F96): the window's own state ------------------------
 
 _WINDOW_STATE = {
+    "schemaVersion": "1.0.0",
     "cameraEye": [0, 0, 5], "cameraLookAt": [0, 0, 0], "cameraUp": [0, 1, 0],
     "rotXW": -61.49998, "rotYW": 1.2, "rotZW": 0, "t": 3.5, "playing": False,
 }
@@ -738,6 +744,15 @@ def test_the_window_state_next_to_current_scala_is_read_and_described(tmp_path):
     assert "camera at (0, 0, 5) looking at (0, 0, 0)" in text
     assert "rotXW -61.5, rotYW 1.2, rotZW 0 degrees" in text
     assert "animation at t = 3.5 s, paused" in text
+
+
+def test_a_window_state_of_another_major_is_not_read(tmp_path):
+    from adapters.render_window import read_window_state
+
+    (tmp_path / "window").mkdir()
+    state = dict(_WINDOW_STATE, schemaVersion="2.0.0")
+    (tmp_path / "window" / "current.scala.window-state.json").write_text(json.dumps(state))
+    assert read_window_state(tmp_path) is None
 
 
 def test_no_window_state_file_is_none(tmp_path):

@@ -2269,10 +2269,14 @@ def test_frame_build_failures_are_reported_once_each(monkeypatch, tmp_path, caps
     window = _FakeWindow()
     logs = []
 
+    # The window reports failed frames as `frame_failed` events (menger#82), not log lines.
+    def _event(detail):
+        return json.dumps({"v": 1, "kind": "frame_failed", "detail": detail, "time": "t"}) + "\n"
+
     def _failing_refresh(scene_file, *args, **kwargs):
-        log = Path(scene_file).parent / "render.stderr.log"
-        log.write_text("12:00:00.000 ERROR menger.engines.WithPreview - FRAME-BUILD-FAILED t=0.5: boom\n")
-        logs.append(log)
+        events = Path(str(scene_file) + ".events.jsonl")
+        events.write_text(_event("t=0.5: boom"))
+        logs.append(events)
         return RenderWindowResult(process=window)
 
     lines = iter(["add a sphere", "", ""])
@@ -2283,7 +2287,7 @@ def test_frame_build_failures_are_reported_once_each(monkeypatch, tmp_path, caps
             raise EOFError
         if logs and line == "" and "rotation" not in logs[0].read_text():
             with logs[0].open("a") as f:
-                f.write("12:00:01.000 ERROR x - FRAME-BUILD-FAILED rebuild after 4D rotation: bad\n")
+                f.write(_event("rebuild after 4D rotation: bad"))
         return line
 
     monkeypatch.setattr(cli, "refresh_render_window", _failing_refresh)

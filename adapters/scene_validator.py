@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from adapters.child_env import child_environment
+from adapters.process_contract import result_problem
 from core.types import (
     ValidationError,
     ValidationFinding,
@@ -192,6 +193,12 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
             message=detail,
             cause=e,
         )
+
+    # menger's process contract (review 2026-10-14, menger#100, #116): the schema version is
+    # checked and the exit code must agree with the tag -- neither was looked at before.
+    problem = result_problem(wire_tag, schema_version, returncode)
+    if problem is not None:
+        return ValidationError(kind="malformed_output", message=f"validator result: {problem}")
 
     return ValidationResult(
         tag=tag, messages=messages, findings=findings, scene=scene, schema_version=schema_version,

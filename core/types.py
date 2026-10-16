@@ -321,7 +321,8 @@ class TurnResult:
     changes: Optional[List[str]] = None
     # Values chosen without being asked (F93): shown, not repaired.
     notes: List[str] = field(default_factory=list)
-    # The validator returned no snapshots: an image older than result schema 1.1.0.
+    # The validator returned no snapshots: it could not evaluate the scene's values (an older
+    # image is refused earlier, by the result contract's schemaVersion check).
     snapshots_missing: bool = False
 
 

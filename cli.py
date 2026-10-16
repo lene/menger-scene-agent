@@ -992,10 +992,12 @@ def _execute_turn(
     print(_wrap_for_terminal(_format_turn_result(result, *_turn_paths(store, result, prompt))))
     if result.snapshots_missing and not _SNAPSHOT_HINT_SHOWN:
         _SNAPSHOT_HINT_SHOWN.append(True)
+        # An image too old to send snapshots is refused before this (its result carries no
+        # schemaVersion, review 2026-10-14, menger#116), so empty snapshots mean the validator
+        # could not evaluate this scene's values -- "rebuild the image" sent users the wrong way.
         print(
-            "  Note: the validator image predates scene snapshots, so changes and camera "
-            "checks fall back to parsing the scene text; rebuild it: "
-            "menger/docker/scene-validator/build.sh"
+            "  Note: the validator could not evaluate this scene's values, so changes and "
+            "camera checks fall back to parsing the scene text"
         )
     if result.tag == "unsupported":
         _write_ticket_draft(store, result.messages[0] if result.messages else "", prompt)

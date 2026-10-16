@@ -178,7 +178,12 @@ DSL change, regenerate them from the sibling `menger` checkout and commit the re
 cd ../menger
 sbt "mengerApp/runMain menger.tools.ManifestGenerator ../menger-scene-agent/reference/dsl-manifest.json"
 sbt "mengerApp/runMain menger.tools.CorpusExporter ../menger-scene-agent/reference/dsl-corpus.json"
+cp contracts/process-result.json ../menger-scene-agent/reference/process-result.json
 ```
+
+`reference/process-result.json` is menger's process contract: the result the validator and
+the render window print when they end at once, the exit code of each tag, and the window's
+event and state versions. `tests/test_process_contract.py` holds the agent's parsers to it.
 
 ## Running the tests
 
