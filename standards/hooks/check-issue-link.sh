@@ -13,21 +13,32 @@ set -u
 HOOKS_DIR=$(dirname "$0")
 . "$HOOKS_DIR/lib.sh"
 
-BRANCH=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)}
-case "$BRANCH" in
-    feat/sprint-*) ;;
-    *)
-        echo "issue-link: ok (not a feat/sprint-* branch: $BRANCH)"
-        exit 0
-        ;;
-esac
+# The branch a range is pushed from is the one at its tip, not whatever HEAD has checked out
+# (menger-toplevel#71): pushing feat/sprint-N from another checkout used to skip the check.
+range_branches() {
+    if [ -n "${GITHUB_HEAD_REF:-}" ]; then printf '%s\n' "$GITHUB_HEAD_REF"; return; fi
+    _b=$(git for-each-ref --points-at "${1##*..}" --format='%(refname:short)' refs/heads 2>/dev/null)
+    [ -n "$_b" ] && { printf '%s\n' "$_b"; return; }
+    git rev-parse --abbrev-ref HEAD 2>/dev/null || true
+}
+
+on_sprint_branch() {
+    range_branches "$1" | grep -q '^feat/sprint-'
+}
 
 REFS_RE='^(Refs|Fixes): [A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+'
 STATUS=0
 MAIN_REF=$(main_ref)
 
 for range in "$@"; do
-    for commit in $(commits_in_range "$range"); do
+    if ! on_sprint_branch "$range"; then
+        echo "issue-link: ok (not a feat/sprint-* branch: $(range_branches "$range" | tr '\n' ' '))"
+        continue
+    fi
+    BRANCH=$(range_branches "$range" | grep '^feat/sprint-' | head -1)
+    # An unresolvable range fails the check (menger-toplevel#70).
+    COMMITS=$(commits_in_range "$range") || { STATUS=1; continue; }
+    for commit in $COMMITS; do
         git merge-base --is-ancestor "$commit" "$MAIN_REF" 2>/dev/null && continue
         is_bootstrapped_commit "$commit" && continue
         commit_is_wip "$commit" && continue

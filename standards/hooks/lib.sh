@@ -15,8 +15,15 @@ main_ref() {
 }
 
 commits_in_range() {
-    # rev-list may fail for unknown remote SHAs (e.g. force pushes); treat as empty
-    git rev-list --no-merges "$1" 2>/dev/null || true
+    # A base unknown here (e.g. the remote SHA of a force push) falls back to where the tip
+    # left main. A range that still cannot be resolved is an error: the policy checks used to
+    # see zero commits and pass (menger-toplevel#70).
+    git rev-list --no-merges "$1" 2>/dev/null && return 0
+    _tip=${1##*..}
+    _base=$(git merge-base "$(main_ref)" "$_tip" 2>/dev/null) \
+        && git rev-list --no-merges "$_base..$_tip" 2>/dev/null && return 0
+    echo "POLICY: cannot resolve the commit range '$1'" >&2
+    return 1
 }
 
 commit_files() {
@@ -33,6 +40,9 @@ commit_subject() {
 }
 
 commit_is_wip() {
+    # Exempt while the work is in progress on a branch, never in a PR: there a WIP commit is
+    # about to reach main and gets the same checks as any other (menger-toplevel#71).
+    [ -n "${GITHUB_BASE_REF:-}" ] && return 1
     case "$(commit_subject "$1")" in
         WIP:*) return 0 ;;
         *) return 1 ;;

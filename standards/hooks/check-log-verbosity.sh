@@ -30,7 +30,9 @@ PATTERNS=$(grep -v '^[[:space:]]*\(#\|$\)' "$PATHS_FILE")
 STATUS=0
 
 for range in "$@"; do
-    for commit in $(commits_in_range "$range"); do
+    # An unresolvable range fails the check (menger-toplevel#70).
+    COMMITS=$(commits_in_range "$range") || { STATUS=1; continue; }
+    for commit in $COMMITS; do
         # Skip commits already on origin/main (absorbed during rebase)
         git merge-base --is-ancestor "$commit" "$(main_ref)" 2>/dev/null && continue
         commit_is_wip "$commit" && continue

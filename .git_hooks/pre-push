@@ -1,35 +1,33 @@
 #!/bin/sh
-# Pre-push hook (Sprint 36 C1): thin wrapper. Change detection is unchanged
-# (standards/hooks/lib.sh); this hook's only job is to compute CHANGED_FILES/QA_RANGES/
-# QA_REMOTE and hand them to standards/scripts/qa-runner.sh, which reads ./qa-manifest.yaml
-# to decide which suites are relevant at push tier (replacing the old hardcoded HAS_SCALA
-# grep block) and runs each one (scripts/suites/*.sh), which decides its own
-# PASS/FAIL/SKIP — an honest per-suite summary (every relevant suite runs and self-reports;
-# an irrelevant one is labeled SKIP without its script ever starting).
+# Pre-push hook, the same in every enrolled repo (vendored from menger-toplevel
+# shared/standards/hooks/pre-push by `./bootstrap.sh sync`; toplevel#79: the copies had
+# diverged -- hard-coded origin/main, different stdin handling, and in menger a bypass that
+# pushed a `WIP:` commit despite a failing gate, dropped by user decision 2026-10-16).
 #
-# Detect changed files. The inline loop this replaces read only git's pre-push
-# protocol from stdin, so running the hook by hand — no stdin — produced an empty
-# file set, skipped every check below and exited 0 regardless of the diff. See
-# standards/hooks/lib.sh for the three invocation contexts and why a TTY test
-# alone does not cover them.
-if [ -r ./standards/hooks/lib.sh ]; then
-  . ./standards/hooks/lib.sh
-  retry_with_backoff "git fetch origin" git fetch origin --quiet || true
-  RANGES=$(push_ranges); _rc=$?
-  [ "$_rc" -eq 2 ] && exit 0   # push only deletes a branch
-  # unquoted on purpose: split the newline-separated ranges into arguments
-  CHANGED_FILES=$(changed_files $RANGES)
-  assert_detection "$CHANGED_FILES" || exit 1
-else
-  # Branch predating standards enrollment: degrade to the same branch-vs-main
-  # comparison rather than silently skipping.
-  BASE=$(git merge-base origin/main HEAD 2>/dev/null)
-  CHANGED_FILES=$(git diff --name-only "${BASE:-HEAD}" HEAD)
-  RANGES="${BASE:-HEAD}..HEAD"
+# Its only job: compute CHANGED_FILES / QA_RANGES / QA_REMOTE and hand them to
+# standards/scripts/qa-runner.sh, which reads ./qa-manifest.yaml, decides which suites are
+# relevant at push tier and runs them; each suite reports PASS/FAIL/SKIP. A failing gate blocks
+# the push; an intentionally broken push is `git push --no-verify`, visibly.
+#
+# Change detection reads git's pre-push protocol from stdin. Run by hand (no stdin) it
+# compares against main instead; see standards/hooks/lib.sh for the three invocation contexts.
+set -u
+
+if [ ! -r ./standards/hooks/lib.sh ]; then
+  echo "pre-push: standards/hooks/lib.sh missing -- run ./bootstrap.sh sync in menger-toplevel" >&2
+  exit 1
 fi
+. ./standards/hooks/lib.sh
+
+retry_with_backoff "git fetch origin" git fetch origin --quiet || true
+RANGES=$(push_ranges); _rc=$?
+[ "$_rc" -eq 2 ] && exit 0   # the push only deletes a branch
+# unquoted on purpose: split the newline-separated ranges into arguments
+CHANGED_FILES=$(changed_files $RANGES)
+assert_detection "$CHANGED_FILES" || exit 1
 
 export CHANGED_FILES
 export QA_RANGES="$RANGES"
-export QA_REMOTE="$1"
+export QA_REMOTE="${1:-origin}"
 
-./standards/scripts/qa-runner.sh --tier push
+exec ./standards/scripts/qa-runner.sh --tier push

@@ -276,6 +276,21 @@ find "$CACHE_DIR" -type f -mtime +14 -delete 2>/dev/null || true
 # No tree, no cache: a shared fallback key ("notree") let one PASS stand for any code.
 TREE_SHA=$(git rev-parse 'HEAD^{tree}' 2>/dev/null) || TREE_SHA=""
 
+# What a cached PASS stands for (menger-toplevel#69): the tree, and also the tier, the pushed
+# range (the policy suites check commit messages, which an amend changes without changing the
+# tree) and the toolchain the suites ran with. Absent commands fingerprint as "not found".
+toolchain_fingerprint() {
+  for _cmd in "java -version" "nvcc --version" "python3 --version" "uv --version"; do
+    $_cmd 2>&1 | head -n 3
+  done
+  nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1
+}
+CACHE_KEY=""
+if [ -n "$TREE_SHA" ]; then
+  CACHE_KEY=$({ echo "$TREE_SHA"; echo "$TIER"; echo "${QA_RANGES:-}"; toolchain_fingerprint; } \
+    | sha1sum | cut -c1-40)
+fi
+
 FAILFAST=0
 [ -t 1 ] && [ "$ALL" -eq 0 ] && FAILFAST=1
 RUN_START=$(date +%s)
@@ -296,8 +311,8 @@ remaining_eta() {
     [ "$(tier_rank "$_rtier")" -gt "$CEILING" ] && continue
     [ "$_rauto" = "false" ] && continue
     suite_relevant "$_rreq" || continue
-    _rcache="$CACHE_DIR/$_rname-$TREE_SHA"
-    [ -n "$TREE_SHA" ] && [ -f "$_rcache" ] && grep -q '^verdict=PASS$' "$_rcache" 2>/dev/null \
+    _rcache="$CACHE_DIR/$_rname-$CACHE_KEY"
+    [ -n "$CACHE_KEY" ] && [ -f "$_rcache" ] && grep -q '^verdict=PASS$' "$_rcache" 2>/dev/null \
       && continue
     _rmed=$(median_duration "$CACHE_DIR" "$_rname")
     if [ -n "$_rmed" ]; then
@@ -351,8 +366,8 @@ while IFS="$TAB" read -r _tag name tier req auto; do
     continue
   fi
 
-  CACHE_FILE="$CACHE_DIR/$name-$TREE_SHA"
-  if [ -n "$TREE_SHA" ] && [ -f "$CACHE_FILE" ] \
+  CACHE_FILE="$CACHE_DIR/$name-$CACHE_KEY"
+  if [ -n "$CACHE_KEY" ] && [ -f "$CACHE_FILE" ] \
       && grep -q '^verdict=PASS$' "$CACHE_FILE" 2>/dev/null; then
     echo "  CACHED PASS (tree unchanged)"
     printf '%s%sCACHED%s\n' "$name" "$TAB" "$TAB" >> "$RESULTS"
@@ -360,11 +375,25 @@ while IFS="$TAB" read -r _tag name tier req auto; do
   fi
 
   LOG=$(mktemp)
+  RCFILE=$(mktemp)
   _t0=$(date +%s)
-  "$script" 2>&1 | tee "$LOG"
+  # The suite's own exit status, which `| tee` would hide (menger-toplevel#78).
+  { "$script" 2>&1; echo $? > "$RCFILE"; } | tee "$LOG"
   _t1=$(date +%s)
+  SUITE_RC=$(cat "$RCFILE"); rm -f "$RCFILE"
 
   LINE=$(grep "^SUITE $name " "$LOG" | tail -n 1)
+  # A suite that prints several verdicts for itself (output of nested runs mixed in, #78) is
+  # not trusted with the last one.
+  VERDICTS=$(grep "^SUITE $name " "$LOG" | awk '{print $3}' | sort -u | wc -l)
+  if [ -n "$LINE" ] && [ "$VERDICTS" -gt 1 ]; then
+    echo "  ${name}: FAILED — conflicting SUITE lines for $name"
+    LINE="SUITE $name FAIL n_failed=1 failed=\"conflicting SUITE lines\" reason=\"\""
+  elif [ -n "$LINE" ] && [ "$SUITE_RC" != "0" ] \
+      && [ "$(printf '%s' "$LINE" | awk '{print $3}')" = "PASS" ]; then
+    echo "  ${name}: FAILED — exit status $SUITE_RC despite a PASS line"
+    LINE="SUITE $name FAIL n_failed=1 failed=\"exit status $SUITE_RC\" reason=\"\""
+  fi
   if [ -z "$LINE" ]; then
     echo "  ${name}: FAILED — no SUITE line emitted (crashed or misbehaved)"
     printf '%s%sFAIL%sno SUITE line emitted\n' "$name" "$TAB" "$TAB" >> "$RESULTS"
@@ -382,7 +411,7 @@ while IFS="$TAB" read -r _tag name tier req auto; do
       printf '%s%sPASS%s\n' "$name" "$TAB" "$TAB" >> "$RESULTS"
       printf '%s\t%s\n' "$name" "$((_t1 - _t0))" >> "$DURATIONS_FILE"
       record_duration "$CACHE_DIR" "$name" "$((_t1 - _t0))"
-      if [ -n "$TREE_SHA" ]; then
+      if [ -n "$CACHE_KEY" ]; then
         { echo "verdict=PASS"; echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; echo "tier=$tier"; } > "$CACHE_FILE"
       fi
       ;;
