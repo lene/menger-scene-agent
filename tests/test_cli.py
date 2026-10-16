@@ -34,7 +34,7 @@ from core.types import (
     ValidationResult,
 )
 
-_FAKE_RENDER_LAUNCHER = "/fake/menger-app/target/universal/stage/bin/menger-app"
+_FAKE_RENDER_LAUNCHER = "/fake/menger/docker/scene-validator/run-render-window.sh"
 
 
 def _scripted_input(lines: List[str]) -> Callable[..., str]:
@@ -873,6 +873,33 @@ def test_whitespace_only_render_launcher_env_var_is_treated_as_unset(monkeypatch
         cli.main([])
 
     assert "MENGER_RENDER_LAUNCHER" in str(exc_info.value)
+
+
+# Review 2026-10-14 (menger#77): the window runs generated code, so it must be the contained one.
+def test_a_host_launcher_is_refused_without_the_explicit_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", "/x/stage/bin/menger-app")
+    monkeypatch.delenv("MENGER_AGENT_HOST_RENDER", raising=False)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _refuse_model_adapter(monkeypatch)
+    _refuse_create_session(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    assert "run-render-window.sh" in str(exc_info.value)
+    assert "MENGER_AGENT_HOST_RENDER=1" in str(exc_info.value)
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_the_host_render_opt_in_is_accepted_with_a_warning(monkeypatch, capsys):
+    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", "/x/stage/bin/menger-app")
+    monkeypatch.setenv("MENGER_AGENT_HOST_RENDER", "1")
+
+    assert cli._require_render_launcher() == "/x/stage/bin/menger-app"
+    assert "outside the sandbox" in capsys.readouterr().out
 
 
 # --- story 21: an accepted turn calls refresh_render_window() with the just-accepted -------

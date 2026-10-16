@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from adapters.child_env import child_environment
+from adapters.scene_validator import REFERENCE_MANIFEST_SHA256
 from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
@@ -112,7 +113,7 @@ def refresh_render_window(
             # The REPL still closes it on exit (`close_render_window`).
             process = subprocess.Popen(
                 cmd, stdout=out, stderr=err, text=True, start_new_session=True,
-                env=child_environment(),
+                env=_window_environment(),
             )
     except OSError as e:
         return RenderWindowError(
@@ -135,6 +136,17 @@ def refresh_render_window(
     )
 
 
+def _window_environment() -> dict:
+    """The window's environment: no credentials, and the manifest the agent holds, so the
+    contained window (run-render-window.sh) refuses an image built from another DSL -- the same
+    identity check the validator gets, so validation and rendering are one build (review
+    2026-10-14, menger#77)."""
+    env = child_environment()
+    if REFERENCE_MANIFEST_SHA256 is not None:
+        env["MENGER_RENDER_EXPECT_MANIFEST_SHA256"] = REFERENCE_MANIFEST_SHA256
+    return env
+
+
 def render_window_scene_path(session_dir: Union[str, Path]) -> Path:
     """The stable file menger's interactive window is launched against and watches for live
     reload (usability review 2026-09, F5) -- distinct from `SceneStore`'s immutable,
@@ -143,8 +155,12 @@ def render_window_scene_path(session_dir: Union[str, Path]) -> Path:
     watches across turns. Kept in sync with the latest ordinal's content by
     `sync_render_window_scene()` after every accepted turn; the user's hand-editing workflow
     (editing the current ordinal file directly, per `check_hand_edit()`) is unaffected -- this
-    path is purely the render window's own launch target, never read by the storage layer."""
-    return Path(session_dir) / "current.scala"
+    path is purely the render window's own launch target, never read by the storage layer.
+
+    It lives in its own `window/` directory (review 2026-10-14, menger#77): the contained
+    window mounts the scene's directory read-write, and that directory must hold nothing but
+    what the window reads and writes -- not the session's history, ordinals or tickets."""
+    return Path(session_dir) / "window" / "current.scala"
 
 
 def read_window_state(session_dir: Union[str, Path]) -> Optional[dict]:
@@ -190,8 +206,9 @@ def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[st
     not an atomic *create*. Returns the stable path, ready to pass to
     `refresh_render_window()`."""
     target = render_window_scene_path(session_dir)
+    target.parent.mkdir(exist_ok=True)
     text = Path(scene_file).read_text(encoding="utf-8")
-    fd, tmp_name = tempfile.mkstemp(dir=str(session_dir), prefix=".current.scala.", suffix=".tmp")
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".current.scala.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)

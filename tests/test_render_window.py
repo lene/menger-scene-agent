@@ -542,8 +542,9 @@ def test_frame_build_failures_without_a_stderr_log_is_empty(tmp_path):
 # --- F5 (usability review 2026-09): the stable path menger's window live-reloads from -------
 
 
+# In its own window/ directory, which the contained window mounts (review 2026-10-14, menger#77).
 def test_render_window_scene_path_is_current_scala_under_the_session_dir(tmp_path):
-    assert render_window_scene_path(tmp_path) == tmp_path / "current.scala"
+    assert render_window_scene_path(tmp_path) == tmp_path / "window" / "current.scala"
 
 
 def test_sync_render_window_scene_copies_the_ordinal_content_to_current_scala(tmp_path):
@@ -552,7 +553,7 @@ def test_sync_render_window_scene_copies_the_ordinal_content_to_current_scala(tm
 
     result = sync_render_window_scene(ordinal, tmp_path)
 
-    assert result == tmp_path / "current.scala"
+    assert result == tmp_path / "window" / "current.scala"
     assert result.read_text() == "object A:\n  val x = 1\n"
 
 
@@ -574,7 +575,7 @@ def test_sync_render_window_scene_leaves_no_temp_file_behind(tmp_path):
 
     sync_render_window_scene(ordinal, tmp_path)
 
-    leftovers = [p for p in tmp_path.iterdir() if p.name not in {"001.scala", "current.scala"}]
+    leftovers = [p for p in tmp_path.rglob("*") if p.name not in {"001.scala", "window", "current.scala"}]
     assert leftovers == []
 
 
@@ -728,7 +729,8 @@ def test_the_window_state_next_to_current_scala_is_read_and_described(tmp_path):
 
     from adapters.render_window import describe_window_state, read_window_state
 
-    (tmp_path / "current.scala.window-state.json").write_text(json.dumps(_WINDOW_STATE))
+    (tmp_path / "window").mkdir()
+    (tmp_path / "window" / "current.scala.window-state.json").write_text(json.dumps(_WINDOW_STATE))
 
     text = describe_window_state(read_window_state(tmp_path))
 
@@ -741,5 +743,6 @@ def test_no_window_state_file_is_none(tmp_path):
     from adapters.render_window import read_window_state
 
     assert read_window_state(tmp_path) is None
-    (tmp_path / "current.scala.window-state.json").write_text("not json")
+    (tmp_path / "window").mkdir()
+    (tmp_path / "window" / "current.scala.window-state.json").write_text("not json")
     assert read_window_state(tmp_path) is None

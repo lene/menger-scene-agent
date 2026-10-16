@@ -135,6 +135,8 @@ _DEFAULT_SESSIONS_DIR = "./sessions"
 # varying location) -- same AD-10 reasoning as `_SCRIPT_PATH_ENV` above, so it's a required
 # env var with no default, checked alongside it before session bootstrap.
 _RENDER_LAUNCHER_ENV = "MENGER_RENDER_LAUNCHER"
+_CONTAINED_LAUNCHER_NAME = "run-render-window.sh"
+_HOST_RENDER_ENV = "MENGER_AGENT_HOST_RENDER"
 
 # Recognized verbatim as the first whitespace-separated token of a line -- story 11's
 # original recognition logic, unchanged by story 19 (Design Notes: "story 19 replaces the
@@ -241,6 +243,20 @@ def _require_render_launcher() -> str:
             f"error: environment variable {_RENDER_LAUNCHER_ENV} is not set. It must name "
             "the staged menger-app render window launcher binary (menger repo, AD-10: "
             "paths are injected, never discovered). Set it before starting the REPL."
+        )
+    if Path(launcher_path).name != _CONTAINED_LAUNCHER_NAME:
+        # Review 2026-10-14 (menger#77): the window compiles and runs every accepted scene;
+        # outside the container that is generated code running as the user, with network.
+        if os.environ.get(_HOST_RENDER_ENV) != "1":
+            raise SystemExit(
+                f"error: {_RENDER_LAUNCHER_ENV} must name menger's contained render window, "
+                f"docker/scene-validator/{_CONTAINED_LAUNCHER_NAME} (got {launcher_path}). "
+                f"To run generated scenes on this host instead -- unsandboxed, as you, with "
+                f"network access -- set {_HOST_RENDER_ENV}=1."
+            )
+        print(
+            f"WARNING: {_HOST_RENDER_ENV}=1 -- the render window runs generated scene code on "
+            "this host, outside the sandbox, as you, with network access."
         )
     return launcher_path
 
@@ -624,8 +640,8 @@ def _report_frame_build_failures(store: SceneStore, reported: int) -> int:
     returns how many are reported now. A relaunch overwrites render.stderr.log, so a shorter
     list than `reported` starts the count over. Must not kill the REPL."""
     try:
-        scene_path = store.current_scene_path()
-        failures = frame_build_failures(scene_path) if scene_path is not None else []
+        # The window's logs sit next to the file it was launched against, not the ordinal.
+        failures = frame_build_failures(render_window_scene_path(store.session_dir))
     except Exception:  # noqa: BLE001 -- a failure check must not kill the REPL
         return reported
     if len(failures) < reported:

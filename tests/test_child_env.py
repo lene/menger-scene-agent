@@ -50,3 +50,13 @@ def test_the_validator_and_the_render_window_get_no_credentials(monkeypatch, tmp
         env = _captured_env(monkeypatch, launch)
         assert "env" in env and env["env"] is not None
         assert not set(SECRETS) & set(env["env"])
+
+
+def test_the_render_window_is_told_which_manifest_to_expect(monkeypatch, tmp_path: Path):
+    from adapters import render_window
+    from adapters.scene_validator import REFERENCE_MANIFEST_SHA256
+
+    scene = tmp_path / "scene.scala"
+    scene.write_text("object S")
+    env = _captured_env(monkeypatch, lambda: render_window.refresh_render_window(scene, "/x/tool"))
+    assert env["env"]["MENGER_RENDER_EXPECT_MANIFEST_SHA256"] == REFERENCE_MANIFEST_SHA256

@@ -123,15 +123,21 @@ call or session is created:
 | Env var | Points to |
 |---|---|
 | `MENGER_SCENE_VALIDATOR_SCRIPT` | the renderer-side scene validator script, e.g. `../menger/docker/scene-validator/run-sandboxed.sh` |
-| `MENGER_RENDER_LAUNCHER` | the staged `menger-app` render window launcher binary, e.g. `../menger/menger-app/target/universal/stage/bin/menger-app` (build it first with `sbt stage` in `menger/` if it doesn't exist yet) |
+| `MENGER_RENDER_LAUNCHER` | the contained render window, `../menger/docker/scene-validator/run-render-window.sh` (build its image together with the validator's: `../menger/docker/scene-validator/build.sh`). It needs Docker with the NVIDIA Container Toolkit (CDI) and an X display. |
 
 Optional: `MENGER_AGENT_SESSIONS_DIR` (default `./sessions`).
+
+The render window compiles and runs every accepted scene, so it runs in the same kind of
+container as the validator: no network, no capabilities, read-only root, only the session's
+`window/` directory mounted. Pointing `MENGER_RENDER_LAUNCHER` at the bare
+`menger-app` launcher instead is refused unless you also set `MENGER_AGENT_HOST_RENDER=1` --
+then generated scene code runs on your host, as you, with network access.
 
 Anthropic (default):
 
 ```bash
 export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
-export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
+export MENGER_RENDER_LAUNCHER=../menger/docker/scene-validator/run-render-window.sh
 export ANTHROPIC_API_KEY=...
 
 uv run menger-scene-agent
@@ -141,7 +147,7 @@ Gemini (or any other provider — same shape, swap the two lines):
 
 ```bash
 export MENGER_SCENE_VALIDATOR_SCRIPT=../menger/docker/scene-validator/run-sandboxed.sh
-export MENGER_RENDER_LAUNCHER=../menger/menger-app/target/universal/stage/bin/menger-app
+export MENGER_RENDER_LAUNCHER=../menger/docker/scene-validator/run-render-window.sh
 export MENGER_AGENT_MODEL_PROVIDER=gemini
 export GEMINI_API_KEY=...   # already synced: uv sync --extra gemini
 
