@@ -5,9 +5,8 @@ through pure allowed-root DSL vocabulary with no allowlist bypass (the allowlist
 legitimate `menger.dsl` field), so this is a separate static pass over the same source
 text.
 
-Field names are the real `menger.dsl` object field names from `reference/dsl-manifest.json`:
-`level` (Sponge/TesseractSponge/Sierpinski4D), `uSteps`/`vSteps` (ParametricSurface), and
-`iterations` (LSystem's iteration-count field).
+The fields checked are every field `reference/dsl-manifest.json` gives a `min` or `max`
+(menger's `FieldConstraints`), plus its `productCaps`.
 
 Usability review 2026-09 (T1#3): the ceilings below used to be hand-picked, independent of
 `menger`'s own DSL/CLI limits (`menger.dsl.ResourceLimits`) -- a mismatch either rejected
@@ -36,9 +35,9 @@ a sampled `t`) is the right place for that rigor, not this one.
 
 from __future__ import annotations
 
-from pathlib import Path
+import math
 
-from adapters.artifacts import ArtifactError, load_manifest
+from core.vocabulary import FIELD_BOUNDS, MANIFEST, PRODUCT_CAPS
 from gauntlet._scala_text import (
     as_float,
     find_call_bodies,
@@ -51,53 +50,11 @@ from gauntlet.types import Finding
 
 _STAGE = "resource_bounds"
 
-# AD-9: this package's own build-time artifact, resolved relative to this script's own
-# location (never CWD) -- same reasoning `adapters/artifacts.py`'s docstring and `cli.py`'s
-# `_MANIFEST_PATH` already give for owning this I/O.
-_MANIFEST_PATH = Path(__file__).resolve().parent.parent / "reference" / "dsl-manifest.json"
-
-# Used only when the manifest can't be read, or doesn't carry a `max` for a tracked field --
-# the pre-manifest hand-picked ceilings, kept as a defense-in-depth floor, not the primary
-# source of truth any more.
-_FALLBACK_CEILINGS_BY_TYPE: dict[str, dict[str, float]] = {
-    "Sponge": {"level": 10},
-    "TesseractSponge": {"level": 10},
-    "Sierpinski4D": {"level": 10},
-    "ParametricSurface": {"uSteps": 200, "vSteps": 200},
-    "LSystem": {"iterations": 10},
-}
-
-
-def ceilings_from_manifest(
-    manifest: dict, fallback: dict[str, dict[str, float]] = _FALLBACK_CEILINGS_BY_TYPE
-) -> dict[str, dict[str, float]]:
-    """Pure transform: `reference/dsl-manifest.json`'s per-field `max` -> the same
-    `{type: {field: ceiling}}` shape `check_resource_bounds` has always used, scoped to
-    exactly the (type, field) pairs `fallback` already tracks (this check's own scope is
-    unchanged; only where the numbers come from is new). A tracked field the manifest
-    doesn't carry a `max` for keeps its fallback value.
-    """
-    by_type = {obj.get("name"): obj.get("fields", []) for obj in manifest.get("objects", [])}
-    result: dict[str, dict[str, float]] = {}
-    for type_name, field_ceilings in fallback.items():
-        fields_by_name = {f.get("name"): f for f in by_type.get(type_name, [])}
-        result[type_name] = {}
-        for field_name, fallback_ceiling in field_ceilings.items():
-            manifest_field = fields_by_name.get(field_name, {})
-            manifest_max = manifest_field.get("max")
-            result[type_name][field_name] = manifest_max if manifest_max is not None else fallback_ceiling
-    return result
-
-
-def _load_ceilings() -> dict[str, dict[str, float]]:
-    try:
-        manifest = load_manifest(_MANIFEST_PATH)
-    except ArtifactError:
-        return _FALLBACK_CEILINGS_BY_TYPE
-    return ceilings_from_manifest(manifest)
-
-
-_FIELD_CEILINGS_BY_TYPE: dict[str, dict[str, float]] = _load_ceilings()
+# Review 2026-10-14 (msa#28): the check's *scope* is every bounded field in the manifest, not a
+# hand list of five -- a field menger bounds (IBL.samples, RenderSettings.aaMaxDepth, ...) used to
+# go unchecked here until someone added it. The hand-picked fallback ceilings are gone: the agent
+# refuses to start without its manifest (core/generation.py), so there is nothing to fall back
+# for. `productCaps` covers bounds per-field limits cannot express (`uSteps * vSteps`).
 
 
 def subtype_fields_from_manifest(manifest: dict) -> dict[tuple[str, str], dict]:
@@ -112,34 +69,31 @@ def subtype_fields_from_manifest(manifest: dict) -> dict[tuple[str, str], dict]:
     }
 
 
-def _load_subtype_fields() -> dict[tuple[str, str], dict]:
-    try:
-        return subtype_fields_from_manifest(load_manifest(_MANIFEST_PATH))
-    except ArtifactError:
-        return {}
+_SUBTYPE_FIELDS: dict[tuple[str, str], dict] = subtype_fields_from_manifest(MANIFEST)
 
 
-_SUBTYPE_FIELDS: dict[tuple[str, str], dict] = _load_subtype_fields()
+def _finding(scene_text: str, offset: int, field: str, identifier: str, message: str) -> Finding:
+    return Finding(stage=_STAGE, message=message, field=field, identifier=identifier,
+                   line=line_of(scene_text, offset))
 
 
 def check_resource_bounds(scene_text: str) -> list[Finding]:
-    """AD-4 rule 3: flags any resource-affecting field bound to a literal value above its
-    fixed ceiling, scoped to the constructor call that actually declares the field. A
-    non-literal (animated) value, or the same field name on an unrelated constructor
-    (`Caustics.iterations`), is never extracted, so both are silently skipped rather than
-    flagged, per the Edge-Case Matrix."""
+    """AD-4 rule 3: flags any bounded field bound to a constant outside its bounds, scoped to
+    the constructor call that actually declares the field. A non-constant (animated) value, or
+    the same field name on an unrelated constructor, is never extracted, so both are silently
+    skipped rather than flagged, per the Edge-Case Matrix."""
     stripped = strip_comments_and_strings(scene_text)
     findings: list[Finding] = []
-    for type_name, ceilings in _FIELD_CEILINGS_BY_TYPE.items():
+    for type_name, bounds in FIELD_BOUNDS.items():
         for offset, inner in find_call_bodies(stripped, type_name):
             args = named_args(inner)
-            for field, ceiling in ceilings.items():
+            for field, (field_min, field_max) in bounds.items():
                 if field not in args:
                     continue
                 value = as_float(args[field])
                 if value is None:
                     continue
-                low, high = _bounds_for(type_name, field, ceiling, args)
+                low, high = _bounds_for(type_name, field, field_min, field_max, args)
                 if high is not None and value > high:
                     message = (
                         f"{type_name}'s '{field}' = {args[field]} exceeds the "
@@ -153,32 +107,39 @@ def check_resource_bounds(scene_text: str) -> list[Finding]:
                     )
                 else:
                     continue
-                findings.append(
-                    Finding(
-                        stage=_STAGE,
-                        message=message,
-                        field=field,
-                        identifier=args[field],
-                        line=line_of(scene_text, offset),
-                    )
-                )
+                findings.append(_finding(scene_text, offset, field, args[field], message))
+    for type_name, fields, cap in PRODUCT_CAPS:
+        for offset, inner in find_call_bodies(stripped, type_name):
+            args = named_args(inner)
+            values = [as_float(args[f]) if f in args else None for f in fields]
+            if any(v is None for v in values):
+                continue
+            product = math.prod(v for v in values if v is not None)
+            if product > cap:
+                shown = " * ".join(f"{f} ({args[f]})" for f in fields)
+                findings.append(_finding(
+                    scene_text, offset, fields[0], args[fields[0]],
+                    f"{type_name}'s {shown} = {product:g} exceeds the cap of {cap:g}",
+                ))
     return findings
 
 
 def _bounds_for(
-    type_name: str, field: str, default_ceiling: float, args: dict[str, str]
+    type_name: str, field: str, field_min: float | None, field_max: float | None,
+    args: dict[str, str],
 ) -> tuple[float | None, float | None]:
     """(minimum, ceiling) for one constructor call: the per-subtype bounds from `limitsBy`
     when the discriminating argument (`spongeType`) is a literal the manifest lists, else the
-    conservative field-level ceiling and no minimum (usability review 2026-10, F59)."""
+    field's own, conservative bounds (usability review 2026-10, F59). A field with per-subtype
+    bounds checks no field-level minimum without a known subtype: RecursiveIAS starts at 1."""
     manifest_field = _SUBTYPE_FIELDS.get((type_name, field))
     if manifest_field is None:
-        return None, default_ceiling
+        return field_min, field_max
     discriminator = discriminator_of(manifest_field)
     subtype = subtype_of(args.get(discriminator)) if discriminator else None
     by_value = (manifest_field.get("limitsBy") or {}).get("values") or {}
     if subtype not in by_value:
-        return None, default_ceiling
+        return None, field_max
     low, high, _ = field_bounds(manifest_field, subtype)
     return low, high
 

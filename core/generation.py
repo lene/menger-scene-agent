@@ -28,19 +28,39 @@ from gauntlet._scala_text import strip_comments_and_strings
 _RULES = (Path(__file__).resolve().parent / "generation_rules.md").read_text()
 
 
+def _major(version: str) -> str:
+    return version.split(".", 1)[0]
+
+
+def _readable_version(version: object, expected: str) -> bool:
+    """Same major as `expected` and not older than it."""
+    if not isinstance(version, str):
+        return False
+    try:
+        got = tuple(int(p) for p in version.split("."))
+        want = tuple(int(p) for p in expected.split("."))
+    except ValueError:
+        return False
+    return got[:1] == want[:1] and got >= want
+
+
 def validate_artifacts(manifest: dict, corpus: dict) -> Optional[GenerationError]:
     if not isinstance(manifest, dict):
         return GenerationError(
             kind="stale_manifest",
             message=f"Manifest artifact must be an object, got {type(manifest).__name__}",
         )
+    # `schemaVersion` describes the manifest's shape only (review 2026-10-14, menger#83): the
+    # same major and at least the minor this agent was written for is readable -- a newer minor
+    # only adds. Any other version used to be refused, so every note-only manifest change
+    # needed an agent commit.
     manifest_version = manifest.get("schemaVersion")
-    if manifest_version != EXPECTED_MANIFEST_SCHEMA_VERSION:
+    if not _readable_version(manifest_version, EXPECTED_MANIFEST_SCHEMA_VERSION):
         return GenerationError(
             kind="stale_manifest",
             message=(
-                f"Manifest artifact schemaVersion is {manifest_version!r}, expected "
-                f"{EXPECTED_MANIFEST_SCHEMA_VERSION!r}"
+                f"Manifest artifact schemaVersion is {manifest_version!r}, this agent reads "
+                f"{EXPECTED_MANIFEST_SCHEMA_VERSION!r} or a later {_major(EXPECTED_MANIFEST_SCHEMA_VERSION)}.x"
             ),
         )
     if not isinstance(corpus, dict):

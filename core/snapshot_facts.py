@@ -38,26 +38,17 @@ def _fmt(value: object) -> str:
 # Emission is left out: a glowing Glass is still Glass (it is shown separately).
 _MATERIAL_KEYS = ("ior", "roughness", "metallic", "specular", "filmThickness", "dispersion")
 _PRESET_TOLERANCE = 1e-4
-_PROCEDURAL_ITEM = re.compile(r"\b(\d+) ([a-z_]+)")
-# Which procedural presets replace (not modulate) the colour: "8 xyz_rgb REPLACES ..." in the
-# manifest's `proceduralType` description.
-_PROCEDURAL_REPLACES = re.compile(r"\b(\d+) ([a-z_]+) REPLACES")
-
-
-def _procedural_description(manifest: dict) -> str:
-    for obj in manifest.get("objects", []):
-        for f in obj.get("fields", []):
-            if f.get("name") == "proceduralType" and f.get("description"):
-                return f["description"]
-    return ""
+# The presets come from the manifest's structured `proceduralPresets` (review 2026-10-14,
+# menger#81). They were parsed out of the `proceduralType` description with a regex, so
+# rewording that sentence silently broke the F89 repair.
 
 
 def procedural_names(manifest: dict) -> dict[int, str]:
-    return {int(n): name for n, name in _PROCEDURAL_ITEM.findall(_procedural_description(manifest))}
+    return {p["id"]: p["name"] for p in manifest.get("proceduralPresets", [])}
 
 
 def colour_replacing_procedurals(manifest: dict) -> set[int]:
-    return {int(n) for n, _ in _PROCEDURAL_REPLACES.findall(_procedural_description(manifest))}
+    return {p["id"] for p in manifest.get("proceduralPresets", []) if p.get("effect") == "replaces"}
 
 
 def material_name(material: Optional[dict], manifest: dict) -> str:

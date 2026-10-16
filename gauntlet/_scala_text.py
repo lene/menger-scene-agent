@@ -93,14 +93,16 @@ def find_call_bodies(text: str, name: str) -> list[tuple[int, str]]:
 
 def split_top_level(s: str) -> list[str]:
     """Splits a comma-separated argument list at depth-0 commas only, so a nested call's
-    own commas (`Vec3(0f, 2f, 6f)`, `Some(Color(0f, 0f, 0f))`) are not split."""
+    own commas (`Vec3(0f, 2f, 6f)`, `Some(Color(0f, 0f, 0f))`) are not split. Braces count too:
+    a block argument (`f = { (u, v) => ... }`) used to split at its own commas and shift every
+    following named argument (review 2026-10-14, msa#38)."""
     parts = []
     depth = 0
     current: list[str] = []
     for ch in s:
-        if ch in "([":
+        if ch in "([{":
             depth += 1
-        elif ch in ")]":
+        elif ch in ")]}":
             depth -= 1
         if ch == "," and depth == 0:
             parts.append("".join(current))

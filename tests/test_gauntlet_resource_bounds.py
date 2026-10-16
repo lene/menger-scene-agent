@@ -3,7 +3,8 @@ Pure string processing, no compiler, no network."""
 
 from __future__ import annotations
 
-from gauntlet.resource_bounds import ceilings_from_manifest, check_resource_bounds
+from core.vocabulary import FIELD_BOUNDS
+from gauntlet.resource_bounds import check_resource_bounds
 
 CLEAN_SCENE = (
     "object GlassSponge:\n"
@@ -27,9 +28,7 @@ def test_clean_scene_with_in_bound_literals_has_no_findings():
 def test_level_at_exactly_the_ceiling_is_not_flagged():
     # Ceiling comes from reference/dsl-manifest.json's Sponge.level max (menger's
     # ResourceLimits.cubeSpongeLevel.max, currently 5) -- not a value hand-picked here.
-    from gauntlet.resource_bounds import _FIELD_CEILINGS_BY_TYPE
-
-    ceiling = _FIELD_CEILINGS_BY_TYPE["Sponge"]["level"]
+    ceiling = FIELD_BOUNDS["Sponge"]["level"][1]
     scene = f"object Foo:\n  val scene = Scene(objects = List(Sponge(level = {ceiling}f)))\n"
 
     findings = check_resource_bounds(scene)
@@ -154,61 +153,46 @@ def test_poc_run_turn2_refined_scala_has_no_resource_bound_findings():
 # --- Usability review 2026-09 (T1#3): ceilings sourced from the manifest, not hand-picked ---
 
 
-def test_ceilings_from_manifest_uses_the_manifest_max_when_present():
-    fallback = {"Sponge": {"level": 999}}
-    manifest = {"objects": [{"name": "Sponge", "fields": [{"name": "level", "max": 5}]}]}
-
-    assert ceilings_from_manifest(manifest, fallback) == {"Sponge": {"level": 5}}
-
-
-def test_ceilings_from_manifest_falls_back_when_field_has_no_max():
-    fallback = {"ParametricSurface": {"uSteps": 200}}
-    manifest = {"objects": [{"name": "ParametricSurface", "fields": [{"name": "uSteps", "min": 1}]}]}
-
-    assert ceilings_from_manifest(manifest, fallback) == {"ParametricSurface": {"uSteps": 200}}
-
-
-def test_ceilings_from_manifest_falls_back_when_type_is_missing_entirely():
-    fallback = {"Sierpinski4D": {"level": 10}}
-    manifest = {"objects": []}
-
-    assert ceilings_from_manifest(manifest, fallback) == {"Sierpinski4D": {"level": 10}}
-
-
-def test_ceilings_from_manifest_covers_exactly_the_fallback_s_tracked_fields():
-    fallback = {"Sponge": {"level": 10}, "LSystem": {"iterations": 10}}
-    manifest = {
-        "objects": [
-            {"name": "Sponge", "fields": [{"name": "level", "max": 5}]},
-            # A manifest field this check doesn't track is simply not consulted.
-            {"name": "LSystem", "fields": [{"name": "angleDegrees", "max": 360}]},
-        ]
-    }
-
-    result = ceilings_from_manifest(manifest, fallback)
-
-    assert result == {"Sponge": {"level": 5}, "LSystem": {"iterations": 10}}
-
-
-def test_the_real_manifest_provides_a_max_for_every_tracked_level_and_iteration_field():
-    # Guards against the manifest silently losing a field this check depends on (e.g. a
-    # menger-side rename) without anyone noticing -- uSteps/vSteps are excepted since their
-    # real constraint is the uSteps*vSteps product, not expressible as a single field max.
+# Review 2026-10-14 (msa#28): the check covers every field the manifest bounds, not a hand list
+# of five; the hand-picked fallback ceilings (200 uSteps, level 10, ...) are gone.
+def test_every_field_the_manifest_bounds_is_checked():
     import json
 
-    from gauntlet.resource_bounds import _FALLBACK_CEILINGS_BY_TYPE
-
     manifest = json.load(open("reference/dsl-manifest.json"))
-    fields_by_type = {obj["name"]: {f["name"]: f for f in obj["fields"]} for obj in manifest["objects"]}
+    bounded = {
+        (t["name"], f["name"])
+        for t in manifest["objects"] + manifest["lights"] + manifest["sceneComposition"]
+        + [manifest["renderSettings"]]
+        for f in t["fields"] if f.get("max") is not None
+    }
+    checked = {(t, f) for t, fields in FIELD_BOUNDS.items() for f, (_, hi) in fields.items() if hi}
+    assert bounded <= checked
+    assert ("IBL", "samples") in checked and ("RenderSettings", "aaMaxDepth") in checked
 
-    for type_name, field_ceilings in _FALLBACK_CEILINGS_BY_TYPE.items():
-        for field_name in field_ceilings:
-            if (type_name, field_name) in {("ParametricSurface", "uSteps"), ("ParametricSurface", "vSteps")}:
-                continue
-            assert fields_by_type[type_name][field_name].get("max") is not None, (
-                f"{type_name}.{field_name}: manifest carries no max, silently falling back "
-                "to the hand-picked ceiling"
-            )
+
+def test_a_cap_outside_the_old_hand_list_is_flagged():
+    scene = "object Foo:\n  val scene = Scene(ibl = Some(IBL(samples = 9)))\n"
+
+    findings = check_resource_bounds(scene)
+
+    assert [f.field for f in findings] == ["samples"]
+
+
+def test_a_value_below_the_minimum_is_flagged():
+    scene = "object Foo:\n  val r = RenderSettings(aaMaxDepth = 0)\n"
+
+    assert [f.field for f in check_resource_bounds(scene)] == ["aaMaxDepth"]
+
+
+def test_the_product_cap_is_checked_when_both_factors_are_constants():
+    over = "object Foo:\n  val s = ParametricSurface(uSteps = 2000, vSteps = 1000)\n"
+    within = "object Foo:\n  val s = ParametricSurface(uSteps = 1000, vSteps = 1000)\n"
+    animated = "object Foo:\n  def s(t: Float) = ParametricSurface(uSteps = 2000, vSteps = n)\n"
+
+    assert [f.field for f in check_resource_bounds(over)] == ["uSteps"]
+    assert "exceeds the cap of 1e+06" in check_resource_bounds(over)[0].message
+    assert check_resource_bounds(within) == []
+    assert check_resource_bounds(animated) == []
 
 
 # --- Verification: the full 32-scene reference corpus (review round 1) --------------------
@@ -307,7 +291,8 @@ def test_arithmetic_hex_and_scientific_literals_are_evaluated_and_flagged():
         if over.endswith(".toInt"):
             assert findings == [], over  # a method call is not a constant expression
         else:
-            assert len(findings) == 1, over
+            # The uSteps ceiling, read from the constant (the product cap may flag it too).
+            assert any(f.field == "uSteps" and "ceiling" in f.message for f in findings), over
 
 
 def test_a_t_driven_expression_is_still_skipped():
@@ -328,3 +313,29 @@ def test_as_float_reads_scala_constant_expressions():
     assert as_float("t * 3f") is None
     assert as_float("1 / 0") is None
     assert as_float("") is None
+
+
+# Review 2026-10-14 (msa#38): a brace block with a top-level comma split the argument list and
+# shifted every named argument after it.
+def test_split_top_level_keeps_brace_blocks_whole():
+    from gauntlet._scala_text import named_args, split_top_level
+
+    block = "{ import menger.dsl.{Sphere, Cube}; Sphere() }"
+    inner = f"f = {block}, uSteps = 2000000, vSteps = 10"
+    assert split_top_level(inner)[0] == f"f = {block}"
+    assert named_args(inner)["uSteps"] == "2000000"
+
+
+def test_split_top_level_on_corpus_shaped_input_keeps_every_named_argument():
+    import random
+
+    from gauntlet._scala_text import named_args
+
+    rng = random.Random(1234)
+    nested = ["Vec3(1f, 2f, 3f)", "Some(Color(0f, 0f, 0f))", "{ (u, v) => (u, v) }",
+              "List(Sphere(), Cube())", "[1, 2]", "0.5f", "{ import x.{A, B}; A() }"]
+    for _ in range(200):
+        names = rng.sample(["a", "b", "c", "d", "e"], k=rng.randint(1, 5))
+        values = [rng.choice(nested) for _ in names]
+        inner = ", ".join(f"{n} = {v}" for n, v in zip(names, values))
+        assert named_args(inner) == dict(zip(names, values)), inner

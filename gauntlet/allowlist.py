@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 
+from core.vocabulary import IMPORT_EXACT, IMPORT_ROOTS
 from gauntlet._scala_text import line_of, strip_comments_and_strings
 from gauntlet.types import Finding
 
@@ -29,19 +30,13 @@ _STAGE = "allowlist"
 # submodules (e.g. `menger.SceneCompiler`, `menger.SceneLoader`) are exactly the
 # compile/execution surface AD-2 forbids reaching from the agent domain, so bare "menger"
 # or "scala" cannot be treated as an allowed root, only these specific subpaths.
-_ALLOWED_ROOTS = (
-    "menger.dsl",
-    "menger.common",
-    "scala.math",
-    "scala.language.implicitConversions",
-)
-
-# AD-4's one narrow exception (added after this check's first real-fixture run rejected
-# every 4D scene, including the MVP flagship): every 4D scene needs `import
-# menger.Projection4DSpec`, which lives outside `menger.dsl`. Allowing this one class --
-# never the bare `menger` root -- keeps AD-2's execution surface (Main-like objects, etc.)
-# closed while admitting the one legitimate type the DSL corpus actually needs from there.
-_ALLOWED_EXACT = ("menger.Projection4DSpec",)
+# Derived from menger's compile surface in the manifest (review 2026-10-14, msa#28: the allowed
+# surface existed three times -- here, menger's compile classpath, arc42 prose): what a scene
+# can compile against, plus the Scala library parts the agent's policy admits. The exact types
+# are root-package types the DSL uses, e.g. `menger.Projection4DSpec`, which every 4D scene
+# imports -- never the bare `menger` root.
+_ALLOWED_ROOTS = IMPORT_ROOTS
+_ALLOWED_EXACT = IMPORT_EXACT
 
 # One import target per line: `import a.b.c`, `import a.b._`, `import a.b.{X, Y}`. The
 # DSL corpus's imports are always one-per-line (confirmed against poc-run/*.scala), so a
@@ -148,8 +143,7 @@ def check_allowlist(scene_text: str) -> list[Finding]:
                     stage=_STAGE,
                     message=(
                         f"Import '{raw_target}' does not root in an allowed package "
-                        f"(menger.dsl, menger.common, scala.math, "
-                        f"scala.language.implicitConversions, menger.Projection4DSpec)"
+                        f"({', '.join(_ALLOWED_ROOTS)}, or one of {', '.join(_ALLOWED_EXACT)})"
                     ),
                     identifier=raw_target,
                     line=line_of(scene_text, match.start()),

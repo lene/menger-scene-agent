@@ -52,11 +52,11 @@ def test_the_validator_and_the_render_window_get_no_credentials(monkeypatch, tmp
         assert not set(SECRETS) & set(env["env"])
 
 
-def test_the_render_window_is_told_which_manifest_to_expect(monkeypatch, tmp_path: Path):
+def test_the_render_window_is_told_which_dsl_revision_to_expect(monkeypatch, tmp_path: Path):
     from adapters import render_window
-    from adapters.scene_validator import REFERENCE_MANIFEST_SHA256
+    from adapters.scene_validator import REFERENCE_DSL_REVISION
 
     scene = tmp_path / "scene.scala"
     scene.write_text("object S")
     env = _captured_env(monkeypatch, lambda: render_window.refresh_render_window(scene, "/x/tool"))
-    assert env["env"]["MENGER_RENDER_EXPECT_MANIFEST_SHA256"] == REFERENCE_MANIFEST_SHA256
+    assert env["env"]["MENGER_RENDER_EXPECT_DSL_REVISION"] == REFERENCE_DSL_REVISION

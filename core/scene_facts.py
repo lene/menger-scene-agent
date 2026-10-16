@@ -26,6 +26,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from core.vocabulary import HOLED_TYPES, OBJECT_TYPES, POSITIONED_LIGHT_TYPES, TRANSPARENT_MATERIALS
 from gauntlet._scala_text import (
     as_float,
     find_call_bodies,
@@ -37,38 +38,20 @@ from gauntlet.manifest_bounds import subtype_of
 
 Vec3 = tuple[float, float, float]
 
-OBJECT_TYPES = (
-    "Sphere",
-    "Cube",
-    "Sponge",
-    "Tesseract",
-    "TesseractSponge",
-    "Sierpinski4D",
-    "ParametricSurface",
-    "Curve",
-    "LSystem",
-    # The regular 4D polytopes (menger F17); missing here, session 2's 24-cell had no facts.
-    "Pentachoron",
-    "Hexadecachoron",
-    "Icositetrachoron",
-    "Hexacosichoron",
-    "Hecatonicosachoron",
-)
-POSITIONED_LIGHT_TYPES = ("Point", "AreaLight")
+# Object types, positioned lights, see-through materials and holed objects come from the
+# manifest (core/vocabulary.py, review 2026-10-14, msa#28): the object list here lagged the DSL
+# -- session 2's 24-cell had no facts. Re-exported for the modules that import them from here.
+__all__ = ["OBJECT_TYPES", "POSITIONED_LIGHT_TYPES"]
 DEFAULT_POS: Vec3 = (0.0, 0.0, 0.0)
 DEFAULT_SIZE = 1.0
 
-# Material presets whose defining characteristic is transparency (the DSL's 12 presets, per
-# reference/dsl-manifest.json's `materials` list) -- used only for the coarse "is this object
-# opaque enough to occlude something behind it" judgment (F23); not a substitute for the
-# renderer's own physically-based transmission.
-_TRANSPARENT_MATERIAL_PRESETS = frozenset({
-    "Glass", "Water", "Diamond", "GlassDispersive", "DiamondDispersive", "Film",
-})
+# See-through materials -- only for the coarse "is this object opaque enough to occlude
+# something behind it" judgment (F23); not the renderer's physically-based transmission.
+_TRANSPARENT_MATERIAL_PRESETS = TRANSPARENT_MATERIALS
 _TRANSPARENT_MATERIAL_OPACITY_HINT = 0.3
 # Fractals with holes through them: an object inside one stays visible through the holes, so
 # they never occlude (F78: the orb inside a tesseract sponge was visible).
-_HOLED_TYPES = frozenset({"Sponge", "TesseractSponge", "Sierpinski4D"})
+_HOLED_TYPES = HOLED_TYPES
 
 
 def parse_vec3(value: str) -> Optional[Vec3]:

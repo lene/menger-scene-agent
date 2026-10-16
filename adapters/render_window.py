@@ -39,7 +39,7 @@ from adapters.process_contract import (
     result_problem,
     same_major,
 )
-from adapters.scene_validator import REFERENCE_MANIFEST_SHA256
+from adapters.scene_validator import REFERENCE_DSL_REVISION
 from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
@@ -152,8 +152,8 @@ def _window_environment() -> dict:
     identity check the validator gets, so validation and rendering are one build (review
     2026-10-14, menger#77)."""
     env = child_environment()
-    if REFERENCE_MANIFEST_SHA256 is not None:
-        env["MENGER_RENDER_EXPECT_MANIFEST_SHA256"] = REFERENCE_MANIFEST_SHA256
+    if REFERENCE_DSL_REVISION is not None:
+        env["MENGER_RENDER_EXPECT_DSL_REVISION"] = REFERENCE_DSL_REVISION
     return env
 
 

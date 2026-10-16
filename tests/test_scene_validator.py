@@ -5,7 +5,6 @@ exception -- this suite never invokes real Docker or a real `run-sandboxed.sh`."
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -378,9 +377,9 @@ def test_subprocess_launch_failure_returns_a_typed_error_not_an_exception(monkey
 
 
 def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
-    # The command also carries the agent's manifest hash (session 4, F99); pinned to None here
+    # The command also carries the agent's DSL revision (session 4, F99); pinned to None here
     # so this test is about the positional arguments only.
-    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", None)
+    monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", None)
     payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -390,7 +389,7 @@ def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
 
 
 def test_builds_the_command_with_an_image_tag_when_given(monkeypatch):
-    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", None)
+    monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", None)
     payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -399,25 +398,27 @@ def test_builds_the_command_with_an_image_tag_when_given(monkeypatch):
     assert calls == [[_SCRIPT_PATH, _SCENE_FILE, "--image", "menger-scene-validator:test"]]
 
 
-def test_the_command_carries_the_agent_manifest_hash(monkeypatch):
+def test_the_command_carries_the_agent_dsl_revision(monkeypatch):
     # Usability review 2026-10, session 4 (F99): run-sandboxed.sh refuses an image built from a
-    # different manifest; a stale image re-tagged by CI had passed for current.
-    monkeypatch.setattr(scene_validator, "REFERENCE_MANIFEST_SHA256", "ab" * 32)
+    # different DSL; a stale image re-tagged by CI had passed for current.
+    monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", "ab" * 32)
     payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     validate_scene(_SCENE_FILE, _SCRIPT_PATH)
 
-    assert calls == [[_SCRIPT_PATH, _SCENE_FILE, "--expect-manifest-sha256", "ab" * 32]]
+    assert calls == [[_SCRIPT_PATH, _SCENE_FILE, "--expect-dsl-revision", "ab" * 32]]
 
 
-def test_the_manifest_hash_is_the_sha256_of_the_reference_manifest():
-    expected = hashlib.sha256(
+# The DSL's identity is the manifest's contentRevision, not the file's hash (menger#83): a pin
+# bump changed the hash although the DSL had not changed.
+def test_the_dsl_revision_is_the_reference_manifests_content_revision():
+    manifest = json.loads(
         (Path(scene_validator.__file__).resolve().parent.parent / "reference"
-         / "dsl-manifest.json").read_bytes()
-    ).hexdigest()
+         / "dsl-manifest.json").read_text()
+    )
 
-    assert scene_validator.REFERENCE_MANIFEST_SHA256 == expected
+    assert scene_validator.REFERENCE_DSL_REVISION == manifest["contentRevision"]
 
 
 def test_subprocess_run_is_invoked_with_capture_output_text_and_timeout_kwargs(monkeypatch):
