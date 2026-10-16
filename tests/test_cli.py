@@ -2610,7 +2610,7 @@ def test_an_unchanged_turn_is_not_shown_as_a_rejection():
     # F76: live and on resume, "No change made: ..." stands alone, not "Rejected (unchanged)".
     result = TurnResult(tag="unchanged", messages=["No change made: same scene."])
 
-    assert cli._format_turn_result(result) == "No change made: same scene."
+    assert formatting._format_turn_result(result) == "No change made: same scene."
     entry = {"outcome": "rejected", "reason": "unchanged: No change made: same scene."}
     assert cli._format_history_entry(entry) == "No change made: same scene."
 
@@ -2621,7 +2621,7 @@ def test_not_done_parts_are_printed():
         not_done=["extrusion along w -- nearest: a Tesseract"],
     )
 
-    assert "\n  Not done: extrusion along w -- nearest: a Tesseract" in cli._format_turn_result(result)
+    assert "\n  Not done: extrusion along w -- nearest: a Tesseract" in formatting._format_turn_result(result)
 
 
 def test_carried_over_and_removed_not_done_lines_are_printed_once_each():
@@ -2631,7 +2631,7 @@ def test_carried_over_and_removed_not_done_lines_are_printed_once_each():
         stale_not_done=["steel -- nearest: Material.Chrome"], carried_over=2,
     )
 
-    text = cli._format_turn_result(result)
+    text = formatting._format_turn_result(result)
 
     assert "\n  Note: removed the outdated Not done line: steel -- nearest: Material.Chrome" in text
     assert "\n  (2 earlier warning(s) / Not done item(s) still apply)" in text
@@ -2647,10 +2647,10 @@ def test_value_changes_and_unasked_choices_are_printed():
     nothing = TurnResult(tag="accepted", messages=[], ordinal=3, changes=[])
 
     assert "\n  Changed: duration: 10 s -> 20 s\n  Note: chose for the sponge, unasked: size 2.5" in (
-        cli._format_turn_result(result)
+        formatting._format_turn_result(result)
     )
-    assert "\n  Changed: no value (only code layout or comments)" in cli._format_turn_result(nothing)
-    assert "Changed:" not in cli._format_turn_result(TurnResult(tag="accepted", messages=[], ordinal=1))
+    assert "\n  Changed: no value (only code layout or comments)" in formatting._format_turn_result(nothing)
+    assert "Changed:" not in formatting._format_turn_result(TurnResult(tag="accepted", messages=[], ordinal=1))
 
 
 def test_open_lists_the_current_scenes_warnings_and_not_done(monkeypatch, tmp_path, capsys):
@@ -2739,14 +2739,14 @@ def test_a_rejection_puts_reasons_and_the_nearest_on_their_own_lines():
         messages=["Compilation of 'a.scala' failed:\nline 3: Not found: X", "lint: too dark"],
     )
 
-    assert cli._format_turn_result(unsupported) == (
+    assert formatting._format_turn_result(unsupported) == (
         "Rejected (unsupported):\n  no glow or halo exists\n  Nearest: an emissive surface"
     )
-    assert cli._format_turn_result(compile_failure) == (
+    assert formatting._format_turn_result(compile_failure) == (
         "Rejected (compile errors):\n  Compilation of 'a.scala' failed:\n  line 3: Not found: X"
         "\n  lint: too dark"
     )
-    assert cli._format_turn_result(TurnResult(tag="local_finding", messages=["bad thing"])) == (
+    assert formatting._format_turn_result(TurnResult(tag="local_finding", messages=["bad thing"])) == (
         "Rejected (local finding): bad thing"
     )
 
@@ -2759,7 +2759,7 @@ def test_long_lines_wrap_at_words_under_their_label_on_a_terminal(monkeypatch):
     )
     text = "  Readback: a level-2 glass sponge with a dark background and two lights"
 
-    wrapped = cli._wrap_for_terminal(text).splitlines()
+    wrapped = formatting._wrap_for_terminal(text).splitlines()
 
     assert all(len(line) <= 40 for line in wrapped)
     assert wrapped[1].startswith(" " * len("  Readback: ")) and wrapped[1].strip()
@@ -2770,7 +2770,7 @@ def test_output_is_not_wrapped_off_a_terminal(monkeypatch):
     monkeypatch.setattr(formatting.sys.stdout, "isatty", lambda: False, raising=False)
     text = "  Readback: " + "word " * 40
 
-    assert cli._wrap_for_terminal(text) == text
+    assert formatting._wrap_for_terminal(text) == text
 
 
 def test_the_window_watcher_reports_a_crash_while_waiting_once(monkeypatch, tmp_path, capsys):
