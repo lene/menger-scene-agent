@@ -31,6 +31,7 @@ from core.types import (
     RenderWindowError,
     RenderWindowResult,
     TurnResult,
+    ValidationResult,
 )
 
 _FAKE_RENDER_LAUNCHER = "/fake/menger-app/target/universal/stage/bin/menger-app"
@@ -1152,7 +1153,7 @@ def test_hand_edit_accepted_refreshes_render_window_and_updates_prior_scene(
 
     known_scenes_seen = []
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         known_scenes_seen.append(known_scene)
         if len(known_scenes_seen) == 1:
             store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")
@@ -1186,7 +1187,7 @@ def test_hand_edit_rejected_does_not_refresh_render_window_or_change_prior_scene
 
     known_scenes_seen = []
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         known_scenes_seen.append(known_scene)
         return TurnResult(
             tag="hand_edit_rejected",
@@ -1220,7 +1221,7 @@ def test_no_hand_edit_detected_produces_no_output_and_normal_turn_proceeds(
 
     hand_edit_calls = []
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         hand_edit_calls.append(known_scene)
         return None
 
@@ -1255,7 +1256,7 @@ def test_check_hand_edit_is_called_every_loop_iteration(monkeypatch, tmp_path):
 
     call_count = 0
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         nonlocal call_count
         call_count += 1
         return None
@@ -1330,7 +1331,7 @@ def test_hand_edit_storage_failure_does_not_refresh_render_window_or_change_prio
 
     known_scenes_seen = []
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         known_scenes_seen.append(known_scene)
         return TurnResult(
             tag="storage_failed",
@@ -1370,7 +1371,7 @@ def test_hand_edit_render_refresh_exception_prints_error_and_repl_continues(
 
     monkeypatch.setattr(cli, "refresh_render_window", _boom)
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         if known_scene is None:
             store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")
             return TurnResult(tag="accepted", messages=[], ordinal=1)
@@ -1447,10 +1448,20 @@ def test_hand_edit_accepted_and_same_iterations_real_prompt_see_it_as_prior_scen
         return TurnResult(tag="accepted", messages=[], ordinal=3)
 
     monkeypatch.setattr(cli, "run_turn", _fake_run_turn)
+    # Since review 2026-10-14 (menger#88) the real check_hand_edit() also runs the sandboxed
+    # validator on the edit; this scenario is about an edit that passes it.
+    validated = []
+
+    def _fake_validate(scene_file, script_path, image=None, timeout=None):
+        validated.append(script_path)
+        return ValidationResult(tag="ok", messages=[], findings=[])
+
+    monkeypatch.setattr("core.turn.validate_scene", _fake_validate)
 
     exit_code = cli.main(["--session", "hand-edit-e2e"])
 
     assert exit_code == 0
+    assert validated == ["/fake/validator.sh"]
     assert len(recorded_calls) == 1
     prompt, prior_scene = recorded_calls[0]
     assert prompt == "a real prompt"
@@ -1583,7 +1594,7 @@ def test_retry_with_scene_changed_via_hand_edit_resends_immediately_no_gate(
 
     hand_edit_calls = []
 
-    def _fake_check_hand_edit(store_arg, known_scene):
+    def _fake_check_hand_edit(store_arg, known_scene, script_path=None):
         hand_edit_calls.append(known_scene)
         if len(hand_edit_calls) == 2:
             store_arg.accept("object HandEdited:\n  val x = 1\n", "<hand-edit>")

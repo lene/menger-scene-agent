@@ -1216,7 +1216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             # current scene file since the last iteration. Guarded the same way run_turn()
             # itself is: a single bad check must not kill the REPL.
             try:
-                hand_edit_result = check_hand_edit(store, prior_scene)
+                hand_edit_result = check_hand_edit(store, prior_scene, script_path)
             except Exception as e:  # noqa: BLE001 -- a hand-edit check failure must not kill the REPL
                 print(f"Hand edit check error: {e}")
                 hand_edit_result = None

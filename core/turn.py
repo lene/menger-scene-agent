@@ -561,7 +561,11 @@ def run_turn(
 _HAND_EDIT_PROMPT = "<hand-edit>"
 
 
-def check_hand_edit(store: SceneStore, known_scene: Optional[str]) -> Optional[TurnResult]:
+def check_hand_edit(
+    store: SceneStore,
+    known_scene: Optional[str],
+    script_path: Optional[Union[str, Path]] = None,
+) -> Optional[TurnResult]:
     """Detects and gates an out-of-band hand edit to the current scene file (spec-ai-scene-
     agent story 17): AD-13 defines "current scene" as whatever the last file on disk
     contains, but nothing checked a hand-edited file before this -- AD-4's lint/allowlist
@@ -639,9 +643,46 @@ def check_hand_edit(store: SceneStore, known_scene: Optional[str]) -> Optional[T
             findings=findings,
         )
 
+    # Review 2026-10-14 (menger#88): a hand edit used to be promoted after local lint only,
+    # although an accepted scene is what the render window runs. With a validator configured
+    # it now passes the same sandboxed validation as a generated scene.
+    if script_path is not None:
+        rejection = _validate_hand_edit(store, current, script_path)
+        if rejection is not None:
+            return rejection
+
     try:
         ordinal = store.accept(current, _HAND_EDIT_PROMPT)
     except SceneStoreError as e:
         return TurnResult(tag="storage_failed", messages=[str(e)])
 
     return TurnResult(tag="accepted", messages=[], ordinal=ordinal)
+
+
+def _validate_hand_edit(
+    store: SceneStore, scene_text: str, script_path: Union[str, Path]
+) -> Optional[TurnResult]:
+    """The sandboxed validator's verdict on a hand edit: None when it is "ok", else the
+    `"hand_edit_rejected"` (or error-kind) `TurnResult` naming why, recorded in history."""
+    staging_path = store.session_dir / _STAGING_FILENAME
+    try:
+        staging_path.write_text(scene_text, encoding="utf-8")
+    except OSError as e:
+        return TurnResult(tag="storage_failed", messages=[f"could not write staging file: {e}"])
+    try:
+        outcome = validate_scene(staging_path, script_path)
+    finally:
+        staging_path.unlink(missing_ok=True)
+    if isinstance(outcome, ValidationError):
+        reason = f"{outcome.kind}: {outcome.message}"
+        return TurnResult(
+            tag=outcome.kind,
+            messages=_record_rejected_safely(store, _HAND_EDIT_PROMPT, reason, [reason]),
+        )
+    if outcome.tag == "ok":
+        return None
+    feedback = _validation_messages(outcome) or [outcome.tag]
+    return TurnResult(
+        tag="hand_edit_rejected",
+        messages=_record_rejected_safely(store, _HAND_EDIT_PROMPT, "; ".join(feedback), feedback),
+    )

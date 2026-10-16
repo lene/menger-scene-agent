@@ -1782,3 +1782,40 @@ def test_the_windows_state_is_left_out_of_an_unrelated_request(tmp_path, monkeyp
     )
 
     assert "render window currently shows" not in adapter.requests[0].user_prompt
+
+
+# Review 2026-10-14 (menger#88): with a validator configured, a hand edit is sandbox-validated.
+def _hand_edited_store(tmp_path):
+    store = _make_store(tmp_path)
+    store.accept("object Old:\n  val scene = Scene()\n", "seed turn")
+    (store.session_dir / "001.scala").write_text("object New:\n  val scene = Scene()\n")
+    return store
+
+
+def test_check_hand_edit_runs_the_sandboxed_validator(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_validate_scene(scene_file, script_path, image=None, timeout=None):
+        seen.append((Path(scene_file).read_text(), script_path))
+        return ValidationResult(tag="lint-findings", messages=["scene-budget: over"], findings=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake_validate_scene)
+    store = _hand_edited_store(tmp_path)
+
+    result = check_hand_edit(store, "object Old:\n  val scene = Scene()\n", _SCRIPT_PATH)
+
+    assert seen == [("object New:\n  val scene = Scene()\n", _SCRIPT_PATH)]
+    assert result.tag == "hand_edit_rejected"
+    assert "scene-budget: over" in result.messages[0]
+    assert len(_ordinal_paths(store)) == 1  # not promoted
+    assert not (store.session_dir / turn_module._STAGING_FILENAME).exists()
+
+
+def test_check_hand_edit_promotes_when_the_validator_accepts(tmp_path, monkeypatch):
+    monkeypatch.setattr(turn_module, "validate_scene", lambda f, s, image=None, timeout=None:
+                        ValidationResult(tag="ok", messages=[], findings=[]))
+    store = _hand_edited_store(tmp_path)
+
+    result = check_hand_edit(store, "object Old:\n  val scene = Scene()\n", _SCRIPT_PATH)
+
+    assert result.tag == "accepted" and result.ordinal == 2
