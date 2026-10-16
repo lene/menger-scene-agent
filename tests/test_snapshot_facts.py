@@ -162,3 +162,31 @@ def test_unasked_size_and_edge_choices_are_noted():
         "chose for the sponge-volume, unasked: size 2.5 (default 1), Copper edges -- "
         "say if you want otherwise"
     ]
+
+
+# --- Result schema 1.2.0 (review 2026-10-14, menger#92): DSL names and planes ---------------
+
+
+def _snap(objects: list[dict], planes: list[dict]) -> list[dict]:
+    return [{"t": 0, "camera": {"position": [0, 0, 5], "lookAt": [0, 0, 0]},
+             "objects": objects, "lights": [], "planes": planes}]
+
+
+_SPONGE = {"objectType": "sponge-volume", "dslType": "Sponge", "pos": [0, 0, 0], "size": 1,
+           "level": 2, "proceduralType": 0}
+_FLOOR = {"axis": "Y", "positive": True, "value": -1, "color": [0.5, 0.5, 0.5, 1],
+          "checkerColor": None, "material": None}
+
+
+def test_a_plane_change_is_reported():
+    # The Tier 2 live run: a plane made blue was missing from Changed:, and the readback
+    # claimed it "was already blue".
+    blue = dict(_FLOOR, color=[0.2, 0.4, 0.9, 1])
+    changes = snapshot_changes(_snap([_SPONGE], [_FLOOR]), _snap([_SPONGE], [blue]), _MANIFEST)
+    assert changes == ["plane colour: (0.5, 0.5, 0.5, 1) -> (0.2, 0.4, 0.9, 1)"]
+
+
+def test_objects_are_named_as_the_dsl_names_them_and_a_subtype_change_still_shows():
+    surface = dict(_SPONGE, objectType="sponge-surface")
+    changes = snapshot_changes(_snap([_SPONGE], []), _snap([surface], []), _MANIFEST)
+    assert changes == ["Sponge subtype: sponge-volume -> sponge-surface"]

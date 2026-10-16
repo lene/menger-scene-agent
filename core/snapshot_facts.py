@@ -92,14 +92,20 @@ def _summary(values: list[object]) -> str:
     return f"animated from {_fmt(first)} to {_fmt(last)}"
 
 
+def _kind(o: dict) -> str:
+    """The DSL name the scene wrote (`Sponge`); the renderer's (`sponge-volume`) for snapshots
+    from a validator image older than result schema 1.2.0 (review 2026-10-14, menger#92)."""
+    return str(o.get("dslType") or o["objectType"])
+
+
 def _labels(objects: list[dict]) -> list[str]:
     counts: dict[str, int] = {}
     for o in objects:
-        counts[o["objectType"]] = counts.get(o["objectType"], 0) + 1
+        counts[_kind(o)] = counts.get(_kind(o), 0) + 1
     seen: dict[str, int] = {}
     labels = []
     for o in objects:
-        kind = o["objectType"]
+        kind = _kind(o)
         seen[kind] = seen.get(kind, 0) + 1
         labels.append(kind if counts[kind] == 1 else f"{kind} #{seen[kind]}")
     return labels
@@ -109,6 +115,9 @@ def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
     names = procedural_names(manifest)
     proc = int(o.get("proceduralType", 0))
     fields: dict[str, object] = {
+        # The renderer's name carries the subtype (sponge-volume, sponge-surface): shown so a
+        # subtype change is reported, now that the label is the DSL name.
+        "subtype": o.get("objectType") if o.get("dslType") else None,
         "position": o.get("pos"),
         "size": o.get("size"),
         "level": o.get("level"),
@@ -132,7 +141,7 @@ def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
 
 def summarise(snapshots: list[dict], manifest: dict) -> dict[tuple[str, str], str]:
     """Every value of a scene, keyed (subject, field) -- subject "scene", "camera", an object
-    label ("sponge-surface", "24-cell #2") or a light ("Directional light") -- summarised over
+    label ("Sponge", "Icositetrachoron #2"), a plane ("plane #2") or a light ("Directional light") -- summarised over
     its checked times. Objects are matched by type and order between scenes."""
     if not snapshots:
         return {}
@@ -152,6 +161,16 @@ def summarise(snapshots: list[dict], manifest: dict) -> dict[tuple[str, str], st
         for label, o in zip(_labels(objects), objects):
             for name, value in _object_fields(o, manifest).items():
                 put(label, name, value)
+        # Planes (result schema 1.2.0, menger#92): a plane change used to be missing from the
+        # change list, and the readback guessed.
+        planes = snap.get("planes") or []
+        for i, plane in enumerate(planes, 1):
+            subject = "plane" + (f" #{i}" if len(planes) > 1 else "")
+            put(subject, "position", f"{plane.get('axis')} = {_fmt(plane.get('value'))}")
+            put(subject, "colour", plane.get("color"))
+            put(subject, "checker colour", plane.get("checkerColor"))
+            if plane.get("material"):
+                put(subject, "material", material_name(plane.get("material"), manifest))
         lights = snap.get("lights") or []
         for i, light in enumerate(lights, 1):
             subject = f"{light.get('kind', 'light')} light" + (f" #{i}" if len(lights) > 1 else "")
