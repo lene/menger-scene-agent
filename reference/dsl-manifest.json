@@ -1,9 +1,10 @@
 {
-  "schemaVersion": "1.9.0",
+  "schemaVersion": "1.10.0",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.4.7",
   "minDriverVersion": "580.65",
   "conventions": [
+    "Scene budget: besides each field's own max, a whole scene must stay within 16000000 mesh triangles (both levels of a fractional sponge count; one VolumeFilling sponge at level 5 fits, two do not), 128 renders per frame (accumulation times 2^k for k fractional-level glass objects, k + 1 above 4) and 2000000000 caustics photons per frame (photonsPerIteration x iterations x renders per frame). The validator reports a `scene-budget` finding naming what to lower.",
     "Units: positions and sizes are world units; `pos` is an object's centre; 3D `rotation` angles are radians, but the 4D rotation angles of `Projection4DSpec` (`rotXW`, `rotYW`, `rotZW`) are DEGREES (usability review 2026-10, session 3, F74).",
     "Axes: +y is up. The rendered image is currently mirrored horizontally: with the camera on +z looking toward -z, +x appears on the LEFT of the image.",
     "Directional light: `direction` is the direction the light TRAVELS. (0f, -1f, 0f) shines straight down; (1f, -1f, -1f) comes from above. Point and area lights are placed by `position`.",
@@ -980,13 +981,15 @@
           "name": "uSteps",
           "type": "int",
           "default": "64",
-          "min": 1
+          "min": 1,
+          "max": 1000000
         },
         {
           "name": "vSteps",
           "type": "int",
           "default": "32",
-          "min": 1
+          "min": 1,
+          "max": 1000000
         },
         {
           "name": "closedU",
@@ -1955,7 +1958,9 @@
       {
         "name": "accumulation",
         "type": "int",
-        "default": "1"
+        "default": "1",
+        "min": 1,
+        "max": 256
       },
       {
         "name": "denoise",

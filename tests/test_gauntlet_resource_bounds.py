@@ -52,7 +52,7 @@ def test_level_above_ceiling_is_flagged_naming_field_and_value():
 
 
 def test_u_steps_above_ceiling_is_flagged():
-    scene = "object Foo:\n  val s = ParametricSurface(uSteps = 500)\n"
+    scene = "object Foo:\n  val s = ParametricSurface(uSteps = 2000000)\n"
 
     findings = check_resource_bounds(scene)
 
@@ -61,7 +61,7 @@ def test_u_steps_above_ceiling_is_flagged():
 
 
 def test_v_steps_above_ceiling_is_flagged():
-    scene = "object Foo:\n  val s = ParametricSurface(vSteps = 999)\n"
+    scene = "object Foo:\n  val s = ParametricSurface(vSteps = 2000000)\n"
 
     findings = check_resource_bounds(scene)
 
@@ -90,7 +90,7 @@ def test_multiple_violations_are_all_reported():
     scene = (
         "object Foo:\n"
         "  val a = Sponge(level = 50f)\n"
-        "  val b = ParametricSurface(uSteps = 500)\n"
+        "  val b = ParametricSurface(uSteps = 2000000)\n"
     )
 
     findings = check_resource_bounds(scene)
@@ -289,3 +289,42 @@ def test_an_unknown_or_missing_sponge_type_keeps_the_conservative_ceiling():
 
     assert len(check_resource_bounds(unnamed)) == 1
     assert len(check_resource_bounds(_sponge_scene("SpongeType.VolumeFilling", "5.8f"))) == 1
+
+
+# --- Review 2026-10-14, menger-scene-agent#41: non-plain literals --------------------------
+
+
+def _surface_scene(u_steps: str) -> str:
+    return (
+        "object Foo:\n"
+        f"  val scene = Scene(objects = List(ParametricSurface(uSteps = {u_steps}, vSteps = 10)))\n"
+    )
+
+
+def test_arithmetic_hex_and_scientific_literals_are_evaluated_and_flagged():
+    for over in ("1000 * 1001", "0xFFFFFF", "1e7", "2e6.toInt", "(1000 + 1) * 1000"):
+        findings = check_resource_bounds(_surface_scene(over))
+        if over.endswith(".toInt"):
+            assert findings == [], over  # a method call is not a constant expression
+        else:
+            assert len(findings) == 1, over
+
+
+def test_a_t_driven_expression_is_still_skipped():
+    assert check_resource_bounds(_surface_scene("(t * 1000000).toInt")) == []
+
+
+def test_as_float_reads_scala_constant_expressions():
+    from gauntlet._scala_text import as_float
+
+    assert as_float("1000 * 1000") == 1_000_000
+    assert as_float("0x3E8") == 1000
+    assert as_float("0xFFL") == 255
+    assert as_float("1.5e3f") == 1500
+    assert as_float("-2f") == -2
+    assert as_float("100_000") == 100_000
+    assert as_float("1e400") == float("inf")
+    assert as_float("x2") is None
+    assert as_float("t * 3f") is None
+    assert as_float("1 / 0") is None
+    assert as_float("") is None

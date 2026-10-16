@@ -11,6 +11,9 @@ to `LSystem.iterations`.
 
 from __future__ import annotations
 
+import ast
+import math
+import operator
 import re
 from typing import Optional
 
@@ -118,17 +121,65 @@ def named_args(inner: str) -> dict[str, str]:
     return args
 
 
-# Accepts Scala's `_`-digit-separator syntax (`100_000`) and `f`/`F`/`d`/`D` suffixes --
-# both real, common Scala numeric-literal forms this module must not silently fail to
-# match (a match failure means the check is skipped, not that the value is in-bounds).
-_NUMERIC_LITERAL_RE = re.compile(r"^-?\d[\d_]*(?:\.[\d_]+)?[fFdD]?$")
+# Scala numeric literals: hex (`0x3E8`, `0xFFL`), decimal with `_` separators (`100_000`),
+# fraction and exponent (`1.5e3`), and `f`/`F`/`d`/`D`/`l`/`L` suffixes. A form this misses is
+# skipped by the checks, not treated as in-bounds -- so it must miss as little as possible.
+_NUMBER_TOKEN_RE = re.compile(
+    r"0[xX][0-9a-fA-F_]+[lL]?"
+    r"|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d+)?[fFdDlL]?"
+)
+_OPERATOR_CHARS = frozenset("+-*/() \t\n")
+_BINARY_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+
+
+def _number(token: str) -> float:
+    token = token.replace("_", "")
+    if token[:2] in ("0x", "0X"):
+        return float(int(token.rstrip("lL"), 16))
+    return float(token.rstrip("fFdDlL"))
+
+
+def _evaluate(node: ast.AST) -> float:
+    if isinstance(node, ast.Constant) and isinstance(node.value, float):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _evaluate(node.operand)
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+        return _BINARY_OPS[type(node.op)](_evaluate(node.left), _evaluate(node.right))
+    raise ValueError("not a constant arithmetic expression")
 
 
 def as_float(value: str) -> Optional[float]:
-    value = value.strip()
-    if _NUMERIC_LITERAL_RE.match(value):
-        return float(value.rstrip("fFdD").replace("_", ""))
-    return None
+    """The value of a constant expression -- numeric literals combined with `+ - * /` and
+    parentheses (`1000 * 1000`, `0x3E8`, `1e6f`) -- or None for anything else (a `t`-driven
+    expression, an identifier). A plain-literal-only check let all three through (review
+    2026-10-14, menger-scene-agent#41).
+
+    ponytail: `/` is float division, so Scala integer division (`7 / 2` = 3) reads slightly
+    high -- conservative for an upper-bound check."""
+    text = value.strip()
+    pieces: list[str] = []
+    position = 0
+    for match in _NUMBER_TOKEN_RE.finditer(text):
+        between = text[position:match.start()]
+        if not set(between) <= _OPERATOR_CHARS:
+            return None
+        number = _number(match.group())
+        # repr(inf) is "inf", a name; 1e309 parses back to inf, so a huge literal still fails.
+        pieces += [between, "1e309" if math.isinf(number) else repr(number)]
+        position = match.end()
+    if not pieces or not set(text[position:]) <= _OPERATOR_CHARS:
+        return None
+    try:
+        return _evaluate(ast.parse("".join(pieces) + text[position:], mode="eval").body)
+    except (SyntaxError, ValueError, ZeroDivisionError, OverflowError):
+        return None
 
 
 def line_of(text: str, offset: int) -> int:
