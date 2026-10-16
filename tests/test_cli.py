@@ -14,6 +14,7 @@ occurs but the render-window call itself isn't under test, so no test shells out
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -21,6 +22,7 @@ from typing import Callable, List, Optional
 import pytest
 
 import cli
+import repl.formatting as formatting
 from adapters.model import MissingAPIKeyError
 from adapters.render_window import WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -2751,8 +2753,10 @@ def test_a_rejection_puts_reasons_and_the_nearest_on_their_own_lines():
 
 def test_long_lines_wrap_at_words_under_their_label_on_a_terminal(monkeypatch):
     # Session 4 (F103): "multiline output is printed all on one line with random word breaks".
-    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda *a: cli.os.terminal_size((40, 24)))
+    monkeypatch.setattr(formatting.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(
+        formatting.shutil, "get_terminal_size", lambda *a: os.terminal_size((40, 24))
+    )
     text = "  Readback: a level-2 glass sponge with a dark background and two lights"
 
     wrapped = cli._wrap_for_terminal(text).splitlines()
@@ -2763,7 +2767,7 @@ def test_long_lines_wrap_at_words_under_their_label_on_a_terminal(monkeypatch):
 
 
 def test_output_is_not_wrapped_off_a_terminal(monkeypatch):
-    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(formatting.sys.stdout, "isatty", lambda: False, raising=False)
     text = "  Readback: " + "word " * 40
 
     assert cli._wrap_for_terminal(text) == text
