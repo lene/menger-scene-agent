@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from adapters.model import ModelAdapter, ModelError, ModelRequest
+from core.ports import ModelAdapter, ModelError, ModelRequest
 from core.types import ConsultError, ConsultResult
 
 _RULES = (

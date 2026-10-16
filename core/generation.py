@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from adapters.model import ModelAdapter, ModelError, ModelRequest, extract_scene_text
+from core.ports import ModelAdapter, ModelError, ModelRequest, extract_scene_text
 from core.scene_facts import extract_scene_facts
 from core.types import (
     EXPECTED_CORPUS_SCHEMA_VERSION,

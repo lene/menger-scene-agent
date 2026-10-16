@@ -19,6 +19,8 @@ import pytest
 from adapters.render_window import (
     LAUNCH_EVENTS,
     RELOAD_EVENTS,
+    RenderWindowError,
+    RenderWindowResult,
     WindowEvent,
     close_render_window,
     crash_report,
@@ -31,7 +33,6 @@ from adapters.render_window import (
     sync_render_window_scene,
     wait_for_window_event,
 )
-from core.types import RenderWindowError, RenderWindowResult
 
 _LAUNCHER_PATH = "/fake/menger-app/target/universal/stage/bin/menger-app"
 # A real directory: the adapter writes the window's stdout/stderr logs next to the scene file.

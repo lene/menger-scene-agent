@@ -69,14 +69,8 @@ _REJECTED_FILENAME = re.compile(r"^rejected-(\d{3,})\.scala$")
 _HISTORY_FILENAME = "history.jsonl"
 
 
-class SceneStoreError(RuntimeError):
-    """Raised for a real filesystem/session-identity failure -- an already-existing session
-    directory (AD-15), a missing ordinal on restore, or an underlying OSError this module
-    cannot recover from. Mirrors `adapters/artifacts.py`'s `ArtifactError`: infrastructure
-    failures here are not the kind of typed business-logic outcome `GenerationResult`/
-    `ReadbackResult` exist for (those model a real derivation choice; a session directory
-    that already exists is an environment/caller error), so this module lets them raise
-    rather than threading a `Union[..., SceneStoreError]` return type through every method."""
+# Defined in core.ports (msa#34): core catches it without importing this adapter.
+from core.ports import SceneStoreError as SceneStoreError  # noqa: E402,F401 -- re-exported
 
 
 def _new_session_id(slug: str) -> str:

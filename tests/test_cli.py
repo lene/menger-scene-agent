@@ -24,14 +24,12 @@ import pytest
 import cli
 import repl.formatting as formatting
 from adapters.model import MissingAPIKeyError
-from adapters.render_window import WindowEvent
+from adapters.render_window import RenderWindowError, RenderWindowResult, WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.types import (
     EXPECTED_CORPUS_SCHEMA_VERSION,
     EXPECTED_MANIFEST_SCHEMA_VERSION,
     ConsultError,
-    RenderWindowError,
-    RenderWindowResult,
     TurnResult,
     ValidationResult,
 )
@@ -2797,3 +2795,21 @@ def test_the_window_watcher_reports_a_crash_while_waiting_once(monkeypatch, tmp_
     assert watcher.already_reported(process)
     assert cli._report_render_crash(store, process, watcher) is None
     assert "crashed" not in capsys.readouterr().out
+
+
+def test_main_wires_the_real_validator_into_the_turn_port(monkeypatch, tmp_path):
+    # Review 2026-10-14 (msa#34): core no longer imports the validator adapter; main() is where
+    # it is chosen. Unwired, every turn would report "no scene validator configured".
+    import core.turn
+    from adapters.scene_validator import validate_scene
+
+    monkeypatch.setattr(core.turn, "validate_scene", core.turn._no_validator)
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+
+    assert cli.main([]) == 0
+    assert core.turn.validate_scene is validate_scene

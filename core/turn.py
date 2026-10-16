@@ -19,10 +19,8 @@ import re
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
-from adapters.model import ModelAdapter
-from adapters.scene_store import SceneStore, SceneStoreError
-from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
+from core.ports import ModelAdapter, SceneStore, SceneStoreError
 from core.prompt_checks import refers_to_window, unknown_material_hint, window_state_hint
 from core.readback import semantic_readback
 from core.scene_facts import (
@@ -42,6 +40,7 @@ from core.types import (
     StageName,
     TurnResult,
     ValidationError,
+    ValidationOutcome,
     ValidationResult,
 )
 from gauntlet._scala_text import strip_comments_and_strings
@@ -50,6 +49,35 @@ from gauntlet.clean_code import check_clean_code
 from gauntlet.lint import check_lint
 from gauntlet.resource_bounds import check_resource_bounds
 from gauntlet.types import Finding
+
+# The renderer-side gauntlet -- menger's sandboxed validator process -- is a port (review
+# 2026-10-14, msa#34: core imported the adapter). The composition roots set it once
+# (`use_validator`: cli.py's main, evals/recorded.py); tests replace it like any port. Unset, a
+# turn reports the missing configuration instead of running anything.
+Validator = Callable[..., ValidationOutcome]
+
+
+def _no_validator(*_args: object, **_kwargs: object) -> ValidationOutcome:
+    return ValidationError(
+        kind="subprocess_failed",
+        message="no scene validator configured (core.turn.use_validator was never called)",
+    )
+
+
+validate_scene: Validator = _no_validator
+
+
+def use_validator(validator: Validator) -> None:
+    global validate_scene
+    validate_scene = validator
+
+
+def use_default_validator(validator: Validator) -> None:
+    """Sets `validator` unless one is configured already -- a composition root's default, which
+    an earlier explicit choice (a test, another front end) keeps."""
+    if validate_scene is _no_validator:
+        use_validator(validator)
+
 
 # Design Notes: candidate text is written to `session_dir/.candidate.scala` -- a name
 # `SceneStore`'s `_ORDINAL_FILENAME` regex (`^(\d{3,})\.scala$`) never matches, so it's

@@ -31,7 +31,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Literal, Optional, Tuple, Union
 
 from adapters.child_env import child_environment
 from adapters.process_contract import (
@@ -41,11 +41,63 @@ from adapters.process_contract import (
     same_major,
 )
 from adapters.scene_validator import REFERENCE_DSL_REVISION
-from core.types import RenderWindowError, RenderWindowOutcome, RenderWindowResult
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
 # RenderWindowError's message, so a pathological or adversarial response can't blow up the
 # error message itself. Mirrors `adapters.scene_validator._STDOUT_PREVIEW_LENGTH`.
+# The window's result types live with the adapter that produces them (review 2026-10-14,
+# msa#34): a live `Popen` handle is not a core type.
+# `adapters.render_window.refresh_render_window()`'s own typed failure vocabulary (story 13):
+#   - "refused" -- AD-16's own lock-conflict tag, reused verbatim from `menger`'s
+#     `Main.refusedResultJson` (story 8, itself reusing `SceneValidator`'s AD-5 `Tag` shape).
+#     A real conflict with a *different* process's render session -- nothing is terminated.
+#   - "malformed_output" -- the launcher exited within the grace period but its stdout wasn't
+#     the expected tagged JSON (mirrors `ValidationErrorKind`'s own tag of the same name).
+#   - "launch_failed" -- `launcher_path` doesn't exist or can't be executed at all (the
+#     `subprocess.Popen(...)` call itself raised `OSError`), never a raised exception.
+RenderWindowErrorKind = Literal["refused", "malformed_output", "launch_failed"]
+
+
+@dataclass(frozen=True)
+class RenderWindowError:
+    """A typed failure result from `adapters.render_window.refresh_render_window()` -- never
+    an exception escaping to the caller (Boundaries & Constraints: "typed error ... never an
+    unhandled exception"). Mirrors `GenerationError`/`ReadbackError`/`TicketError`/
+    `ValidationError`'s exact shape (story 13)."""
+
+    kind: RenderWindowErrorKind
+    message: str
+    cause: Optional[BaseException] = None
+
+
+@dataclass(frozen=True)
+class RenderWindowResult:
+    """A successful render-window launch (story 13): still running past `grace_period`, per
+    the Design Notes' own "no ready signal beyond staying alive" reasoning. Carries the live
+    `subprocess.Popen` handle itself -- unlike `ValidationResult`'s `messages`/`findings`
+    payload, there is nothing else to report on success, and the caller needs the handle to
+    track/replace this window on a later call (`previous_process`).
+
+    Note: this module's own "no I/O at runtime" guarantee (AD-1/AD-3, module header) is about
+    this module's *own code* never performing I/O itself -- it says nothing about whether the
+    dataclasses it defines can *reference* objects that do. `process` is exactly that case: a
+    live `subprocess.Popen` that performs real I/O, just not I/O this module initiates.
+
+    Also note: `frozen=True` only prevents reassigning the `process` attribute itself -- it has
+    no effect on the wrapped `Popen`'s own mutable OS-level state. The underlying process can
+    still exit, be waited on, terminated, etc. independently of this wrapper; a reader should
+    not assume stronger immutability than that.
+    """
+
+    process: "subprocess.Popen[str]"
+
+
+# refresh_render_window() returns either the running launch's handle, or a typed error --
+# never raise. Mirrors GenerationResult/ReadbackResult/TicketResult/ValidationOutcome's exact
+# convention.
+RenderWindowOutcome = Union[RenderWindowResult, RenderWindowError]
+
+
 _STDOUT_PREVIEW_LENGTH = 500
 # Earlier launches' window logs kept next to the current one (render.stderr.1.log ...).
 _KEPT_LOGS = 5

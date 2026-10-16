@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from adapters.model import ModelAdapter, ModelError, ModelRequest
+from core.ports import ModelAdapter, ModelError, ModelRequest
 from core.scene_facts import SceneFacts, extract_scene_facts, scene_changes
 from core.types import ReadbackError, ReadbackResult
 from gauntlet._scala_text import strip_comments_and_strings

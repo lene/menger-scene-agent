@@ -11,7 +11,8 @@ import textwrap
 from pathlib import Path
 from typing import Optional
 
-from core.types import RenderWindowOutcome, RenderWindowResult, TurnResult
+from adapters.render_window import RenderWindowOutcome, RenderWindowResult
+from core.types import TurnResult
 
 # A rejection's history `reason` starts with its turn tag ("compile_errors: ..."), which
 # `_format_history_entry` recovers so a replayed rejection shows its real tag (F38).

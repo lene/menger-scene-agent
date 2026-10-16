@@ -106,9 +106,16 @@ from adapters.render_window import (
     wait_for_window_event,
 )
 from adapters.scene_store import SceneStore
+from adapters.scene_validator import validate_scene
 from core.consult import answer_consult
 from core.generation import validate_artifacts
-from core.turn import MAX_REPAIR_ROUNDS, check_hand_edit, open_items, run_turn
+from core.turn import (
+    MAX_REPAIR_ROUNDS,
+    check_hand_edit,
+    open_items,
+    run_turn,
+    use_default_validator,
+)
 from repl import window
 from repl.formatting import (
     _format_history_entry,
@@ -462,6 +469,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # The composition root (review 2026-10-14, msa#33/#34): what the loop runs with, and the
     # collaborators it calls, chosen here -- tests replace this module's names.
+    use_default_validator(validate_scene)  # the sandboxed menger validator (msa#34)
     ctx = Context(manifest, corpus, adapter, store, script_path, render_launcher_path)
     ports = Ports(
         run_turn=run_turn,

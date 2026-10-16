@@ -28,8 +28,9 @@ from typing import Iterator, List, Optional
 from adapters.artifacts import load_corpus, load_manifest
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.scene_store import SceneStore
+from adapters.scene_validator import validate_scene
 from core.scene_facts import extract_scene_facts
-from core.turn import run_turn
+from core.turn import run_turn, use_default_validator
 from gauntlet._scala_text import strip_comments_and_strings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -95,6 +96,7 @@ class CaseResult:
 
 def run_case(case: dict, manifest: dict, corpus: dict) -> CaseResult:
     problems: List[str] = []
+    use_default_validator(validate_scene)  # the real adapter, run against the stub script
     prior: Optional[str] = None
     with tempfile.TemporaryDirectory() as tmp:
         store = SceneStore.create_session(Path(tmp), session_id="eval")

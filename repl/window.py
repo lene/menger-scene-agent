@@ -14,6 +14,8 @@ from typing import Callable, Optional
 from adapters.render_window import (
     LAUNCH_EVENTS,
     RELOAD_EVENTS,
+    RenderWindowOutcome,
+    RenderWindowResult,
     WindowEvent,
     frame_build_failures,
     log_size,
@@ -21,7 +23,6 @@ from adapters.render_window import (
     sync_render_window_scene,
 )
 from adapters.scene_store import SceneStore
-from core.types import RenderWindowOutcome, RenderWindowResult
 from repl.formatting import _format_render_outcome
 
 
