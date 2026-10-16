@@ -1,0 +1,20 @@
+# qa-manifest.yaml -- which suites run on a push of this repo (read by
+# standards/scripts/qa-runner.sh; cross-checked by scripts/check-suite-parity.sh). Enrolled
+# 2026-10-16 (review 2026-10-14, msa#29, #40). Not vendored -- inherently per-repo.
+change_classes:
+  python:
+    - '\.py$'
+    - '^pyproject\.toml$'
+    - '^uv\.lock$'
+    - '^mypy-baseline\.txt$'
+    - '^coverage-baseline\.txt$'
+  reference:
+    - '^reference/'
+
+suites:
+  parity: { tier: push, requires: [] }
+  policy: { tier: push, requires: [] }
+  lint:   { tier: push, requires: [python] }
+  types:  { tier: push, requires: [python] }
+  unit:   { tier: push, requires: [python, reference] }
+  audit:  { tier: push, requires: [python] }

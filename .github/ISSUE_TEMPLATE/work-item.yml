@@ -1,0 +1,51 @@
+name: Work item
+description: A finding, task, or defect tracked through this repo's issue tracker.
+title: "[one-line summary]"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See `docs/superpowers/specs/2026-08-26-intent-achievement-spine-design.md` (menger-toplevel)
+        for the convention this form implements. Pick a **Kind** below, and also apply the
+        matching `kind:finding` / `kind:task` / `kind:defect` label to this issue once created —
+        GitHub issue forms can't apply a label conditionally on a dropdown answer.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      description: What this issue tracks. Apply the matching kind:* label after creating it.
+      options:
+        - finding (a problem found by review, not yet scheduled)
+        - task (scheduled work, e.g. a sprint item)
+        - defect (a confirmed bug)
+    validations:
+      required: true
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      description: One sentence. What does "done" mean for this issue?
+      placeholder: "e.g. check-issue-link.sh rejects a commit missing a Refs: trailer on a feat/sprint-* branch"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: >-
+        A checklist. At least one item must be runnable — name a test, a CLI invocation, or a
+        reference image — if this work is testable at all. Design/doc-only work may use prose
+        criteria instead; say so explicitly rather than leaving it ambiguous.
+      placeholder: |
+        - [ ] `./standards/hooks/test-check-issue-link.sh` passes
+        - [ ] `git commit` on a `feat/sprint-*` branch without a `Refs:` trailer is rejected by the hook
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What this issue deliberately does not cover. Leave blank only if genuinely nothing.
+    validations:
+      required: false
