@@ -11,17 +11,17 @@ import sys
 
 import pytest
 
-from adapters.model import AnthropicModelAdapter, MissingAPIKeyError, UnknownProviderError
 from adapters.gemini_model import GeminiModelAdapter
-from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
+from adapters.model import AnthropicModelAdapter, MissingAPIKeyError, UnknownProviderError
 from adapters.model_factory import (
-    DEFAULT_PROVIDER,
     _ENV_VAR,
     _FACTORIES,
     _MODEL_ENV_VAR,
+    DEFAULT_PROVIDER,
     get_model_adapter,
     selected_provider,
 )
+from adapters.openai_compatible_model import OpenAICompatibleModelAdapter
 
 _FAKE_KEY = "test-key-not-a-real-credential"
 _FAKE_PROXY = "https://litellm.example.invalid/v1"

@@ -25,7 +25,7 @@ import math
 import os
 from typing import Optional
 
-from adapters.model import MissingAPIKeyError, ModelRequest, ModelResult, ModelError
+from adapters.model import MissingAPIKeyError, ModelError, ModelRequest, ModelResult
 
 # Current-generation default; a caller can override via the `model` constructor argument.
 # gemini-2.5-pro was retired for new API keys (404 NOT_FOUND, "no longer available to new

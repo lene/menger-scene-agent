@@ -29,7 +29,13 @@ import re
 from typing import Optional
 
 from core.scene_facts import ObjectFact, extract_scene_facts
-from gauntlet._scala_text import as_float, line_of, scan_balanced, split_top_level, strip_comments_and_strings
+from gauntlet._scala_text import (
+    as_float,
+    line_of,
+    scan_balanced,
+    split_top_level,
+    strip_comments_and_strings,
+)
 from gauntlet.types import Finding
 
 _STAGE = "lint"
@@ -53,7 +59,7 @@ def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> f
 
 
 def _check_camera_inside_object(camera, objects: list[ObjectFact], text) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     if camera is None:
         return findings
     position, _ = camera
@@ -77,7 +83,7 @@ def _check_camera_inside_object(camera, objects: list[ObjectFact], text) -> list
 
 
 def _check_light_inside_geometry(lights, objects, text) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     for light in lights:
         if light.position is None:
             continue  # absent or non-literal position -- can't reason about this light
@@ -101,7 +107,7 @@ def _check_light_inside_geometry(lights, objects, text) -> list[Finding]:
 
 
 def _check_frustum(camera, objects, text) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     if camera is None:
         return findings
     position, look_at = camera
@@ -131,7 +137,7 @@ def _check_frustum(camera, objects, text) -> list[Finding]:
 
 
 def _check_black_on_black(objects, background, text) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     if background is None or not all(c < _NEAR_BLACK_EPSILON for c in background):
         return findings
     for obj in objects:
@@ -154,7 +160,7 @@ def _check_black_on_black(objects, background, text) -> list[Finding]:
 
 
 def _check_degenerate_scale(objects, text) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     for obj in objects:
         if obj.size is None:
             continue
@@ -197,7 +203,7 @@ def _check_refractive_alpha(raw_text: str, text: str) -> list[Finding]:
     default to alpha 1, so tinting a refractive preset (`Material.Glass.copy(color = ...)`) or
     giving `Material(...)` an `ior` without a low-alpha colour renders fully opaque. Runs on
     the raw text for hex strings; `text` (stripped, same offsets) keeps the paren scan sane."""
-    findings = []
+    findings: list[Finding] = []
     for match in _MATERIAL_CALL.finditer(text):
         open_idx = match.end() - 1
         body = raw_text[open_idx + 1 : scan_balanced(text, open_idx)]

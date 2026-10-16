@@ -26,7 +26,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from gauntlet._scala_text import as_float, find_call_bodies, named_args, scan_balanced, split_top_level
+from gauntlet._scala_text import (
+    as_float,
+    find_call_bodies,
+    named_args,
+    scan_balanced,
+    split_top_level,
+)
 from gauntlet.manifest_bounds import subtype_of
 
 Vec3 = tuple[float, float, float]
@@ -511,7 +517,8 @@ def scene_changes(before: SceneFacts, after: SceneFacts) -> list[str]:
                     changes.append(f"{type_name} {label}: {was} -> {now}")
     if len(before.lights) != len(after.lights):
         changes.append(f"lights: {len(before.lights)} -> {len(after.lights)}")
-    elif [(l.position, l.direction) for l in before.lights] != [(l.position, l.direction) for l in after.lights]:
+    elif ([(light.position, light.direction) for light in before.lights]
+          != [(light.position, light.direction) for light in after.lights]):
         changes.append("lights moved or turned")
     if before.background != after.background:
         changes.append(f"background: {before.background or 'default'} -> {after.background or 'default'}")
@@ -535,7 +542,7 @@ def _sees(position: Vec3, look_at: Vec3, center: Vec3, radius: float) -> bool:
     to_center = [c - p for c, p in zip(center, position)]
     if math.dist(position, center) <= radius:
         return True
-    gaze = [l - p for l, p in zip(look_at, position)]
+    gaze = [look - p for look, p in zip(look_at, position)]
     length = math.hypot(*gaze)
     if length == 0:
         return False

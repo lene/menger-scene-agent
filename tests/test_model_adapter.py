@@ -14,9 +14,9 @@ import pytest
 
 from adapters.model import (
     AnthropicModelAdapter,
-    ModelRequest,
     MissingAPIKeyError,
     ModelError,
+    ModelRequest,
     extract_scene_text,
 )
 

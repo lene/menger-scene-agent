@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from adapters.model import ModelRequest, MissingAPIKeyError, ModelError, UnknownProviderError
-from adapters.openai_compatible_model import OpenAICompatibleModelAdapter, _PROVIDERS
+from adapters.model import MissingAPIKeyError, ModelError, ModelRequest, UnknownProviderError
+from adapters.openai_compatible_model import _PROVIDERS, OpenAICompatibleModelAdapter
 
 
 def _adapter_with_fake_client(provider: str, create_fn) -> OpenAICompatibleModelAdapter:
@@ -206,8 +206,8 @@ def test_complete_error_message_names_the_failing_provider():
 
 
 def test_complete_maps_an_api_timeout_error_to_a_distinct_timeout_kind_not_call_failed():
-    import openai
     import httpx
+    import openai
 
     exc = openai.APITimeoutError(request=httpx.Request("POST", "https://example.com"))
 

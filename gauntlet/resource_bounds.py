@@ -39,7 +39,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from adapters.artifacts import ArtifactError, load_manifest
-from gauntlet._scala_text import as_float, find_call_bodies, line_of, named_args, strip_comments_and_strings
+from gauntlet._scala_text import (
+    as_float,
+    find_call_bodies,
+    line_of,
+    named_args,
+    strip_comments_and_strings,
+)
 from gauntlet.manifest_bounds import discriminator_of, field_bounds, subtype_of
 from gauntlet.types import Finding
 

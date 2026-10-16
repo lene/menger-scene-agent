@@ -177,7 +177,7 @@ def read_window_state(session_dir: Union[str, Path]) -> Optional[dict]:
 
 
 def _vec(value: object) -> str:
-    return "(" + ", ".join(f"{round(float(v), 3):g}" for v in value) + ")"  # type: ignore[union-attr]
+    return "(" + ", ".join(f"{round(float(v), 3):g}" for v in value) + ")"  # type: ignore[attr-defined]
 
 
 def describe_window_state(state: dict) -> str:

@@ -23,9 +23,8 @@ from adapters.model import ModelAdapter
 from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.scene_validator import validate_scene
 from core.generation import generate, revise
-from core.readback import semantic_readback
 from core.prompt_checks import refers_to_window, unknown_material_hint, window_state_hint
-from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
+from core.readback import semantic_readback
 from core.scene_facts import (
     camera_gaze_warnings,
     caveat_warnings,
@@ -36,6 +35,7 @@ from core.scene_facts import (
     occlusion_warnings,
     scene_changes,
 )
+from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
 from core.types import (
     GenerationError,
     ReadbackError,

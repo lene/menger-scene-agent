@@ -25,9 +25,9 @@ from adapters.model import MissingAPIKeyError
 from adapters.render_window import WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
 from core.types import (
-    ConsultError,
     EXPECTED_CORPUS_SCHEMA_VERSION,
     EXPECTED_MANIFEST_SCHEMA_VERSION,
+    ConsultError,
     RenderWindowError,
     RenderWindowResult,
     TurnResult,
@@ -46,7 +46,7 @@ def _scripted_input(lines: List[str]) -> Callable[..., str]:
         try:
             return next(it)
         except StopIteration:
-            raise EOFError
+            raise EOFError from None
 
     return _fake_input
 
@@ -2386,7 +2386,7 @@ def test_drop_abandons_the_pending_request(monkeypatch, tmp_path, capsys):
         try:
             return next(lines)
         except StopIteration:
-            raise EOFError
+            raise EOFError from None
 
     def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, **kw):
         sent.append(prompt)
@@ -2476,7 +2476,7 @@ def test_unsupported_rejection_writes_a_ticket_draft_and_says_where(
 
     assert cli.main([]) == 0
 
-    draft_lines = [l for l in capsys.readouterr().out.splitlines() if "Ticket draft:" in l]
+    draft_lines = [line for line in capsys.readouterr().out.splitlines() if "Ticket draft:" in line]
     assert len(draft_lines) == 1
     draft = draft_lines[0].split("Ticket draft: ", 1)[1]
     text = open(draft, encoding="utf-8").read()
@@ -2718,7 +2718,8 @@ def test_a_not_done_part_of_an_accepted_turn_writes_a_ticket_draft(monkeypatch, 
 
     out = capsys.readouterr().out
     assert "Not done: no 5D penteract -- nearest: a Tesseract" in out
-    draft = [l for l in out.splitlines() if "Ticket draft:" in l][0].split("Ticket draft: ", 1)[1]
+    draft = next(line for line in out.splitlines() if "Ticket draft:" in line)
+    draft = draft.split("Ticket draft: ", 1)[1]
     assert "no 5D penteract" in open(draft, encoding="utf-8").read()
 
 

@@ -21,7 +21,13 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from adapters.model import MissingAPIKeyError, ModelRequest, ModelResult, ModelError, UnknownProviderError
+from adapters.model import (
+    MissingAPIKeyError,
+    ModelError,
+    ModelRequest,
+    ModelResult,
+    UnknownProviderError,
+)
 
 _MAX_TOKENS = 16000
 

@@ -4,10 +4,14 @@ F7/F8/F20/F23 usability follow-ups. Pure string processing, no compiler, no netw
 from __future__ import annotations
 
 from core.scene_facts import (
-    camera_gaze_warnings, extract_scene_facts, facts_diff, occlusion_warnings, parse_color_rgb,
-    parse_vec3, scene_changes,
+    camera_gaze_warnings,
+    extract_scene_facts,
+    facts_diff,
+    occlusion_warnings,
+    parse_color_rgb,
+    parse_vec3,
+    scene_changes,
 )
-
 
 # --- parse_vec3 / parse_color_rgb -----------------------------------------------------------
 

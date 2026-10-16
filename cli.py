@@ -78,7 +78,8 @@ import json
 import os
 import re
 import readline  # noqa: F401 -- side-effect only: wires GNU readline into input() (arrow
-                  # keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
+
+# keys, Home/End, Ctrl-W word-delete, in-session Up/Down history)
 import shutil
 import subprocess
 import sys

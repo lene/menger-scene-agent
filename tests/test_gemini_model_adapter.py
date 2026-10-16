@@ -12,11 +12,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from google import genai
 
-from adapters.model import ModelRequest, MissingAPIKeyError, ModelError
 from adapters.gemini_model import GeminiModelAdapter
+from adapters.model import MissingAPIKeyError, ModelError, ModelRequest
 
 
 def _adapter_with_fake_client(create_fn) -> GeminiModelAdapter:
