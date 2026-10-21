@@ -38,7 +38,8 @@ _SYSTEM_PROMPT = (
     "- Output exactly one plain-language sentence, or at most a short handful of "
     "comma-separated clauses -- never a paragraph, never bullet points.\n"
     "- Name: the object type and its key parameters (e.g. level/size), the material, each "
-    "light's color and rough position, and the camera's distance and angle.\n"
+    "light's color and rough position, and the camera's distance and angle. Include any "
+    "non-default render settings given in <facts>, especially antialiasing or accumulation.\n"
     f'- Match this exact style: "{_STYLE_EXAMPLE}"\n'
     "- Base the restatement only on what the scene text actually says -- never invent a "
     "detail, parameter, or interpretation the text itself doesn't support.\n"
@@ -47,15 +48,15 @@ _SYSTEM_PROMPT = (
     "material, or transparency that contradicts it -- in particular, an object's material "
     "(e.g. Glass) keeps its own transparency regardless of any color also set on it.\n"
     "- Describe a Directional light by where it appears to shine FROM (the facts block "
-    "already gives this as a phrase, e.g. \"from above\") -- never restate a raw direction "
+    'already gives this as a phrase, e.g. "from above") -- never restate a raw direction '
     "vector, and never invert it into where the light travels TO.\n"
     "- Never restate the raw DSL syntax (field names, method calls, code structure) -- "
     "describe what it means, not how it's written.\n"
     "- If the scene text has no recognizable object, say so plainly in one sentence instead "
     "of guessing.\n"
     "- If <request> and <changes> blocks are present, lead with what this turn changed for "
-    "the request, using the values in <changes> exactly (e.g. \"now level 3 and glass; "
-    "...\"), then the rest of the scene. If <changes> says nothing changed, say so first.\n"
+    'the request, using the values in <changes> exactly (e.g. "now level 3 and glass; '
+    '..."), then the rest of the scene. If <changes> says nothing changed, say so first.\n'
     "- State a camera distance only as the <facts> block gives it; never estimate one.\n"
     "- Do not mention warnings about unrequested changes; they are shown separately.\n"
     "- Respond with only the sentence -- no preamble, no code block, no markdown.\n"
@@ -120,7 +121,9 @@ def _format_facts(facts: SceneFacts) -> str:
     for light in facts.lights:
         if light.type_name == "Directional":
             phrase = light.direction_phrase
-            lines.append(f"- Directional light, shines {phrase}" if phrase else "- Directional light")
+            lines.append(
+                f"- Directional light, shines {phrase}" if phrase else "- Directional light"
+            )
         elif light.position is not None:
             lines.append(f"- {light.type_name} light at pos={light.position}")
     if facts.camera is not None:
@@ -146,9 +149,13 @@ def _complete(system_prompt: str, user_prompt: str, adapter: ModelAdapter) -> Re
     # returns some third thing -- `.strip()` on a non-`str` would raise, so the type is
     # checked before it's used, not assumed (review round).
     try:
-        result = adapter.complete(ModelRequest(system_prompt=system_prompt, user_prompt=user_prompt))
+        result = adapter.complete(
+            ModelRequest(system_prompt=system_prompt, user_prompt=user_prompt)
+        )
     except Exception as e:  # noqa: BLE001 -- adapter misbehavior must not escape core
-        return ReadbackError(kind="model_call_failed", message=f"Model adapter raised: {e}", cause=e)
+        return ReadbackError(
+            kind="model_call_failed", message=f"Model adapter raised: {e}", cause=e
+        )
     if isinstance(result, ModelError):
         return _model_error_to_readback_error(result)
     if not isinstance(result, str):

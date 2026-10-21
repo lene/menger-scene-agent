@@ -116,7 +116,7 @@ def test_semantic_readback_handles_scene_text_containing_a_triple_backtick():
     # The exact case a code fence would have broken: scene_text containing "```" would
     # prematurely close a markdown fence, splicing text out of the quoted block.
     adapter = FakeModelAdapter(result=READBACK_TEXT)
-    tricky_scene_text = SCENE_TEXT + '\n  // a comment mentioning ``` for good measure\n'
+    tricky_scene_text = SCENE_TEXT + "\n  // a comment mentioning ``` for good measure\n"
 
     semantic_readback(tricky_scene_text, adapter)
 
@@ -169,9 +169,7 @@ def test_whitespace_only_model_response_is_a_typed_error():
 
 
 def test_model_invalid_output_error_maps_to_typed_readback_error():
-    adapter = FakeModelAdapter(
-        result=ModelError(kind="invalid_output", message="model refused")
-    )
+    adapter = FakeModelAdapter(result=ModelError(kind="invalid_output", message="model refused"))
 
     result = semantic_readback(SCENE_TEXT, adapter)
 
@@ -198,7 +196,9 @@ def test_semantic_readback_facts_state_where_objects_are_relative_to_each_other(
     semantic_readback(scene_text, adapter)
 
     user_prompt = adapter.last_request.user_prompt
-    assert "Icositetrachoron is beside the TesseractSponge (+2.5 along x), not above it" in user_prompt
+    assert (
+        "Icositetrachoron is beside the TesseractSponge (+2.5 along x), not above it" in user_prompt
+    )
     assert "4D projection=Some(Projection4DSpec(rotXW = 30f))" in user_prompt
 
 
@@ -252,6 +252,15 @@ def test_semantic_readback_states_the_camera_distance_computed_not_estimated():
     semantic_readback(PRIOR_TEXT, adapter)
 
     assert "5.0 units from its target" in adapter.last_request.user_prompt
+
+
+def test_semantic_readback_prompt_requires_non_default_render_settings():
+    adapter = FakeModelAdapter(result=READBACK_TEXT)
+
+    semantic_readback(SCENE_TEXT, adapter)
+
+    assert "non-default render settings" in adapter.last_request.system_prompt
+    assert "accumulation" in adapter.last_request.system_prompt
 
 
 def test_semantic_readback_does_not_repeat_the_turn_warnings():

@@ -38,7 +38,9 @@ def test_task_2_reports_exactly_the_duration_and_level_floor():
 
 
 def test_a_material_change_is_reported_with_preset_names_and_values():
-    changes = snapshot_changes(_load("t4-015")["snapshots"], _load("t4-016")["snapshots"], _MANIFEST)
+    changes = snapshot_changes(
+        _load("t4-015")["snapshots"], _load("t4-016")["snapshots"], _MANIFEST
+    )
 
     assert (
         "24-cell material: Glass, colour (1, 1, 1), alpha 0.02 -> "
@@ -47,7 +49,9 @@ def test_a_material_change_is_reported_with_preset_names_and_values():
 
 
 def test_an_added_object_is_one_line_with_its_main_values():
-    changes = snapshot_changes(_load("8a-004")["snapshots"], _load("8a-005")["snapshots"], _MANIFEST)
+    changes = snapshot_changes(
+        _load("8a-004")["snapshots"], _load("8a-005")["snapshots"], _MANIFEST
+    )
 
     assert changes[0] == (
         "added tesseract-sponge-surface (position (0, 0, 0), size 4, "
@@ -61,11 +65,32 @@ def test_identical_snapshots_have_no_changes():
     assert snapshot_changes(snapshots, snapshots, _MANIFEST) == []
 
 
+def test_summarise_reports_only_non_default_render_settings():
+    from core.snapshot_facts import summarise
+
+    snapshot = [{"t": 0, "render": "RenderSettings(true,false,true,3,0.1,None,4,Off)"}]
+
+    assert summarise(snapshot, _MANIFEST)[("scene", "render settings")] == (
+        "antialiasing true, AA depth 3, accumulation 4"
+    )
+
+
+def test_summarise_omits_default_render_settings():
+    from core.snapshot_facts import summarise
+
+    snapshot = [{"t": 0, "render": "RenderSettings(true,false,false,2,0.1,None,1,Off)"}]
+
+    assert ("scene", "render settings") not in summarise(snapshot, _MANIFEST)
+
+
 def test_a_kept_procedural_under_a_new_colour_is_a_finding():
     # Session 4, 4.9: the sponge "glow green" kept xyz_rgb_local, which replaces the colour.
     result = check_turn(
-        _load("t4-015")["snapshots"], _load("t4-016")["snapshots"], [],
-        "make the 24-cell glow orange and the sponge glow green", _MANIFEST,
+        _load("t4-015")["snapshots"],
+        _load("t4-016")["snapshots"],
+        [],
+        "make the 24-cell glow orange and the sponge glow green",
+        _MANIFEST,
     )
 
     assert len(result.findings) == 1
@@ -75,8 +100,11 @@ def test_a_kept_procedural_under_a_new_colour_is_a_finding():
 
 def test_no_procedural_finding_when_the_request_asks_for_the_pattern():
     result = check_turn(
-        _load("t4-015")["snapshots"], _load("t4-016")["snapshots"], [],
-        "make it green but keep the xyz colouring", _MANIFEST,
+        _load("t4-015")["snapshots"],
+        _load("t4-016")["snapshots"],
+        [],
+        "make it green but keep the xyz colouring",
+        _MANIFEST,
     )
 
     assert result.findings == []
@@ -150,11 +178,22 @@ def test_material_name_ignores_tint_and_emission():
 
 
 def test_unasked_size_and_edge_choices_are_noted():
-    after = [{"objects": [{
-        "objectType": "sponge-volume", "pos": [0, 0, 0], "size": 2.5, "proceduralType": 0,
-        "edgeMaterial": {**next(m for m in _MANIFEST["materials"] if m["name"] == "Copper"),
-                         "color": [1, 0.5, 0.2, 1]},
-    }]}]
+    after = [
+        {
+            "objects": [
+                {
+                    "objectType": "sponge-volume",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "proceduralType": 0,
+                    "edgeMaterial": {
+                        **next(m for m in _MANIFEST["materials"] if m["name"] == "Copper"),
+                        "color": [1, 0.5, 0.2, 1],
+                    },
+                }
+            ]
+        }
+    ]
 
     result = check_turn([], after, [], "a menger sponge level 2", _MANIFEST)
 
@@ -168,14 +207,33 @@ def test_unasked_size_and_edge_choices_are_noted():
 
 
 def _snap(objects: list[dict], planes: list[dict]) -> list[dict]:
-    return [{"t": 0, "camera": {"position": [0, 0, 5], "lookAt": [0, 0, 0]},
-             "objects": objects, "lights": [], "planes": planes}]
+    return [
+        {
+            "t": 0,
+            "camera": {"position": [0, 0, 5], "lookAt": [0, 0, 0]},
+            "objects": objects,
+            "lights": [],
+            "planes": planes,
+        }
+    ]
 
 
-_SPONGE = {"objectType": "sponge-volume", "dslType": "Sponge", "pos": [0, 0, 0], "size": 1,
-           "level": 2, "proceduralType": 0}
-_FLOOR = {"axis": "Y", "positive": True, "value": -1, "color": [0.5, 0.5, 0.5, 1],
-          "checkerColor": None, "material": None}
+_SPONGE = {
+    "objectType": "sponge-volume",
+    "dslType": "Sponge",
+    "pos": [0, 0, 0],
+    "size": 1,
+    "level": 2,
+    "proceduralType": 0,
+}
+_FLOOR = {
+    "axis": "Y",
+    "positive": True,
+    "value": -1,
+    "color": [0.5, 0.5, 0.5, 1],
+    "checkerColor": None,
+    "material": None,
+}
 
 
 def test_a_plane_change_is_reported():

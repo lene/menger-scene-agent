@@ -38,6 +38,7 @@ def _fmt(value: object) -> str:
 # Emission is left out: a glowing Glass is still Glass (it is shown separately).
 _MATERIAL_KEYS = ("ior", "roughness", "metallic", "specular", "filmThickness", "dispersion")
 _PRESET_TOLERANCE = 1e-4
+_DEFAULT_RENDER_SETTINGS = (True, False, False, 2, 0.1, None, 1, "Off")
 # The presets come from the manifest's structured `proceduralPresets` (review 2026-10-14,
 # menger#81). They were parsed out of the `proceduralType` description with a regex, so
 # rewording that sentence silently broke the F89 repair.
@@ -58,7 +59,8 @@ def material_name(material: Optional[dict], manifest: dict) -> str:
         return "none"
     preset = next(
         (
-            m["name"] for m in manifest.get("materials", [])
+            m["name"]
+            for m in manifest.get("materials", [])
             if all(
                 abs(float(m.get(k, 0)) - float(material.get(k, 0))) <= _PRESET_TOLERANCE
                 for k in _MATERIAL_KEYS
@@ -90,6 +92,35 @@ def _summary(values: list[object]) -> str:
         if low not in (first, last):
             return f"animated {_fmt(first)} -> low {_fmt(low)} -> {_fmt(last)}"
     return f"animated from {_fmt(first)} to {_fmt(last)}"
+
+
+def _render_settings(value: object) -> Optional[str]:
+    """RenderSettings(shadows, transparentShadows, antialiasing, aaMaxDepth,
+    aaThreshold, maxRayDepth, accumulation, denoise) -> non-default fields only."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"RenderSettings\((.*)\)", value)
+    if not match:
+        return value
+    values = [field.strip() for field in match.group(1).split(",")]
+    if len(values) != len(_DEFAULT_RENDER_SETTINGS):
+        return value
+    names = (
+        "shadows",
+        "transparent shadows",
+        "antialiasing",
+        "AA depth",
+        "AA threshold",
+        "max ray depth",
+        "accumulation",
+        "denoise",
+    )
+    differences = [
+        f"{name} {_fmt(actual)}"
+        for name, actual, default in zip(names, values, _DEFAULT_RENDER_SETTINGS)
+        if actual.lower() != str(default).lower()
+    ]
+    return ", ".join(differences) or None
 
 
 def _kind(o: dict) -> str:
@@ -156,7 +187,9 @@ def summarise(snapshots: list[dict], manifest: dict) -> dict[tuple[str, str], st
         put("camera", "looks at", camera.get("lookAt"))
         put("scene", "background", snap.get("background"))
         put("scene", "caustics", snap.get("caustics"))
-        put("scene", "render settings", snap.get("render"))
+        render_settings = _render_settings(snap.get("render"))
+        if render_settings is not None:
+            put("scene", "render settings", render_settings)
         objects = snap.get("objects") or []
         for label, o in zip(_labels(objects), objects):
             for name, value in _object_fields(o, manifest).items():
@@ -199,7 +232,8 @@ def snapshot_changes(before: list[dict], after: list[dict], manifest: dict) -> l
     changes = []
     for subject in sorted(added):
         parts = [
-            f"{name} {value}" for (s, name), value in new.items()
+            f"{name} {value}"
+            for (s, name), value in new.items()
             if s == subject and name in ("position", "size", "level", "material")
         ]
         changes.append(f"added {subject} ({', '.join(parts)})")
@@ -227,7 +261,9 @@ def _change_kind(key: tuple[str, str]) -> Optional[str]:
     return None
 
 
-def unrequested_changes(before: list[dict], after: list[dict], prompt: str, manifest: dict) -> list[str]:
+def unrequested_changes(
+    before: list[dict], after: list[dict], prompt: str, manifest: dict
+) -> list[str]:
     """F8/F39 with values (session 4, F90): a moved object or camera, a changed material or 4D
     projection the request did not ask for. A refactor that keeps the values (8a: a projection
     moved into a local val) is no change, so it is not reported."""
@@ -255,10 +291,14 @@ class CheckResult:
     notes: list[str] = field(default_factory=list)
 
 
-_PATTERN_WORDS = re.compile(r"\b(pattern|procedural|texture|grain|noise|marble|wood|xyz|rgb|colou?r(ed)? by)\b", re.I)
+_PATTERN_WORDS = re.compile(
+    r"\b(pattern|procedural|texture|grain|noise|marble|wood|xyz|rgb|colou?r(ed)? by)\b", re.I
+)
 
 
-def procedural_override_findings(before: list[dict], after: list[dict], prompt: str, manifest: dict) -> list[str]:
+def procedural_override_findings(
+    before: list[dict], after: list[dict], prompt: str, manifest: dict
+) -> list[str]:
     """F89: a turn changed an object's material or colour but kept a non-zero procedural, which
     either imitates the old material (wood on aluminium) or replaces the new colour (green
     under xyz_rgb_local)."""
@@ -280,7 +320,8 @@ def procedural_override_findings(before: list[dict], after: list[dict], prompt: 
         if not colour_changed:
             continue
         effect = (
-            "replaces the new colour, so it is never seen" if proc in replacing
+            "replaces the new colour, so it is never seen"
+            if proc in replacing
             else "belongs to the look of the old material"
         )
         findings.append(
@@ -292,7 +333,9 @@ def procedural_override_findings(before: list[dict], after: list[dict], prompt: 
 
 
 _FLIGHT_WORDS = re.compile(r"\b(fly|flies|flight|flying|through|travel|tunnel|follow)\b", re.I)
-_LOOK_AHEAD_WORDS = re.compile(r"\b(look(s|ing)? (along|ahead|forward|where)|flight direction|facing forward)\b", re.I)
+_LOOK_AHEAD_WORDS = re.compile(
+    r"\b(look(s|ing)? (along|ahead|forward|where)|flight direction|facing forward)\b", re.I
+)
 _INSIDE_WORDS = re.compile(r"\b(through|inside|into|tunnel)\b", re.I)
 # A step this many times larger than both its neighbours and than the path's median step is a
 # jump, not a fast leg (8b 010: 0.46 units at 7.55 s against 0.03 around it).
@@ -323,7 +366,7 @@ def _angle(a: list[float], b: list[float]) -> float:
 
 
 def _spans(times: list[float]) -> str:
-    """"5-7.5 s, 10.5 s" from sorted sample times, merging neighbours."""
+    """ "5-7.5 s, 10.5 s" from sorted sample times, merging neighbours."""
     if not times:
         return ""
     spans, start, prev = [], times[0], times[0]
@@ -359,7 +402,8 @@ def camera_path_check(camera_path: list[dict], snapshots: list[dict], prompt: st
         return result
     median = moving[len(moving) // 2]
     jumps = [
-        times[i + 1] for i in range(1, len(steps) - 1)
+        times[i + 1]
+        for i in range(1, len(steps) - 1)
         if steps[i] > JUMP_FACTOR * max(steps[i - 1], steps[i + 1], median)
     ]
     if jumps:
@@ -384,10 +428,12 @@ def camera_path_check(camera_path: list[dict], snapshots: list[dict], prompt: st
             else:
                 result.warnings.append(message)
         abrupt = [
-            times[i + 1] for i in range(1, len(steps))
+            times[i + 1]
+            for i in range(1, len(steps))
             if min(steps[i], steps[i - 1]) > _MOVING
             and max(steps[i], steps[i - 1]) > SPEED_FACTOR * min(steps[i], steps[i - 1])
-            and times[i + 1] not in jumps and times[i] not in jumps
+            and times[i + 1] not in jumps
+            and times[i] not in jumps
         ]
         if abrupt:
             result.warnings.append(f"the camera speed changes abruptly at t = {_spans(abrupt)}")
@@ -402,12 +448,19 @@ def camera_path_check(camera_path: list[dict], snapshots: list[dict], prompt: st
     return result
 
 
-_SIZE_WORDS = re.compile(r"\b(size|big|bigger|small|smaller|large|larger|tiny|huge|scale|scaled|units?)\b", re.I)
-_EDGE_COLOUR_WORDS = re.compile(r"\bedges?\b.{0,40}\b(gold|chrome|copper|colou?r|material|metal|glass|black|white|red|green|blue)\b|\b(gold|chrome|copper|colou?r(ed)?|black|white|red|green|blue)\b.{0,20}\bedges?\b", re.I)
+_SIZE_WORDS = re.compile(
+    r"\b(size|big|bigger|small|smaller|large|larger|tiny|huge|scale|scaled|units?)\b", re.I
+)
+_EDGE_COLOUR_WORDS = re.compile(
+    r"\bedges?\b.{0,40}\b(gold|chrome|copper|colou?r|material|metal|glass|black|white|red|green|blue)\b|\b(gold|chrome|copper|colou?r(ed)?|black|white|red|green|blue)\b.{0,20}\bedges?\b",
+    re.I,
+)
 _DEFAULT_SIZE = 1.0
 
 
-def unasked_choice_notes(before: list[dict], after: list[dict], prompt: str, manifest: dict) -> list[str]:
+def unasked_choice_notes(
+    before: list[dict], after: list[dict], prompt: str, manifest: dict
+) -> list[str]:
     """F93: values the agent chose for a new object that the request did not name -- shown, so
     the user can say otherwise (session 4: a size-2.5 sponge, copper edges, a glass 24-cell)."""
     if not after:
@@ -424,14 +477,18 @@ def unasked_choice_notes(before: list[dict], after: list[dict], prompt: str, man
         size = float(o.get("size", _DEFAULT_SIZE))
         if abs(size - _DEFAULT_SIZE) > _PRESET_TOLERANCE and not _SIZE_WORDS.search(prompt):
             chosen.append(f"size {_num(size)} (default 1)")
-        if o.get("material") and not (prompt_words & material_words) and "material" not in prompt_words:
+        if (
+            o.get("material")
+            and not (prompt_words & material_words)
+            and "material" not in prompt_words
+        ):
             chosen.append(material_name(o.get("material"), manifest).split(",")[0])
         if o.get("edgeMaterial") and not _EDGE_COLOUR_WORDS.search(prompt):
-            chosen.append(
-                material_name(o.get("edgeMaterial"), manifest).split(",")[0] + " edges"
-            )
+            chosen.append(material_name(o.get("edgeMaterial"), manifest).split(",")[0] + " edges")
         if chosen:
-            notes.append(f"chose for the {label}, unasked: {', '.join(chosen)} -- say if you want otherwise")
+            notes.append(
+                f"chose for the {label}, unasked: {', '.join(chosen)} -- say if you want otherwise"
+            )
     return notes
 
 
@@ -440,6 +497,8 @@ def check_turn(
 ) -> CheckResult:
     """All snapshot checks of one turn."""
     result = camera_path_check(camera_path, after, prompt)
-    result.findings = procedural_override_findings(before, after, prompt, manifest) + result.findings
+    result.findings = (
+        procedural_override_findings(before, after, prompt, manifest) + result.findings
+    )
     result.notes = unasked_choice_notes(before, after, prompt, manifest)
     return result
