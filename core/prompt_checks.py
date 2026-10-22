@@ -75,6 +75,19 @@ def refers_to_window(prompt: str) -> bool:
     return _WINDOW_WORDS.search(prompt) is not None
 
 
+# "Play one rotation, then stop": the preview loops whatever the scene does (session 5, F119).
+_PLAY_ONCE_WORDS = re.compile(
+    r"\b(once|then stop|and stop|stop after|stop at the end|(do not|don't|no) loop)", re.IGNORECASE
+)
+_ANIMATED = re.compile(r"\bdef\s+scene\s*\(\s*t\b")
+
+
+def play_once_note(prompt: str, scene_text: str) -> Optional[str]:
+    if _PLAY_ONCE_WORDS.search(prompt) and _ANIMATED.search(scene_text):
+        return "the preview loops the animation; Space pauses it"
+    return None
+
+
 def window_state_hint(description: str) -> str:
     """The instruction that carries the window's state into a generation prompt."""
     return (

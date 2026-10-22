@@ -64,3 +64,14 @@ def test_a_request_about_what_the_window_shows_is_recognised():
     assert refers_to_window("ok, keep them like that for further prompts")
     assert refers_to_window("use the current view")
     assert not refers_to_window("make it glass")
+
+
+def test_play_once_on_an_animated_scene_notes_that_the_preview_loops():
+    # Session 5 (F119): "one 360 degree rotation ..., then stop" was accepted silently.
+    from core.prompt_checks import play_once_note
+
+    animated = "object A:\n  val durationSeconds = 4f\n  def scene(t: Float): Scene = Scene()\n"
+    prompt = "play one 360 degree rotation about the xw plane, then stop for further instructions"
+    assert "loops" in play_once_note(prompt, animated)
+    assert play_once_note("rotate it about the xw plane", animated) is None
+    assert play_once_note(prompt, "object A:\n  val scene = Scene()\n") is None

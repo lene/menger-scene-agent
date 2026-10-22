@@ -21,7 +21,12 @@ from typing import Callable, List, Optional, Tuple, Union
 
 from core.generation import generate, revise
 from core.ports import ModelAdapter, SceneStore, SceneStoreError
-from core.prompt_checks import refers_to_window, unknown_material_hint, window_state_hint
+from core.prompt_checks import (
+    play_once_note,
+    refers_to_window,
+    unknown_material_hint,
+    window_state_hint,
+)
 from core.readback import semantic_readback
 from core.scene_facts import (
     camera_gaze_warnings,
@@ -610,6 +615,7 @@ def run_turn(
             return TurnResult(tag="storage_failed", messages=messages)
         if snapshots:
             store.write_snapshots(ordinal, snapshots)
+        play_once = [n for n in [play_once_note(prompt, scene_text)] if n is not None]
         return TurnResult(
             tag="accepted",
             messages=[],
@@ -621,7 +627,7 @@ def run_turn(
             stale_not_done=stale_not_done,
             carried_over=carried_over,
             changes=changes,
-            notes=checks.notes + [f"the scene notes: {c}" for c in caveats],
+            notes=checks.notes + [f"the scene notes: {c}" for c in caveats] + play_once,
             snapshots_missing=not snapshots,
         )
     finally:
