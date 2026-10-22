@@ -2629,6 +2629,14 @@ def test_an_unchanged_turn_is_not_shown_as_a_rejection():
     assert cli._format_history_entry(entry) == "No change made: same scene."
 
 
+def test_a_budget_finding_is_labelled_over_budget():
+    # Session 5 (F109, msa#48): it was shown as "Rejected (lint findings)".
+    result = TurnResult(tag="lint_findings", messages=["scene-budget: 260112384 triangles", "Lower it?"])
+    assert formatting._format_turn_result(result).startswith("Rejected (over budget):")
+    other = TurnResult(tag="lint_findings", messages=["camera-inside: the camera is inside"])
+    assert formatting._format_turn_result(other).startswith("Rejected (lint findings)")
+
+
 def test_not_done_parts_are_printed():
     result = TurnResult(
         tag="accepted", messages=[], ordinal=2, readback_summary="a tesseract",

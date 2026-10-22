@@ -116,7 +116,8 @@ def _build_clarification_prompt(state: _ClarificationState, answer: str) -> str:
             f"(The system asked for clarification: {state.reason})\n"
             f"User's answer: {answer}\n"
             f"(This answer settles the question: a bare \"yes\" or \"ok\" accepts the option "
-            f"the question offered first. Do not respond NEEDS_CLARIFICATION again; if "
+            f"the question offered first. If it is a different request instead (\"no, make "
+            f"it aluminium\"), do that request. Do not respond NEEDS_CLARIFICATION again; if "
             f"something is still open, compose the nearest reading and state the assumption "
             f"in the doc comment.)"
         )

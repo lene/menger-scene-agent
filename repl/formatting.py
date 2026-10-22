@@ -29,6 +29,8 @@ def _rejection_line(tag: Optional[str], *messages: str) -> str:
     messages = tuple(m for m in messages if m)
     if tag == "unchanged" and messages:
         return "; ".join(messages)  # F76: not a rejection; it says "No change made: ..."
+    if tag == "lint_findings" and messages and messages[0].startswith("scene-budget"):
+        tag = "over_budget"  # session 5 (F109): the validator reports the budget as a finding
     head = f"Rejected ({_tag_label(tag)})" if tag else "Rejected"
     lines = []
     for message in messages:
