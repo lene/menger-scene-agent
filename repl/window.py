@@ -21,6 +21,7 @@ from adapters.render_window import (
     frame_build_failures,
     log_size,
     render_window_scene_path,
+    slow_frames,
     sync_render_window_scene,
 )
 from adapters.scene_store import SceneStore
@@ -71,6 +72,7 @@ class WindowWatcher:
         self._busy = threading.Lock()
         self._prompt = ""
         self._on_idle: Optional[Callable[[], bool]] = None
+        self._slow_reported = 0
         self._stop = threading.Event()
         threading.Thread(target=self._run, name="render-window-watcher", daemon=True).start()
 
@@ -109,6 +111,7 @@ class WindowWatcher:
                 continue
             try:
                 printed = self._check_crash()
+                printed = self._report_slow_frames() or printed
                 if self._on_idle is not None:
                     printed = self._on_idle() or printed
                 if printed:
@@ -117,6 +120,21 @@ class WindowWatcher:
                 pass
             finally:
                 self._busy.release()
+
+    def _report_slow_frames(self) -> bool:
+        """Session 5 (F125, menger#133): a 3.4 s-per-frame scene opened blank and stayed slow
+        with nothing said. A relaunch starts a new event file, so a shorter list restarts the
+        count."""
+        reports = slow_frames(render_window_scene_path(self._store.session_dir))
+        if len(reports) < self._slow_reported:
+            self._slow_reported = 0
+        new = reports[self._slow_reported:]
+        self._slow_reported = len(reports)
+        if not new:
+            return False
+        earlier = f" ({len(new) - 1} earlier report(s) like it)" if len(new) > 1 else ""
+        print(f"\nRender window: slow - {new[-1]}{earlier}", flush=True)
+        return True
 
     def _check_crash(self) -> bool:
         with self._lock:

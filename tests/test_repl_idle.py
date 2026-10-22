@@ -5,6 +5,7 @@ during a turn is not a crash)."""
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 from adapters.scene_store import SceneStore
@@ -107,3 +108,28 @@ def test_an_idle_broken_hand_edit_is_reported_once(tmp_path, capsys):
     assert _hand_edit_while_idle(_ctx(store), ports, state, watcher) is True
     assert _hand_edit_while_idle(_ctx(store), ports, state, watcher) is False
     assert capsys.readouterr().out.count("hand_edit_rejected") == 1
+
+
+def test_the_watcher_reports_new_slow_frames_once_while_idle(tmp_path, capsys):
+    # Session 5 (F125, menger#133): 3.4 s per frame, the window looked blank.
+    import json
+
+    from adapters.render_window import render_window_scene_path
+
+    store = SceneStore.create_session(tmp_path)
+    events = Path(str(render_window_scene_path(store.session_dir)) + ".events.jsonl")
+    events.parent.mkdir()
+
+    def slow(detail):
+        return json.dumps({"v": 1, "kind": "frame_slow", "detail": detail, "time": "x"}) + "\n"
+
+    events.write_text(slow("frame 3/501 took 3.4 s") + slow("frame 5/501 took 3.5 s"))
+    watcher = _watcher(store)
+    with watcher.busy():
+        with watcher.idle("> "):
+            time.sleep(0.1)
+    watcher.stop()
+
+    out = capsys.readouterr().out
+    assert out.count("Render window: slow") == 1
+    assert "frame 5/501 took 3.5 s (1 earlier report(s) like it)" in out

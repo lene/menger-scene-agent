@@ -490,6 +490,12 @@ def frame_build_failures(scene_file: Union[str, Path]) -> List[str]:
     return [e.detail for e in _read_events(scene_file, 0) if e.kind == "frame_failed"]
 
 
+def slow_frames(scene_file: Union[str, Path]) -> List[str]:
+    """The window's reports of frames that took over a second (`frame_slow` events, at most
+    one per five seconds): a slow scene looked blank or frozen (session 5, F125, menger#133)."""
+    return [e.detail for e in _read_events(scene_file, 0) if e.kind == "frame_slow"]
+
+
 # How long a SIGTERMed window gets before SIGKILL: the contained window's wrapper removes its
 # container on SIGTERM (`docker kill` + `docker rm`), which takes longer than the 1.5 s launch
 # check; killed mid-cleanup, the container would keep running (menger#104).
