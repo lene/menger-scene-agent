@@ -9,10 +9,12 @@ rounds, readback -- with `ReplayModelAdapter` in place of the model and a valida
 answers "ok" under menger's process contract. So a change to the agent that breaks a turn the
 model once got right fails here, without a model call or a GPU.
 
-Live later: the same cases with a real adapter (scores instead of pass/fail, kept as a
-ratchet per provider).
+`--live` sends the same prompts to the configured provider instead (paid: the user's call)
+and writes pass/fail and the questions the model asked per case to
+`evals/live-results/<provider>-<model>.json` (session 5: the prompt side of F104/F105 only
+shows with a real model).
 
-Usage: uv run python -m evals.recorded [case.json ...]   (default: every case in evals/cases)
+Usage: uv run python -m evals.recorded [--live] [case.json ...]   (default: every case)
 """
 
 from __future__ import annotations
@@ -27,8 +29,10 @@ from typing import Iterator, List, Optional
 
 from adapters.artifacts import load_corpus, load_manifest
 from adapters.model import ModelError, ModelRequest, ModelResult
+from adapters.model_factory import get_model_adapter, selected_provider
 from adapters.scene_store import SceneStore
 from adapters.scene_validator import validate_scene
+from core.ports import ModelAdapter
 from core.scene_facts import extract_scene_facts
 from core.turn import run_turn, use_default_validator
 from gauntlet._scala_text import strip_comments_and_strings
@@ -36,6 +40,7 @@ from gauntlet._scala_text import strip_comments_and_strings
 ROOT = Path(__file__).resolve().parent.parent
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 STUB_VALIDATOR = Path(__file__).resolve().parent / "stub_validator.py"
+LIVE_RESULTS_DIR = Path(__file__).resolve().parent / "live-results"
 DARK = 0.15  # every background channel at or below this is "dark"
 
 
@@ -88,22 +93,41 @@ def _turn_problems(expect: dict, scene: str, tag: str) -> List[str]:
 class CaseResult:
     case_id: str
     problems: List[str]
+    questions: List[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
         return not self.problems
 
 
-def run_case(case: dict, manifest: dict, corpus: dict) -> CaseResult:
+@dataclass
+class _QuestionCounter:
+    """Passes calls to a live adapter and keeps every question the model asked."""
+
+    inner: ModelAdapter
+    questions: List[str] = field(default_factory=list)
+
+    def complete(self, request: ModelRequest) -> ModelResult:
+        result = self.inner.complete(request)
+        if isinstance(result, str) and result.lstrip().startswith("NEEDS_CLARIFICATION"):
+            self.questions.append(result.strip())
+        return result
+
+
+def run_case(
+    case: dict, manifest: dict, corpus: dict, live: Optional[ModelAdapter] = None
+) -> CaseResult:
     problems: List[str] = []
     use_default_validator(validate_scene)  # the real adapter, run against the stub script
     prior: Optional[str] = None
+    counter = _QuestionCounter(live) if live is not None else None
     with tempfile.TemporaryDirectory() as tmp:
         store = SceneStore.create_session(Path(tmp), session_id="eval")
         for n, turn in enumerate(case["turns"], start=1):
-            adapter = ReplayModelAdapter(iter(turn["responses"]))
+            adapter = counter or ReplayModelAdapter(iter(turn["responses"]))
             result = run_turn(
                 turn["prompt"], prior, manifest, corpus, adapter, store, STUB_VALIDATOR,
+                answered=turn.get("answered", False),
             )
             scene = store.current_scene() or ""
             turn_problems = _turn_problems(turn.get("expect", {}), scene, result.tag)
@@ -112,7 +136,7 @@ def run_case(case: dict, manifest: dict, corpus: dict) -> CaseResult:
             problems += [f"turn {n} ({turn['prompt'][:40]!r}): {p}" for p in turn_problems]
             if result.tag == "accepted":
                 prior = scene
-    return CaseResult(case["id"], problems)
+    return CaseResult(case["id"], problems, counter.questions if counter else [])
 
 
 def load_cases(paths: Optional[List[Path]] = None) -> List[dict]:
@@ -120,17 +144,33 @@ def load_cases(paths: Optional[List[Path]] = None) -> List[dict]:
     return [json.loads(p.read_text(encoding="utf-8")) for p in files]
 
 
+def _write_live_results(adapter: ModelAdapter, results: List[CaseResult]) -> Path:
+    model = getattr(adapter, "model_name", "unknown")
+    path = LIVE_RESULTS_DIR / f"{selected_provider()}-{model}.json".replace("/", "_")
+    LIVE_RESULTS_DIR.mkdir(exist_ok=True)
+    path.write_text(json.dumps([
+        {"case": r.case_id, "passed": r.passed, "questions": r.questions, "problems": r.problems}
+        for r in results
+    ], indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    live = get_model_adapter() if "--live" in args else None
+    paths = [Path(a) for a in args if a != "--live"]
     manifest = load_manifest(ROOT / "reference" / "dsl-manifest.json")
     corpus = load_corpus(ROOT / "reference" / "dsl-corpus.json")
-    results = [run_case(c, manifest, corpus) for c in load_cases([Path(a) for a in args] or None)]
+    results = [run_case(c, manifest, corpus, live) for c in load_cases(paths or None)]
     for r in results:
-        print(f"{'PASS' if r.passed else 'FAIL'} {r.case_id}")
+        print(f"{'PASS' if r.passed else 'FAIL'} {r.case_id}"
+              + (f" ({len(r.questions)} question(s))" if live is not None else ""))
         for p in r.problems:
             print(f"  {p}")
     passed = sum(r.passed for r in results)
     print(f"{passed}/{len(results)} cases pass")
+    if live is not None:
+        print(f"written: {_write_live_results(live, results)}")
     return 0 if passed == len(results) else 1
 
 

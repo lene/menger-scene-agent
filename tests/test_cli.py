@@ -1927,9 +1927,11 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     _stub_render_window(monkeypatch)
 
     call_log = []
+    answered_log = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None, answered=False, **_kw):
         call_log.append(prompt)
+        answered_log.append(answered)
         if len(call_log) == 1:
             return TurnResult(
                 tag="needs_clarification",
@@ -1952,7 +1954,10 @@ def test_clarification_answer_is_threaded_into_the_original_request(
     # the user's terse answer -- not just "z" alone.
     assert "rotate the cube by 90 degrees" in merged
     assert "unspecified rotation axis (X, Y, or Z)" in merged
-    assert merged.endswith("User's answer: z")
+    assert "User's answer: z\n" in merged
+    # Session 5 (F105): the answer is binding, and run_turn knows it was an answer.
+    assert "Do not respond NEEDS_CLARIFICATION again" in merged
+    assert answered_log == [False, True]
     out_lines = _file_names(capsys.readouterr().out.splitlines())
     assert out_lines == [
         "Rejected (needs clarification): unspecified rotation axis (X, Y, or Z)",
@@ -2015,7 +2020,7 @@ def test_two_consecutive_clarification_rounds_compound_both_reasons(
 
     call_log = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None, **_kw):
         call_log.append(prompt)
         idx = len(call_log)
         if idx == 1:
@@ -2038,7 +2043,7 @@ def test_two_consecutive_clarification_rounds_compound_both_reasons(
     assert "which axis?" in third_prompt
     assert "z" in third_prompt
     assert "which direction?" in third_prompt
-    assert third_prompt.endswith("User's answer: clockwise")
+    assert "User's answer: clockwise\n" in third_prompt
 
 
 def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sent_raw(
@@ -2052,7 +2057,7 @@ def test_clarification_state_clears_on_any_other_outcome_so_the_next_line_is_sen
 
     call_log = []
 
-    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None):
+    def _fake_run_turn(prompt, prior_scene, manifest, corpus, adapter, store_arg, script_path, on_stage=None, **_kw):
         call_log.append(prompt)
         idx = len(call_log)
         if idx == 1:
@@ -2419,6 +2424,17 @@ def test_drop_with_nothing_pending_says_so(monkeypatch, tmp_path, capsys):
 
     assert cli.main([]) == 0
     assert capsys.readouterr().out.splitlines() == ["Drop: no pending request."]
+
+
+@pytest.mark.parametrize("command", ["/exit", "/quit", "  /exit  "])
+def test_exit_ends_the_session_without_a_model_call(monkeypatch, tmp_path, capsys, command):
+    # Session 5 (F107): "/exit" was sent to the model as a request.
+    _repl_env(monkeypatch, tmp_path)
+    _refuse_run_turn(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([command, "a red sphere"]))
+
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_ctrl_c_during_a_turn_abandons_the_turn_not_the_repl(monkeypatch, tmp_path, capsys):

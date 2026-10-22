@@ -43,8 +43,11 @@ _MATERIAL_WORDS = (
 
 
 def unknown_material_hint(prompt: str, manifest: dict) -> Optional[str]:
-    """An instruction for the model when the request names a material without a preset."""
+    """An instruction for the model when the request names a material without a preset. Not
+    for a threaded answer (`run_turn(answered=True)`): repeated there, it asked again on every
+    round (session 5, F104). A procedural preset's name (marble) is a look the DSL has."""
     presets = {m.get("name", "").lower() for m in manifest.get("materials", [])}
+    presets |= {p.get("name", "").lower() for p in manifest.get("proceduralPresets", [])}
     words = set(re.findall(r"[a-z]+", prompt.lower()))
     unknown = [w for w in _MATERIAL_WORDS if w in words and w not in presets]
     if not unknown:
@@ -52,7 +55,9 @@ def unknown_material_hint(prompt: str, manifest: dict) -> Optional[str]:
     return (
         f"The request names {', '.join(unknown)}, which the DSL has no preset for. Unless the "
         "request already says how to approximate it, respond with NEEDS_CLARIFICATION asking "
-        "which approximation the user wants, naming the nearest presets (session 4, F93)."
+        "once which approximation the user wants, offering two or three concrete compositions: "
+        "a metal colour via `Material.metal(Color(...))`, Glass or Diamond with a colour or IOR, "
+        "or a preset with a procedural pattern (session 4, F93; session 5, F104)."
     )
 
 

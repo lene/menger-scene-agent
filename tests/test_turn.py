@@ -11,7 +11,7 @@ exists" is a real filesystem check, matching tests/test_scene_store.py's own pat
 from __future__ import annotations
 
 import json as _json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
@@ -57,11 +57,13 @@ class _SequencedModelAdapter:
     express that."""
 
     results: List[ModelResult]
+    requests: List[ModelRequest] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._index = 0
 
     def complete(self, request: ModelRequest) -> ModelResult:
+        self.requests.append(request)
         result = self.results[self._index]
         self._index += 1
         return result
@@ -1819,3 +1821,62 @@ def test_check_hand_edit_promotes_when_the_validator_accepts(tmp_path, monkeypat
     result = check_hand_edit(store, "object Old:\n  val scene = Scene()\n", _SCRIPT_PATH)
 
     assert result.tag == "accepted" and result.ordinal == 2
+
+
+# --- session 5 (F104, F105, F109): one clarification per request ----------------------------
+
+_STEEL_MANIFEST = {**VALID_MANIFEST, "materials": [{"name": "Chrome"}]}
+
+
+def _ok_validator(monkeypatch):
+    monkeypatch.setattr(turn_module, "validate_scene", lambda f, s, image=None, timeout=None:
+                        ValidationResult(tag="ok", messages=[], findings=[], scene=str(f)))
+
+
+def test_the_material_hint_is_given_on_the_request_but_not_on_its_answer(tmp_path, monkeypatch):
+    _ok_validator(monkeypatch)
+    asked = _SequencedModelAdapter(["NEEDS_CLARIFICATION: steel how?"])
+    run_turn("make it steel", None, _STEEL_MANIFEST, VALID_CORPUS, asked, _make_store(tmp_path),
+             _SCRIPT_PATH)
+    assert "no preset for. Unless" in asked.requests[0].user_prompt
+
+    answered = _SequencedModelAdapter([CLEAN_SCENE_TEXT, CLEAN_SCENE_TEXT])
+    result = run_turn("make it steel\n\nUser's answer: tinted chrome", None, _STEEL_MANIFEST,
+                      VALID_CORPUS, answered, _make_store(tmp_path / "b"), _SCRIPT_PATH,
+                      answered=True)
+    assert result.tag == "accepted"
+    assert "no preset for" not in answered.requests[0].user_prompt
+
+
+def test_a_second_question_after_an_answer_gets_one_round_that_composes(tmp_path, monkeypatch):
+    _ok_validator(monkeypatch)
+    adapter = _SequencedModelAdapter(
+        ["NEEDS_CLARIFICATION: Copper preset or aluminium?", CLEAN_SCENE_TEXT, CLEAN_SCENE_TEXT]
+    )
+    result = run_turn("make it aluminium\n\nUser's answer: copper", None, VALID_MANIFEST,
+                      VALID_CORPUS, adapter, _make_store(tmp_path), _SCRIPT_PATH, answered=True)
+    assert result.tag == "accepted"
+    assert "the user has already answered" in adapter.requests[1].user_prompt
+
+
+def test_a_question_on_a_fresh_request_is_returned_as_is(tmp_path, monkeypatch):
+    _ok_validator(monkeypatch)
+    adapter = _SequencedModelAdapter(["NEEDS_CLARIFICATION: which axis?"])
+    result = run_turn("rotate it", None, VALID_MANIFEST, VALID_CORPUS, adapter,
+                      _make_store(tmp_path), _SCRIPT_PATH)
+    assert result.tag == "needs_clarification"
+    assert len(adapter.requests) == 1
+
+
+def test_an_unrepairable_budget_finding_asks_for_a_level(tmp_path, monkeypatch):
+    monkeypatch.setattr(turn_module, "validate_scene", lambda f, s, image=None, timeout=None:
+                        ValidationResult(tag="lint_findings", findings=[], messages=[
+                            "scene-budget: scene over budget: 260112384 triangles in total, "
+                            "budget 16000000"]))
+    result = run_turn("a tesseract sponge level 3.8", None, VALID_MANIFEST, VALID_CORPUS,
+                      FakeModelAdapter(result=CLEAN_SCENE_TEXT), _make_store(tmp_path),
+                      _SCRIPT_PATH)
+    assert result.tag == "lint_findings"
+    assert "260112384" in result.messages[0]
+    assert "keeps the level you asked for" in result.messages[-1]
+    assert "returned the same scene" not in result.messages[-1]

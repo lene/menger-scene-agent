@@ -51,6 +51,13 @@ def test_preset_materials_need_no_hint():
     assert unknown_material_hint("make it glass, then gold, then diamond", _MANIFEST) is None
 
 
+def test_a_procedural_preset_is_a_look_the_dsl_has():
+    # Session 5 (F104): wood and marble are procedural presets, composed without a question.
+    assert unknown_material_hint("make it from wood, or marble", _MANIFEST) is None
+    hint = unknown_material_hint("make it aluminium", _MANIFEST)
+    assert hint is not None and "Material.metal" in hint
+
+
 def test_a_request_about_what_the_window_shows_is_recognised():
     from core.prompt_checks import refers_to_window
 

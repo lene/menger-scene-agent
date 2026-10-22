@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -192,7 +193,9 @@ def _record_consult_safely(
 # --- one turn ---------------------------------------------------------------------------
 
 
-def execute_turn(ctx: Context, ports: Ports, state: TurnState, prompt: str) -> Optional[TurnResult]:
+def execute_turn(
+    ctx: Context, ports: Ports, state: TurnState, prompt: str, answered: bool = False
+) -> Optional[TurnResult]:
     """Runs one turn, prints its result, and on "accepted" advances `state.prior_scene` and
     refreshes the window -- the one path a typed request, a `/retry` resend and nothing else
     take (story 22). A `run_turn()` exception is printed as "Turn error: ..." and returns
@@ -208,6 +211,7 @@ def execute_turn(ctx: Context, ports: Ports, state: TurnState, prompt: str) -> O
             ctx.script_path,
             on_stage=_print_stage,
             **_window_state_kwargs(ctx.store),
+            **({"answered": True} if answered else {}),
         )
         _end_stage_line()
         logger.info("turn: %s, ordinal %s", result.tag, result.ordinal)
@@ -314,19 +318,45 @@ def _consult(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
         _record_consult_safely(ctx.store, question, answer=result)
 
 
+def _new(ctx: Context, ports: Ports, state: TurnState, _line: str) -> None:
+    # ponytail: a fresh scene inside a session breaks AD-13 (the last file on disk is the
+    # current scene; the old one would come back as a "hand edit"), so a new session it is.
+    print("New: a session holds one scene -- type /exit and start menger-scene-agent again.")
+
+
+def _unknown(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
+    """Session 5 (F107): `/exit`, `/new` and a pasted file path went to the model as requests."""
+    names = sorted([*COMMANDS, *EXIT_COMMANDS, *CONSULT_PREFIXES])
+    print(f"Unknown command {line.split(None, 1)[0]!r} (not sent to the model). "
+          f"Commands: {', '.join(names)}.")
+
+
+def _status_echo(ctx: Context, ports: Ports, state: TurnState, _line: str) -> None:
+    print("Ignored: that is the agent's own status line, not a request.")
+
+
 Command = Callable[[Context, Ports, TurnState, str], None]
 
 # Exact stripped lines. The consult prefixes take arguments and are matched by first word.
-COMMANDS: Dict[str, Command] = {"/retry": _retry, "/open": _open, "/drop": _drop}
+COMMANDS: Dict[str, Command] = {"/retry": _retry, "/open": _open, "/drop": _drop, "/new": _new}
+# End the loop, like Ctrl-D (run_repl).
+EXIT_COMMANDS = ("/exit", "/quit")
+# A pasted copy of `_print_stage`'s line ("... generating, validating"), session 5 (F107).
+_STATUS_ECHO = re.compile(r"^\.\.\. (generating|validating|repairing|reading back)\b")
 
 
 def command_for(line: str) -> Optional[Command]:
     stripped = line.strip()
     if not stripped:
         return None
-    if stripped.split(None, 1)[0] in CONSULT_PREFIXES:
+    first = stripped.split(None, 1)[0]
+    if first in CONSULT_PREFIXES:
         return _consult
-    return COMMANDS.get(stripped)
+    if _STATUS_ECHO.match(stripped):
+        return _status_echo
+    if first.startswith("/"):
+        return COMMANDS.get(stripped, _unknown)
+    return None
 
 
 # --- the loop ------------------------------------------------------------------------------
@@ -362,13 +392,11 @@ def _request(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
         print(_rejection_line("needs_clarification", cut_off))
         print(_FOLLOW_UP_HINT)
         return
-    prompt = (
-        _build_clarification_prompt(state.clarification_state, line)
-        if state.clarification_state is not None
-        else line
-    )
+    pending = state.clarification_state
+    prompt = _build_clarification_prompt(pending, line) if pending is not None else line
+    answered = pending is not None and pending.asked_for_clarification
     scene_before_turn = state.prior_scene
-    result = execute_turn(ctx, ports, state, prompt)
+    result = execute_turn(ctx, ports, state, prompt, answered=answered)
     if result is None:
         return
     state.clarification_state = _next_clarification_state(result, prompt)
@@ -398,6 +426,8 @@ def run_repl(ctx: Context, ports: Ports) -> int:
                 line = input("> " if state.clarification_state is None else "(continuing) > ")
             except (EOFError, KeyboardInterrupt):
                 break
+            if line.strip() in EXIT_COMMANDS:
+                break
             _check_hand_edit(ctx, ports, state)
             command = command_for(line)
             if command is not None:
@@ -410,4 +440,7 @@ def run_repl(ctx: Context, ports: Ports) -> int:
     return 0
 
 
-__all__ = ["Context", "Ports", "TurnState", "COMMANDS", "command_for", "execute_turn", "run_repl"]
+__all__ = [
+    "Context", "Ports", "TurnState", "COMMANDS", "EXIT_COMMANDS", "command_for", "execute_turn",
+    "run_repl",
+]

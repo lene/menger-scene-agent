@@ -197,6 +197,7 @@ StageName = Literal[
     "repairing (local finding)",
     "repairing (compile errors)",
     "repairing (lint findings)",
+    "repairing (asked again)",
     "reading back",
 ]
 

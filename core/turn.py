@@ -36,6 +36,7 @@ from core.scene_facts import (
 from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
 from core.types import (
     GenerationError,
+    GenerationResult,
     ReadbackError,
     StageName,
     TurnResult,
@@ -152,6 +153,17 @@ def _with_first_attempt(rejection: TurnResult, first_candidate: str, rounds_done
         messages=rejection.messages + [f"The first attempt said: Not done: {p}" for p in parts],
         findings=rejection.findings,
     )
+
+
+def _unrepaired_note(feedback: List[str]) -> str:
+    """What to say when the repair returned the same scene. Over budget, the repair keeps what
+    the user named instead of lowering it (F87), so the user decides (session 5, F109)."""
+    if any(f.startswith("scene-budget") for f in feedback):
+        return (
+            "The scene is over the budget above, and the automatic repair keeps the level you "
+            "asked for. Lower it (name a level), or /drop this request?"
+        )
+    return "The automatic repair returned the same scene, so it was stopped."
 
 
 def scene_warnings(facts, scene_text: str, manifest: dict) -> List[str]:
@@ -281,6 +293,7 @@ def run_turn(
     on_stage: Optional[Callable[[StageName], None]] = None,
     repair_rounds: int = MAX_REPAIR_ROUNDS,
     window_state: Optional[str] = None,
+    answered: bool = False,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -304,7 +317,11 @@ def run_turn(
     execution (no threading/async involved) -- callbacks should be cheap and non-blocking.
     Any exception `on_stage` itself raises (including a `TypeError` from a non-callable
     value) is swallowed rather than propagated: its only job is cosmetic reporting, and it
-    must never abort a turn that had otherwise succeeded up to that point."""
+    must never abort a turn that had otherwise succeeded up to that point.
+
+    `answered`: `prompt` threads the user's answer to a question the model asked (session 5,
+    F104/F105). The material hint is then left out, and a second question gets one round that
+    asks for the scene instead: one clarification per request."""
 
     def _emit(stage: StageName) -> None:
         if on_stage is None:
@@ -317,17 +334,27 @@ def run_turn(
     _emit("generating")
     # F93: a material with no preset is a question, not a silent approximation. Only the
     # model's copy of the request carries the hint; history and tickets keep the user's words.
-    hint = unknown_material_hint(prompt, manifest)
+    hint = None if answered else unknown_material_hint(prompt, manifest)
     model_prompt = f"{prompt}\n\n({hint})" if hint else prompt
     if window_state and refers_to_window(prompt):
         # F96: "keep them like that" -- the window's own state (a description of the file
         # `<current.scala>.window-state.json`, passed by the REPL) is context for the model.
         model_prompt += f"\n\n({window_state_hint(window_state)})"
-    generation_result = (
-        generate(model_prompt, manifest, corpus, adapter)
-        if prior_scene is None
-        else revise(model_prompt, prior_scene, manifest, corpus, adapter)
-    )
+
+    def _derive(text: str) -> GenerationResult:
+        if prior_scene is None:
+            return generate(text, manifest, corpus, adapter)
+        return revise(text, prior_scene, manifest, corpus, adapter)
+
+    generation_result = _derive(model_prompt)
+    if (answered and repair_rounds > 0 and isinstance(generation_result, GenerationError)
+            and generation_result.kind == "needs_clarification"):
+        _emit("repairing (asked again)")
+        generation_result = _derive(
+            f"{model_prompt}\n\nYou asked again ({generation_result.message}), but the user has "
+            "already answered. Do not ask a second time: compose the scene now with the nearest "
+            "reading of the request and the answer, and state the assumption in the doc comment."
+        )
 
     if isinstance(generation_result, GenerationError):
         # Not one of the frozen I/O & Edge-Case Matrix's five rows, but a real precondition
@@ -473,8 +500,7 @@ def run_turn(
                 return _with_first_attempt(
                     TurnResult(
                         tag=rejection.tag,
-                        messages=rejection.messages
-                        + ["The automatic repair returned the same scene, so it was stopped."],
+                        messages=rejection.messages + [_unrepaired_note(feedback)],
                         findings=rejection.findings,
                     ),
                     first_candidate,

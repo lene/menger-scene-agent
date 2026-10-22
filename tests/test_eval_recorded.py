@@ -41,3 +41,12 @@ def test_an_agent_that_rejects_every_scene_fails_every_case(monkeypatch):
     )
     for case in CASES:
         assert not run_case(case, MANIFEST, CORPUS).passed, case["id"]
+
+
+def test_live_mode_counts_the_questions_the_model_asks():
+    from tests.fakes import FakeModelAdapter
+
+    asker = FakeModelAdapter(result="NEEDS_CLARIFICATION: which material?")
+    result = run_case(CASES[0], MANIFEST, CORPUS, live=asker)
+    assert not result.passed
+    assert result.questions[0] == "NEEDS_CLARIFICATION: which material?"

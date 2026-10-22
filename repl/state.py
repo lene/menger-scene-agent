@@ -110,10 +110,15 @@ def _build_clarification_prompt(state: _ClarificationState, answer: str) -> str:
             f"nothing else from it.)"
         )
     if state.asked_for_clarification:
+        # Session 5 (F104, F105): "yes", "level 3.8" and "copper" were each asked about again.
         return (
             f"{state.pending_prompt}\n\n"
             f"(The system asked for clarification: {state.reason})\n"
-            f"User's answer: {answer}"
+            f"User's answer: {answer}\n"
+            f"(This answer settles the question: a bare \"yes\" or \"ok\" accepts the option "
+            f"the question offered first. Do not respond NEEDS_CLARIFICATION again; if "
+            f"something is still open, compose the nearest reading and state the assumption "
+            f"in the doc comment.)"
         )
     return (
         f"{state.pending_prompt}\n\n"

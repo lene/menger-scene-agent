@@ -1,0 +1,32 @@
+{
+  "id": "luna-answered-type-is-not-asked-again",
+  "source": "session-20261019T113255368155-5bb6281f history 12 (asked again after \"level 3.8\") + 14 (its level-3.8 TesseractSponge scene and the readback; the budget check is the real validator's, not the stub's)",
+  "turns": [
+    {
+      "prompt": "a menger sponge level 2",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level 2 Menger sponge with a gold material and lighting to reveal its carved structure.\n */\nobject MengerSponge:\n  val scene: Scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"menger-sponge\", scene)\n```",
+        "level-2 sponge, 2.5 units, opaque gold, directional lights from above toward +x and -z and from above toward -x and -z, camera 7.8 units out at an angle toward the origin from (4, 3, 6)"
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ]
+      }
+    },
+    {
+      "prompt": "ok now turn the sponge into a tesseract-sponge\n\n(The system asked for clarification: \u201ctesseract-sponge\u201d could mean a Sponge of a different type or a TesseractSponge object; the scene\u2019s existing local RGB coloring and level 5.8 do not transfer directly to a TesseractSponge, whose maximum level is 5. Which interpretation and level should I use?)\nUser's answer: level 3.8",
+      "answered": true,
+      "responses": [
+        "NEEDS_CLARIFICATION: \u201clevel 3.8\u201d gives a level but does not resolve whether \u201ctesseract-sponge\u201d means a `TesseractSponge` object or a different `Sponge` type; the two interpretations have different available sponge types and limits.",
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level 3.8 TesseractSponge with glass material and local RGB colouring.\n * Transparent shadows are enabled so the sponge's shadow shows the colour seen through it.\n */\nobject GlassTesseractSponge:\n  val scene: Scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeRemoving,\n        level = 3.8f,\n        material = Some(Material.Glass),\n        size = 2.5f,\n        proceduralType = 11,\n        proceduralScale = 1f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\")),\n    render = Some(RenderSettings(transparentShadows = true))\n  )\n\n  SceneRegistry.register(\"glass-tesseract-sponge\", scene)\n```",
+        "now a level-3 TesseractSponge, size 2.5, glass; two directional lights from above, one toward +x and -z and one toward -x and -z; camera 7.8 units out, viewing from (4, 3, 6) toward the origin"
+      ],
+      "expect": {
+        "objects": [
+          "TesseractSponge"
+        ]
+      }
+    }
+  ]
+}
