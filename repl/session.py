@@ -79,6 +79,8 @@ class TurnState:
     retry_state: Optional[_RetryState] = None
     clarification_state: Optional[_ClarificationState] = None
     frame_failures_reported: int = 0
+    # The hand edit last rejected, so the idle check reports it once (msa#47).
+    rejected_edit: Optional[str] = None
 
 
 # Once per REPL process: the validator could not evaluate a scene's values.
@@ -379,6 +381,20 @@ def _check_hand_edit(ctx: Context, ports: Ports, state: TurnState) -> None:
         state.render_process = ports.accept_and_refresh_render(
             ctx.store, ctx.render_launcher_path, state.render_process
         )
+    else:
+        state.rejected_edit = ctx.store.current_scene()
+
+
+def _hand_edit_while_idle(ctx: Context, ports: Ports, state: TurnState, watcher: Any) -> bool:
+    """Session 5 (F108, msa#47): a hand edit reloaded the window only after the next typed
+    line. The watcher calls this while the REPL waits for input; True when it printed."""
+    current = ctx.store.current_scene()
+    if current in (state.prior_scene, state.rejected_edit):
+        return False
+    print()  # off the prompt line
+    _check_hand_edit(ctx, ports, state)
+    watcher.watch(state.render_process)
+    return True
 
 
 def _request(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
@@ -414,26 +430,32 @@ def run_repl(ctx: Context, ports: Ports) -> int:
     however the loop ends (W4, menger#104)."""
     state = TurnState(prior_scene=ctx.store.current_scene())
     watcher = ports.make_window_watcher(ctx.store)
+    watcher.on_idle(lambda: _hand_edit_while_idle(ctx, ports, state, watcher))
     try:
-        while True:
-            state.render_process = ports.report_render_crash(ctx.store, state.render_process, watcher)
-            watcher.watch(state.render_process)
-            state.frame_failures_reported = ports.report_frame_build_failures(
-                ctx.store, state.frame_failures_reported
-            )
-            try:
+        with watcher.busy():
+            while True:
+                state.render_process = ports.report_render_crash(
+                    ctx.store, state.render_process, watcher
+                )
+                watcher.watch(state.render_process)
+                state.frame_failures_reported = ports.report_frame_build_failures(
+                    ctx.store, state.frame_failures_reported
+                )
                 # F48: a visible marker while the next line is threaded onto a pending request.
-                line = input("> " if state.clarification_state is None else "(continuing) > ")
-            except (EOFError, KeyboardInterrupt):
-                break
-            if line.strip() in EXIT_COMMANDS:
-                break
-            _check_hand_edit(ctx, ports, state)
-            command = command_for(line)
-            if command is not None:
-                command(ctx, ports, state, line)
-            elif line.strip():
-                _request(ctx, ports, state, line)
+                prompt = "> " if state.clarification_state is None else "(continuing) > "
+                try:
+                    with watcher.idle(prompt):
+                        line = input(prompt)
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if line.strip() in EXIT_COMMANDS:
+                    break
+                _check_hand_edit(ctx, ports, state)
+                command = command_for(line)
+                if command is not None:
+                    command(ctx, ports, state, line)
+                elif line.strip():
+                    _request(ctx, ports, state, line)
     finally:
         watcher.stop()
         ports.close_render_window(state.render_process)

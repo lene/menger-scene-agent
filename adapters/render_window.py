@@ -350,8 +350,18 @@ def crash_report(
     # Stack-frame lines ("at ...") never name the cause; prefer the last line that does.
     lines = [s for s in (raw.strip() for raw in text.splitlines()) if s and not s.startswith("at ")]
     errors = [s for s in lines if "error" in s.lower() or "exception" in s.lower()]
-    detail = (startup_failures or errors or lines or ["no output in render.stderr.log"])[-1]
+    silent = _SIGNAL_NOTES.get(-returncode if returncode < 0 else returncode - 128,
+                               "no output in render.stderr.log")
+    detail = (startup_failures or errors or lines or [silent])[-1]
     return f"exit {returncode}: {detail[:_STDOUT_PREVIEW_LENGTH]}"
+
+
+# A window ended by a signal writes nothing to its log (session 5, F113, menger#130): name the
+# signal. -N from Popen, 128+N from a wrapper shell.
+_SIGNAL_NOTES = {
+    9: "killed (SIGKILL), often by the out-of-memory killer -- see `journalctl -k`",
+    15: "terminated (SIGTERM) by another process",
+}
 
 
 RELOAD_EVENTS = ("reloaded", "reload_failed", "kind_changed")

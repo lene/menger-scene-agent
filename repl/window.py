@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 from adapters.render_window import (
     LAUNCH_EVENTS,
@@ -48,7 +49,13 @@ class WindowWatcher:
     session 4, F88: 3.6's out-of-memory crash came minutes after the turn and was never
     reported, because the check ran only between turns). A daemon thread polls the window the
     loop last handed it; each window (by object identity) is reported at most once, here or by
-    `_report_render_crash`."""
+    `_report_render_crash`.
+
+    It acts only while the REPL is idle at its prompt: the REPL holds `busy()` while it handles
+    a line and releases it in `idle()` around `input()`. Session 5 (F113, menger#130): a
+    relaunch terminates the old window while a turn runs, and the watcher reported that as
+    "crashed - exit 143". The idle hook (`on_idle`) is how a hand edit reloads the window
+    without a typed line (F108, msa#47); it returns True when it printed something."""
 
     POLL_SECONDS = 2.0
 
@@ -61,6 +68,9 @@ class WindowWatcher:
         self._process: Optional[subprocess.Popen[str]] = None
         self._reported: set[int] = set()
         self._lock = threading.Lock()
+        self._busy = threading.Lock()
+        self._prompt = ""
+        self._on_idle: Optional[Callable[[], bool]] = None
         self._stop = threading.Event()
         threading.Thread(target=self._run, name="render-window-watcher", daemon=True).start()
 
@@ -72,26 +82,66 @@ class WindowWatcher:
         with self._lock:
             return process is not None and id(process) in self._reported
 
+    def on_idle(self, callback: Callable[[], bool]) -> None:
+        self._on_idle = callback
+
+    @contextmanager
+    def busy(self) -> Iterator[None]:
+        with self._busy:
+            yield
+
+    @contextmanager
+    def idle(self, prompt: str) -> Iterator[None]:
+        """Inside `busy()`: lets the watcher act while the REPL waits at `prompt`."""
+        self._prompt = prompt
+        self._busy.release()
+        try:
+            yield
+        finally:
+            self._busy.acquire()
+
     def stop(self) -> None:
         self._stop.set()
 
     def _run(self) -> None:
         while not self._stop.wait(self._poll_seconds):
+            if not self._busy.acquire(blocking=False):
+                continue
             try:
-                with self._lock:
-                    process = self._process
-                if process is None or id(process) in self._reported or process.poll() is None:
-                    continue
-                scene_path = self._store.current_scene_path()
-                report = (
-                    self._ports.crash_report(process, scene_path) if scene_path is not None else None
-                )
-                with self._lock:
-                    self._reported.add(id(process))
-                if report is not None:
-                    print(f"\nRender window: crashed - {report}", flush=True)
+                printed = self._check_crash()
+                if self._on_idle is not None:
+                    printed = self._on_idle() or printed
+                if printed:
+                    _redraw_prompt(self._prompt)
             except Exception:  # noqa: BLE001 -- the watcher must never kill the REPL
                 pass
+            finally:
+                self._busy.release()
+
+    def _check_crash(self) -> bool:
+        with self._lock:
+            process = self._process
+        if process is None or id(process) in self._reported or process.poll() is None:
+            return False
+        scene_path = self._store.current_scene_path()
+        report = self._ports.crash_report(process, scene_path) if scene_path is not None else None
+        with self._lock:
+            self._reported.add(id(process))
+        if report is None:
+            return False
+        print(f"\nRender window: crashed - {report}", flush=True)
+        return True
+
+
+def _redraw_prompt(prompt: str) -> None:
+    """After output printed over a waiting prompt: the prompt and what the user had typed."""
+    try:
+        import readline
+
+        typed = readline.get_line_buffer()
+    except (ImportError, AttributeError):
+        typed = ""
+    print(prompt + typed, end="", flush=True)
 
 
 def _report_render_crash(

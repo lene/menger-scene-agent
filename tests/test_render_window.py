@@ -518,6 +518,12 @@ def test_crash_report_without_a_stderr_log_still_reports_the_exit_status(tmp_pat
     assert report == "exit -11: no output in render.stderr.log"
 
 
+def test_crash_report_names_a_kill_signal_when_the_log_is_empty(tmp_path):
+    # Session 5 (F113, menger#130): exit -9 and 143 came with an empty render.stderr.log.
+    assert "SIGKILL" in crash_report(FakePopen(returncode=-9), tmp_path / "001.scala")
+    assert "SIGTERM" in crash_report(FakePopen(returncode=143), tmp_path / "001.scala")
+
+
 # --- frame_build_failures (usability review 2026-09, F44: menger#54's stderr marker) ----------
 
 
