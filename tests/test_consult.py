@@ -64,8 +64,12 @@ def test_answer_consult_admits_it_cannot_see_the_render_window():
     answer_consult("what are the 4D parameters in the window now?", MANIFEST, CORPUS, adapter)
 
     system_prompt = adapter.last_request.system_prompt
-    assert "You cannot see the render window" in system_prompt
+    assert "When it is not, say plainly that you cannot see the window" in system_prompt
     assert "Never contradict what the user reports about the window" in system_prompt
+    # Session 5 (F115): with the window state appended, the rule no longer contradicts it.
+    assert "When the window's state is given below, answer questions about the window" in (
+        system_prompt
+    )
 
 
 def test_answer_consult_with_no_prior_scene_does_not_mention_a_scene_in_the_prompt():

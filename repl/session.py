@@ -97,7 +97,8 @@ def _window_state_text(store: SceneStore) -> Optional[str]:
     than the state file; usability review 2026-10, session 4, F96)."""
     try:
         state = read_window_state(store.session_dir)
-        return describe_window_state(state) if state is not None else None
+        return (describe_window_state(state, store.current_snapshots())
+                if state is not None else None)
     except (KeyError, TypeError, ValueError):
         return None
 

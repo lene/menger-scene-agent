@@ -753,6 +753,28 @@ def test_the_window_state_next_to_current_scala_is_read_and_described(tmp_path):
     assert "animation at t = 3.5 s, paused" in text
 
 
+def test_the_window_state_names_the_4d_values_the_window_shows(tmp_path):
+    # Session 5 (F115, msa#49): the rotation was animated in the file; the state held only the
+    # window's offset, so "keep them like that" lost it. The nearest snapshot to t gives it.
+    from adapters.render_window import describe_window_state
+
+    def snapshot(t, rot_yw):
+        projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": rot_yw, "rotZW": 0,
+                      "wScale": 1}
+        return {"t": t, "objects": [
+            {"dslType": "TesseractSponge", "projection": projection},
+            {"dslType": "Sphere", "projection": None},
+        ]}
+
+    text = describe_window_state(_WINDOW_STATE, [snapshot(0, 0), snapshot(3.4, 40),
+                                                 snapshot(6.8, 80)])
+
+    assert ("4D values the window shows (the file's at t = 3.4 s plus the window's rotation): "
+            "TesseractSponge: rotXW -61.5, rotYW 41.2, rotZW 0, eyeW 3, wScale 1") in text
+    assert "Sphere" not in text
+    assert "4D values" not in describe_window_state(_WINDOW_STATE)
+
+
 def test_a_window_state_of_another_major_is_not_read(tmp_path):
     from adapters.render_window import read_window_state
 

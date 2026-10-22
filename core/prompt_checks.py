@@ -80,5 +80,6 @@ def window_state_hint(description: str) -> str:
     return (
         f"The render window currently shows: {description}. If the request refers to what the "
         "window shows (\"keep them like that\", \"this angle\"), write exactly these values "
-        "into the scene file; otherwise ignore them (session 4, F96)."
+        "into the scene file -- for 4D rotations the values the window shows, not the window's "
+        "added rotation alone; otherwise ignore them (session 4, F96; session 5, F115)."
     )

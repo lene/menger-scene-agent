@@ -31,7 +31,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple, Union
 
 from adapters.child_env import child_environment
 from adapters.process_contract import (
@@ -254,9 +254,10 @@ def _vec(value: object) -> str:
     return "(" + ", ".join(f"{round(float(v), 3):g}" for v in value) + ")"  # type: ignore[attr-defined]
 
 
-def describe_window_state(state: dict) -> str:
+def describe_window_state(state: dict, snapshots: Sequence[dict] = ()) -> str:
     """The window state as one sentence for the model: camera, 4D rotation (degrees, added on
-    top of the scene file's own projection), playback."""
+    top of the scene file's own projection), playback, and -- given the turn's validator
+    snapshots -- the 4D values the window shows."""
     parts = [
         f"camera at {_vec(state['cameraEye'])} looking at {_vec(state['cameraLookAt'])}",
         "4D rotation added in the window: "
@@ -269,7 +270,35 @@ def describe_window_state(state: dict) -> str:
             f"animation at t = {round(float(state['t']), 2):g} s, "
             + ("playing" if state.get("playing") else "paused")
         )
+    shown = _shown_4d_values(state, snapshots)
+    if shown is not None:
+        parts.append(shown)
     return "; ".join(parts)
+
+
+def _shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Optional[str]:
+    """Per projected object, the scene file's own 4D values at the window's t (the nearest
+    snapshot) plus the window's rotation. Session 5 (F115, msa#49): the rotation was animated in
+    the file, the window state held only the offset, and "keep them like that" lost it."""
+    if not snapshots:
+        return None
+    t = float(state.get("t") or 0.0)
+    snapshot = min(snapshots, key=lambda s: abs(float(s.get("t") or 0.0) - t))
+    objects = [o for o in snapshot.get("objects", []) if isinstance(o.get("projection"), dict)]
+    if not objects:
+        return None
+
+    def values(obj: dict) -> str:
+        p = obj["projection"]
+        rotations = ", ".join(
+            f"{k} {round(float(p.get(k) or 0) + float(state.get(k) or 0), 2):g}"
+            for k in ("rotXW", "rotYW", "rotZW")
+        )
+        return (f"{obj.get('dslType') or obj.get('objectType')}: {rotations}, "
+                f"eyeW {float(p.get('eyeW') or 0):g}, wScale {float(p.get('wScale') or 0):g}")
+
+    return (f"4D values the window shows (the file's at t = {float(snapshot.get('t') or 0):g} s "
+            "plus the window's rotation): " + "; ".join(values(o) for o in objects))
 
 
 def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[str, Path]) -> Path:
