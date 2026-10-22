@@ -332,6 +332,31 @@ def procedural_override_findings(
     return findings
 
 
+_SAME_MATERIAL_WORDS = re.compile(r"\bsame\b[\w\s,]{0,20}\bmaterial\b", re.I)
+
+
+def same_material_edge_findings(after: list[dict], prompt: str) -> list[str]:
+    """Session 5 (F120, msa#53): "the same size and material as the sponge" copied the Film
+    but never the sponge's edge tubes. A 4D object without edges next to one with them, after
+    such a request, gets the edges named as missing."""
+    if not after or not _SAME_MATERIAL_WORDS.search(prompt):
+        return []
+    objects = after[0].get("objects") or []
+    four_d = [(label, o) for label, o in zip(_labels(objects), objects) if o.get("projection")]
+    with_edges = [(label, o) for label, o in four_d if o.get("edgeRadius")]
+    if not with_edges:
+        return []
+    source, edged = with_edges[0]
+    return [
+        f"{label}: the request asks for the same material as another object, but it has no edge "
+        f"tubes while {source} has edgeRadius {edged['edgeRadius']:g}"
+        + (" and an edge material" if edged.get("edgeMaterial") else "")
+        + "; copy them, or say in the doc comment why not"
+        for label, o in four_d
+        if not o.get("edgeRadius")
+    ]
+
+
 _FLIGHT_WORDS = re.compile(r"\b(fly|flies|flight|flying|through|travel|tunnel|follow)\b", re.I)
 _LOOK_AHEAD_WORDS = re.compile(
     r"\b(look(s|ing)? (along|ahead|forward|where)|flight direction|facing forward)\b", re.I
@@ -498,7 +523,9 @@ def check_turn(
     """All snapshot checks of one turn."""
     result = camera_path_check(camera_path, after, prompt)
     result.findings = (
-        procedural_override_findings(before, after, prompt, manifest) + result.findings
+        procedural_override_findings(before, after, prompt, manifest)
+        + same_material_edge_findings(after, prompt)
+        + result.findings
     )
     result.notes = unasked_choice_notes(before, after, prompt, manifest)
     return result

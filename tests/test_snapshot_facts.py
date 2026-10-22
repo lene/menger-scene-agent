@@ -248,3 +248,24 @@ def test_objects_are_named_as_the_dsl_names_them_and_a_subtype_change_still_show
     surface = dict(_SPONGE, objectType="sponge-surface")
     changes = snapshot_changes(_snap([_SPONGE], []), _snap([surface], []), _MANIFEST)
     assert changes == ["Sponge subtype: sponge-volume -> sponge-surface"]
+
+
+def test_same_material_between_4d_objects_names_missing_edge_tubes():
+    # Session 5 (F120, msa#53): the 24-cell got the sponge's Film but not its edge tubes.
+    from core.snapshot_facts import same_material_edge_findings
+
+    projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": 10, "rotZW": 0, "wScale": 1}
+    after = [{"t": 0, "objects": [
+        {"objectType": "tesseract-sponge-volume", "dslType": "TesseractSponge",
+         "edgeRadius": 0.005, "edgeMaterial": None, "projection": projection},
+        {"objectType": "sphere", "dslType": "Sphere", "edgeRadius": None, "projection": None},
+        {"objectType": "24-cell", "dslType": "Icositetrachoron", "edgeRadius": None,
+         "projection": projection},
+    ]}]
+    prompt = "make the 24-cell the same size and material as the sponge"
+
+    findings = same_material_edge_findings(after, prompt)
+
+    assert len(findings) == 1
+    assert findings[0].startswith("Icositetrachoron: ") and "edgeRadius 0.005" in findings[0]
+    assert same_material_edge_findings(after, "make the 24-cell bigger") == []
