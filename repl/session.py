@@ -20,7 +20,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from adapters.render_window import describe_window_state, read_window_state
 from adapters.scene_store import SceneStore, SceneStoreError
-from adapters.tickets import write_draft
+from adapters.tickets import (
+    OPEN_ISSUES_FILE,
+    issue_link,
+    load_open_issues,
+    related_issues,
+    tracked_issue,
+    write_draft,
+)
 from core.prompt_checks import cut_off_reason
 from core.types import ConsultError, TurnResult
 from repl.formatting import (
@@ -148,18 +155,28 @@ def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:
     """F49 (msa#17): an "unsupported" decline, or a part of an accepted turn marked not done
     (F81), leaves a ticket draft in the session's `tickets/` directory, for the filing script
     outside the agent (AD-1: the agent never files anything itself). A failure to write it
-    never disturbs the REPL."""
+    never disturbs the REPL. A capability an open issue already asks for gets that issue's
+    link instead of a draft (session 5, F123, msa#55)."""
     missing, _, nearest = message.partition(" -- nearest: ")
+    open_issues = load_open_issues(store.session_dir.parent / OPEN_ISSUES_FILE)
+    issue = tracked_issue(missing or prompt, open_issues)
+    if issue is not None:
+        print(f"  Already tracked: {issue_link(issue)}")
+        return
+    related = related_issues(missing or prompt, open_issues)
     drafts_dir = store.session_dir / "tickets"
     try:
         drafts_dir.mkdir(exist_ok=True)
     except OSError:
         return
     draft = write_draft(
-        missing or prompt, prompt, drafts_dir, nearest=nearest, session_id=store.session_dir.name
+        missing or prompt, prompt, drafts_dir, nearest=nearest,
+        session_id=store.session_dir.name, related=related,
     )
     if isinstance(draft, str):
         print(f"  Ticket draft: {draft}")
+        for other in related:
+            print(f"    Possibly tracked by: {issue_link(other)}")
 
 
 _stage_line_open = False

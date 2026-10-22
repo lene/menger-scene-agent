@@ -26,13 +26,14 @@ Constraints and Design Notes.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tempfile
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 from core.types import TicketError, TicketResult
 
@@ -105,6 +106,43 @@ def _same_capability(a: str, b: str) -> bool:
     return shared >= min(2, smaller) and shared / smaller >= 2 / 3
 
 
+# In the sessions directory, next to the session directories.
+OPEN_ISSUES_FILE = "open-issues.json"
+
+
+def load_open_issues(path: Union[str, Path]) -> list[dict]:
+    """The open issues the filing step last listed (`scripts/file-ticket-drafts.sh
+    --refresh-issues` in menger-toplevel writes them; AD-1: the agent itself never asks
+    GitHub). `[]` when there is no such file or it is unreadable."""
+    with suppress(OSError, ValueError):
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [i for i in data if isinstance(i, dict) and isinstance(i.get("title"), str)]
+    return []
+
+
+def tracked_issue(missing_capability: str, open_issues: list[dict]) -> Optional[dict]:
+    """The open issue that already asks for this capability, if any (session 5, F123,
+    msa#55: a decline drafted a duplicate of an open feature request)."""
+    title = _title(missing_capability)
+    return next((i for i in open_issues if _same_capability(i["title"], title)), None)
+
+
+def related_issues(missing_capability: str, open_issues: list[dict], limit: int = 3) -> list[dict]:
+    """Open issues that share at least three content words and 40% with the capability: maybe
+    the same request in other words, so the draft names them and the filer decides. Session 5's
+    pre-projection colouring decline shared only 4 of 9 words with the issue that asks for it."""
+    words = _content_words(_title(missing_capability))
+
+    def overlap(issue: dict) -> float:
+        other = _content_words(issue["title"])
+        shared = len(words & other)
+        return shared / min(len(words), len(other)) if shared >= 3 else 0.0
+
+    scored = sorted(((overlap(i), i) for i in open_issues), key=lambda p: -p[0])
+    return [i for score, i in scored if score >= 0.4][:limit]
+
+
 def _existing_draft(drafts_dir: Path, title: str) -> Optional[Path]:
     for draft in sorted(drafts_dir.glob("*.md")):
         with suppress(OSError, UnicodeError):
@@ -124,8 +162,13 @@ def _use_cases(draft: Optional[Path]) -> list[str]:
     return []
 
 
+def issue_link(issue: dict) -> str:
+    return f"#{issue.get('number')} {issue['title']} {issue.get('url', '')}".rstrip()
+
+
 def _draft_text(
-    missing_capability: str, use_cases: list[str], nearest: str = ""
+    missing_capability: str, use_cases: list[str], nearest: str = "",
+    related: Sequence[dict] = (),
 ) -> str:
     timestamp = datetime.now(timezone.utc).isoformat()
     text = (
@@ -137,6 +180,8 @@ def _draft_text(
     )
     if nearest.strip():
         text += f"\n## Nearest possible today\n\n{nearest.strip()}\n"
+    if related:
+        text += "\n## Possibly tracked by\n\n" + "".join(f"- {issue_link(i)}\n" for i in related)
     text += (
         "\n## Done when\n\n"
         "A scene can express the use cases above as asked, not only through the nearest "
@@ -159,6 +204,7 @@ def write_draft(
     drafts_dir: Union[str, Path],
     nearest: str = "",
     session_id: str = "",
+    related: Sequence[dict] = (),
 ) -> TicketResult:
     """Writes a ticket draft naming `missing_capability` and the `prompt` that surfaced it,
     under `drafts_dir` (always an injected parameter -- AD-10). Returns the written file's
@@ -197,7 +243,7 @@ def write_draft(
         target = existing or resolved_dir / _draft_filename(missing_capability)
         case = " ".join(prompt.split()) + (f" (session {session_id})" if session_id else "")
         use_cases = [c for c in _use_cases(existing) if c != f"- {case}"] + [f"- {case}"]
-        text = _draft_text(missing_capability, use_cases, nearest)
+        text = _draft_text(missing_capability, use_cases, nearest, related)
 
         fd, tmp_name = tempfile.mkstemp(
             dir=resolved_dir, prefix=f".{target.name}.", suffix=".tmp"

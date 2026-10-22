@@ -269,3 +269,47 @@ def test_a_draft_says_when_it_is_done(tmp_path):
     text = Path(write_draft("no 5D penteract", PROMPT, tmp_path)).read_text(encoding="utf-8")
 
     assert "## Done when" in text
+
+
+# --- Session 5 (F123, msa#55): an open issue already asks for it ---------------------------
+
+
+def test_a_capability_an_open_issue_asks_for_is_tracked_not_drafted(tmp_path, capsys):
+    import json
+
+    from adapters.scene_store import SceneStore
+    from adapters.tickets import OPEN_ISSUES_FILE, load_open_issues, tracked_issue
+    from repl.session import _write_ticket_draft
+
+    issues = [{"number": 7, "title": "Support colouring by pre-projection 4D coordinates",
+               "url": "https://github.com/lene/menger/issues/7"}]
+    (tmp_path / OPEN_ISSUES_FILE).write_text(json.dumps(issues))
+    decline = "there is no colouring by pre-projection 4D coordinates -- nearest: xyz_rgb_local"
+
+    assert tracked_issue("colouring by pre-projection 4D coordinates", issues) == issues[0]
+    assert tracked_issue("torus knot geometry", issues) is None
+    assert load_open_issues(tmp_path / "missing.json") == []
+
+    store = SceneStore.create_session(tmp_path)
+    _write_ticket_draft(store, decline, "colour it by the 4D coordinates")
+
+    assert "Already tracked: #7 Support colouring" in capsys.readouterr().out
+    assert not (store.session_dir / "tickets").exists()
+
+
+def test_a_loosely_matching_open_issue_is_named_in_the_draft(tmp_path):
+    # Session 5 (F123): luna's decline shared 4 of 9 words with lene/menger#49.
+    from adapters.tickets import related_issues, tracked_issue
+
+    issues = [
+        {"number": 49, "title": "F15: procedural colouring from pre-projection 4D coordinates "
+                                "(xyzw → RGBA)", "url": "https://github.com/lene/menger/issues/49"},
+        {"number": 1, "title": "Camera shake", "url": "u"},
+    ]
+    decline = ("the built-in xyz_rgb_local colouring uses the projected 3D position and cannot "
+               "access the TesseractSponge's original 4D coordinates before rotation and projection")
+
+    assert tracked_issue(decline, issues) is None
+    assert related_issues(decline, issues) == [issues[0]]
+    draft = Path(write_draft(decline, PROMPT, tmp_path, related=issues[:1])).read_text()
+    assert "## Possibly tracked by\n\n- #49 F15: procedural colouring" in draft
