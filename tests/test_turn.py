@@ -1732,6 +1732,24 @@ def test_an_unchanged_scene_gets_one_more_round_that_can_decline(tmp_path, monke
     assert result.messages == ["pre-projection colouring -- nearest: local colouring"]
 
 
+def test_a_reply_that_only_adds_not_done_gets_a_round_to_compose_the_nearest(
+    tmp_path, monkeypatch
+):
+    # Session 5 (F117, sol 8d92cb2f 018): two NOT DONE lines, nothing changed, accepted.
+    _validator_sequence(monkeypatch, ["ok"])
+    prior = CLEAN_SCENE_TEXT
+    marked = "// NOT DONE: a bell-curve glow -- nearest: nested translucent shells\n" + prior
+    adapter = _SequenceAdapter([marked, _repaired(1)])
+
+    result = run_turn(
+        "make the glow fall off like a bell curve", prior, VALID_MANIFEST, VALID_CORPUS,
+        adapter, _make_store(tmp_path), _SCRIPT_PATH,
+    )
+
+    assert "Compose the nearest approximation you named" in adapter.requests[1].user_prompt
+    assert result.tag == "accepted"
+
+
 def test_an_unchanged_scene_that_stays_unchanged_says_no_change_made(tmp_path, monkeypatch):
     _validator_sequence(monkeypatch, ["ok"])
 

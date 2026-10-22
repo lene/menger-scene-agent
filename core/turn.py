@@ -44,7 +44,7 @@ from core.types import (
     ValidationOutcome,
     ValidationResult,
 )
-from gauntlet._scala_text import strip_comments_and_strings
+from gauntlet._scala_text import STRING_LITERAL, strip_comments_and_strings
 from gauntlet.allowlist import check_allowlist
 from gauntlet.clean_code import check_clean_code
 from gauntlet.lint import check_lint
@@ -117,6 +117,13 @@ _MATERIAL_TOKEN = re.compile(r"\bMaterial\.[A-Z]\w*")
 def not_done_parts(scene_text: Optional[str]) -> List[str]:
     """The scene's `// NOT DONE:` parts, stripped."""
     return [m.strip() for m in _NOT_DONE.findall(scene_text or "")]
+
+
+def _same_code(a: str, b: str) -> bool:
+    """Equal but for whitespace and comments: a reply that only adds `// NOT DONE` lines
+    changes nothing (session 5, F118). String literals count, a texture path is code."""
+    return (strip_comments_and_strings(a).split() == strip_comments_and_strings(b).split()
+            and STRING_LITERAL.findall(a) == STRING_LITERAL.findall(b))
 
 
 def split_not_done(parts: List[str]) -> Tuple[List[str], List[str]]:
@@ -378,18 +385,32 @@ def run_turn(
 
     scene_text = generation_result
 
-    if prior_scene is not None and scene_text.split() == prior_scene.split() and repair_rounds > 0:
+    unchanged = prior_scene is not None and scene_text.split() == prior_scene.split()
+    # Session 5 (F117, F118): a reply that only added `// NOT DONE` lines changed nothing
+    # either; its round asks for the nearest it named.
+    only_not_done = (
+        prior_scene is not None and not unchanged and _same_code(scene_text, prior_scene)
+        and not_done_parts(scene_text) != not_done_parts(prior_scene)
+    )
+    if prior_scene is not None and (unchanged or only_not_done) and repair_rounds > 0:
         # Session 4, 4.3 (F92): an impossible request came back as the unchanged scene, and
         # the user got "No change made ... rephrase it" instead of a decline. One more round
         # asks for the change, a decline with a nearest, or a question.
         _emit("repairing (local finding)")
-        retried = revise(
-            f"{prompt}\n\nYou returned the current scene unchanged. If the request can be done, "
-            "make the change. If it cannot be done at all, respond UNSUPPORTED naming what is "
-            "not possible and the nearest thing that is. If it is unclear, respond "
-            "NEEDS_CLARIFICATION with your question.",
-            prior_scene, manifest, corpus, adapter,
-        )
+        if only_not_done:
+            instruction = (
+                "You marked part of the request NOT DONE but changed nothing else. Compose the "
+                "nearest approximation you named now, say in the doc comment that it is an "
+                "approximation, and keep the NOT DONE line for what is still missing."
+            )
+        else:
+            instruction = (
+                "You returned the current scene unchanged. If the request can be done, make "
+                "the change. If it cannot be done at all, respond UNSUPPORTED naming what is "
+                "not possible and the nearest thing that is. If it is unclear, respond "
+                "NEEDS_CLARIFICATION with your question."
+            )
+        retried = revise(f"{prompt}\n\n{instruction}", prior_scene, manifest, corpus, adapter)
         if isinstance(retried, GenerationError):
             return _generation_failure(store, prompt, retried)
         scene_text = retried

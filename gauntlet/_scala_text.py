@@ -30,7 +30,7 @@ _BLOCK_COMMENT = re.compile(r"/\*(?:(?!\*/).)*\*/", re.DOTALL)
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 # Ordinary double-quoted string, `\"`-escape aware, does not span a newline (a real Scala
 # single-quoted string can't either -- an unescaped newline inside one is a syntax error).
-_STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\\n])*"')
+STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\\n])*"')
 
 
 def _blank(match: re.Match) -> str:
@@ -48,7 +48,7 @@ def strip_comments_and_strings(text: str) -> str:
     text = _TRIPLE_QUOTED_STRING.sub(_blank, text)
     text = _BLOCK_COMMENT.sub(_blank, text)
     text = _LINE_COMMENT.sub(_blank, text)
-    text = _STRING_LITERAL.sub(_blank, text)
+    text = STRING_LITERAL.sub(_blank, text)
     return text
 
 
@@ -59,7 +59,7 @@ def strip_strings_only(text: str) -> str:
     contains lint-shaped text (a texture filename, a description) should still not
     false-positive."""
     text = _TRIPLE_QUOTED_STRING.sub(_blank, text)
-    text = _STRING_LITERAL.sub(_blank, text)
+    text = STRING_LITERAL.sub(_blank, text)
     return text
 
 
