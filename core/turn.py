@@ -30,6 +30,7 @@ from core.prompt_checks import (
 from core.readback import semantic_readback
 from core.scene_facts import (
     camera_gaze_warnings,
+    caustics_caveats,
     caveat_warnings,
     extract_scene_facts,
     facts_diff,
@@ -188,6 +189,7 @@ def scene_warnings(facts, scene_text: str, manifest: dict) -> List[str]:
             facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
         )
         + camera_gaze_warnings(facts, strip_comments_and_strings(scene_text))
+        + caustics_caveats(facts, strip_comments_and_strings(scene_text))
     )
 
 

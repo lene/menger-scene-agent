@@ -26,7 +26,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from core.vocabulary import HOLED_TYPES, OBJECT_TYPES, POSITIONED_LIGHT_TYPES, TRANSPARENT_MATERIALS
+from core.vocabulary import (
+    HOLED_TYPES,
+    OBJECT_TYPES,
+    POSITIONED_LIGHT_TYPES,
+    REFRACTIVE_MATERIALS,
+    TRANSPARENT_MATERIALS,
+)
 from gauntlet._scala_text import (
     as_float,
     find_call_bodies,
@@ -660,6 +666,28 @@ def caveat_warnings(
                 f"fragmented refraction; an opaque or metal material, or level 1, shows the shape"
             )
     return warnings
+
+
+_CAUSTICS_ON = re.compile(r"\bcaustics\s*=\s*Some\s*\(")
+# ponytail: the manifest has no "curved" trait; add one when more curved types arrive.
+_CURVED_TYPES = ("Sphere", "ParametricSurface")
+
+
+def caustics_caveats(facts: SceneFacts, stripped_text: str) -> list[str]:
+    """Session 5 (F121, msa#54): the caustics feedback took Glass for the only refractive
+    material. With caustics on, name every refractive object and how visible its caustics are
+    (curved refractors focus light; flat Film and facets give faint ones, menger F98)."""
+    if not _CAUSTICS_ON.search(stripped_text):
+        return []
+    refractive = [o for o in facts.objects if o.material in REFRACTIVE_MATERIALS]
+    if not refractive:
+        return ["caustics are on, but no object has a refractive material "
+                f"({', '.join(sorted(REFRACTIVE_MATERIALS))}), so none appear"]
+    if any(o.type_name in _CURVED_TYPES for o in refractive):
+        return []
+    named = ", ".join(sorted({f"{o.material} {o.type_name}" for o in refractive}))
+    return [f"the refractive objects ({named}) have no curved surface, so their caustics are "
+            "faint; a curved one (a glass Sphere) focuses light into visible patterns"]
 
 
 def extract_scene_facts(stripped_text: str) -> SceneFacts:

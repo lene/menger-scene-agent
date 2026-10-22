@@ -29,6 +29,7 @@ import re
 from typing import Optional
 
 from core.scene_facts import ObjectFact, extract_scene_facts
+from core.vocabulary import REFRACTIVE_MATERIALS
 from gauntlet._scala_text import (
     as_float,
     line_of,
@@ -177,8 +178,9 @@ def _check_degenerate_scale(objects, text) -> list[Finding]:
     return findings
 
 
-_REFRACTIVE_PRESETS = ("Glass", "Water", "Diamond", "GlassDispersive", "DiamondDispersive", "Film")
-_MATERIAL_CALL = re.compile(r"\bMaterial(?:\.(" + "|".join(_REFRACTIVE_PRESETS) + r")\.copy)?\(")
+_MATERIAL_CALL = re.compile(
+    r"\bMaterial(?:\.(" + "|".join(sorted(REFRACTIVE_MATERIALS)) + r")\.copy)?\("
+)
 _COLOR_ARG = re.compile(r"\bcolor\s*=\s*(Color\((?:[^()]|\([^()]*\))*\)|\"[^\"]*\"|[\w.]+)")
 # Alpha from here up reads as opaque: a refractive material needs a low alpha to transmit.
 _OPAQUE_ALPHA = 0.9

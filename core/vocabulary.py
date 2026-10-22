@@ -28,6 +28,10 @@ HOLED_TYPES: FrozenSet[str] = frozenset(_names(MANIFEST["objects"], "holed"))
 TRANSPARENT_MATERIALS: FrozenSet[str] = frozenset(
     m["name"] for m in MANIFEST["materials"] if m.get("transparent")
 )
+# Light bends through these (session 5, F121: Film was taken for not refractive).
+REFRACTIVE_MATERIALS: FrozenSet[str] = frozenset(
+    m["name"] for m in MANIFEST["materials"] if m.get("transparent") and (m.get("ior") or 1) > 1
+)
 REPLACING_PRESETS: Dict[int, str] = {
     p["id"]: p["name"] for p in MANIFEST["proceduralPresets"] if p["effect"] == "replaces"
 }

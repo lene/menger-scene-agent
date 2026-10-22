@@ -513,3 +513,18 @@ def test_a_durationSeconds_animation_is_bounded_like_a_duration_one():
         scene = f"val {name} = 4f\nSponge(level = 1f + t / 2f)"
 
         assert extract_scene_facts(scene).objects[0].level == 3.0, name
+
+
+def test_caustics_caveats_name_every_refractive_object():
+    # Session 5 (F121, msa#54): Film was taken for not refractive ("no Glass, no caustics").
+    from core.scene_facts import caustics_caveats, extract_scene_facts
+
+    def caveats(objects: str, caustics: str = "caustics = Some(Caustics()),") -> list:
+        text = f"val scene = Scene(objects = List({objects}), {caustics})"
+        return caustics_caveats(extract_scene_facts(text), text)
+
+    film = caveats("TesseractSponge(level = 1f, material = Material.Film)")
+    assert len(film) == 1 and "Film TesseractSponge" in film[0] and "faint" in film[0]
+    assert caveats("Sphere(material = Material.Glass), Cube(material = Material.Film)") == []
+    assert "no object has a refractive material" in caveats("Cube(material = Material.Gold)")[0]
+    assert caveats("Cube(material = Material.Film)", caustics="") == []
