@@ -2,7 +2,7 @@
   "schemaVersion": "1.11.0",
   "contentRevision": "058155e1cc09ed7b610cd11906769336e3060f27f7b784a8a762829aa03e7a6c",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.8",
+  "optixJniVersion": "0.4.9",
   "minDriverVersion": "580.65",
   "conventions": [
     "Scene budget: besides each field's own max, a whole scene must stay within 16000000 mesh triangles (both levels of a fractional sponge count; one VolumeFilling sponge at level 5 fits, two do not), 128 renders per frame (accumulation times 2^k for k fractional-level glass objects, k + 1 above 4) and 2000000000 caustics photons per frame (photonsPerIteration x iterations x renders per frame). The validator reports a `scene-budget` finding naming what to lower.",
