@@ -288,7 +288,7 @@ toolchain_fingerprint() {
 CACHE_KEY=""
 if [ -n "$TREE_SHA" ]; then
   CACHE_KEY=$({ echo "$TREE_SHA"; echo "$TIER"; echo "${QA_RANGES:-}"; toolchain_fingerprint; } \
-    | sha1sum | cut -c1-40)
+    | sha256sum | cut -c1-64)
 fi
 
 FAILFAST=0
