@@ -5,12 +5,22 @@ right fails the gate."""
 from __future__ import annotations
 
 import copy
+from types import SimpleNamespace
 
 import pytest
 
 import core.turn
+import evals.recorded as recorded
 from adapters.artifacts import load_corpus, load_manifest
-from evals.recorded import ROOT, _turn_problems, load_cases, run_case
+from evals.recorded import (
+    ROOT,
+    _turn_problems,
+    load_cases,
+    main,
+    previous_runs,
+    ratchet_drops,
+    run_case,
+)
 from gauntlet.types import Finding
 
 MANIFEST = load_manifest(ROOT / "reference" / "dsl-manifest.json")
@@ -113,3 +123,45 @@ def test_an_answer_is_threaded_when_the_model_asks():
     result = run_case(case, MANIFEST, CORPUS)
     assert result.problems == []
     assert result.questions == ["NEEDS_CLARIFICATION: gold or glass?"]
+
+
+# --- kept live runs, compare, ratchet (msa#57) ---------------------------------------------
+
+
+def _keep(monkeypatch, tmp_path, stamp, results):
+    """Writes one live run of `{case: [passed?, ...]}` as `_write_live_results` would."""
+    monkeypatch.setattr(recorded, "LIVE_RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(recorded, "selected_provider", lambda: "litellm")
+    runs = {case: [recorded.CaseResult(case, [] if ok else ["wrong"]) for ok in oks]
+            for case, oks in results.items()}
+    return recorded._write_live_results(SimpleNamespace(model_name="vendor/luna"), runs,
+                                        stamp=stamp, revision="abc1234")
+
+
+def test_live_runs_are_kept_per_model_with_a_latest_copy(monkeypatch, tmp_path):
+    first = _keep(monkeypatch, tmp_path, "20261023T100000Z", {"a": [True]})
+    second = _keep(monkeypatch, tmp_path, "20261023T110000Z", {"a": [False]})
+    assert first.parent == tmp_path / "litellm-vendor_luna"
+    assert first.name == "20261023T100000Z-abc1234.json" and first.is_file()
+    assert (first.parent / "latest.json").read_text() == second.read_text()
+
+
+def test_compare_prints_each_case_s_rate_and_change(monkeypatch, tmp_path, capsys):
+    a = _keep(monkeypatch, tmp_path, "20261023T100000Z", {"a": [True, True], "b": [True]})
+    b = _keep(monkeypatch, tmp_path, "20261023T110000Z", {"a": [True, False], "c": [False]})
+    assert main(["--compare", str(a), str(b)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out == ["100% ->  50%  -50%  a", "100% ->    -  b", "   - ->   0%  c"]
+
+
+def test_the_ratchet_flags_a_drop_of_more_than_one_run_s_share(monkeypatch, tmp_path):
+    for n, oks in enumerate(([True, True, True], [True, True, False], [True, False, False])):
+        _keep(monkeypatch, tmp_path, f"20261023T10000{n}Z", {"a": oks, "b": [True] * 3})
+    latest = _keep(monkeypatch, tmp_path, "20261023T100009Z",
+                   {"a": [True, False, False], "b": [True, True, False], "new": [False] * 3})
+    previous = previous_runs(latest)
+    assert [p.name[:16] for p in previous] == [f"20261023T10000{n}Z" for n in range(3)]
+    # a: 33% against a best of 100% -- flagged; b: 67% against 100% is one run's share; a case
+    # without history has no best.
+    assert ratchet_drops(latest, previous) == [
+        "a: 1/3 runs, best of the last 3 kept run(s) 100%"]

@@ -9,6 +9,16 @@ uv run python -m evals.recorded --live --repeat 3                     # paid
 uv run python -m evals.recorded --live --validator ../menger/docker/scene-validator/run-sandboxed.sh
 ```
 
+Every live run is kept as `evals/live-results/<provider>-<model>/<UTC time>-<agent revision>.json`
+(`-dirty` when the agent had uncommitted changes), the newest also as `latest.json`. After a run,
+a case whose pass rate is below its best in the model's last three kept runs by more than one
+run's share is printed as `dropped:` -- with `--repeat 3`, 3/3 -> 1/3 is flagged and 3/3 -> 2/3
+is taken as noise; with `--repeat 1` nothing is. Two runs side by side:
+
+```bash
+uv run python -m evals.recorded --compare evals/live-results/<m>/<A>.json evals/live-results/<m>/latest.json
+```
+
 A case is one REPL session; its turns build on each other. What a file cannot show (the window,
 how it looks, REPL commands) is listed under `manual` and stays for the usability session.
 

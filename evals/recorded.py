@@ -12,11 +12,15 @@ model once got right fails here, without a model call or a GPU.
 `--live` sends the prompts to the configured provider instead (paid: the user's call), the
 recorded cases and `evals/script/` -- every usability-script request with its conditions, no
 recorded responses (msa#57). `--repeat N` runs each case N times (models vary); pass counts
-and the questions asked go to `evals/live-results/<provider>-<model>.json`. `--validator`
-takes menger's `run-sandboxed.sh` instead of the stub, so compile errors and the scene budget
-count too.
+and the questions asked are kept per run in
+`evals/live-results/<provider>-<model>/<UTC time>-<agent revision>.json`, the newest also as
+`latest.json`. A case whose pass rate falls below its best in the model's last
+`RATCHET_RUNS` kept runs by more than one run's share is flagged. `--compare A B` prints two
+kept runs' pass rates per case. `--validator` takes menger's `run-sandboxed.sh` instead of the
+stub, so compile errors and the scene budget count too.
 
 Usage: uv run python -m evals.recorded [--live [--repeat N] [--validator SCRIPT]] [case.json ...]
+       uv run python -m evals.recorded --compare A.json B.json
 """
 
 from __future__ import annotations
@@ -24,9 +28,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -45,6 +51,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 STUB_VALIDATOR = Path(__file__).resolve().parent / "stub_validator.py"
 LIVE_RESULTS_DIR = Path(__file__).resolve().parent / "live-results"
+LATEST = "latest.json"
+# Kept runs a new live run's pass rates are held against.
+RATCHET_RUNS = 3
 # The usability script's requests with conditions and no recorded responses: live runs only.
 SCRIPT_DIR = Path(__file__).resolve().parent / "script"
 DARK = 0.15  # every background channel at or below this is "dark"
@@ -211,16 +220,76 @@ def load_cases(paths: Optional[List[Path]] = None, live: bool = False) -> List[d
     return [json.loads(p.read_text(encoding="utf-8")) for p in files]
 
 
-def _write_live_results(adapter: ModelAdapter, runs: Dict[str, List[CaseResult]]) -> Path:
+def _agent_revision() -> str:
+    """The agent's commit, `-dirty` with uncommitted changes: what code the run measured."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
+                              check=True).stdout.strip()
+    try:
+        return git("rev-parse", "--short", "HEAD") + ("-dirty" if git("status", "--porcelain") else "")
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def _write_live_results(
+    adapter: ModelAdapter, runs: Dict[str, List[CaseResult]],
+    stamp: Optional[str] = None, revision: Optional[str] = None,
+) -> Path:
     model = getattr(adapter, "model_name", "unknown")
-    path = LIVE_RESULTS_DIR / f"{selected_provider()}-{model}.json".replace("/", "_")
-    LIVE_RESULTS_DIR.mkdir(exist_ok=True)
-    path.write_text(json.dumps([
+    directory = LIVE_RESULTS_DIR / f"{selected_provider()}-{model}".replace("/", "_")
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = directory / f"{stamp}-{revision or _agent_revision()}.json"
+    text = json.dumps([
         {"case": case_id, "passed": sum(r.passed for r in results), "runs": len(results),
          "questions": [r.questions for r in results], "problems": [r.problems for r in results]}
         for case_id, results in runs.items()
-    ], indent=2) + "\n", encoding="utf-8")
+    ], indent=2) + "\n"
+    path.write_text(text, encoding="utf-8")
+    (directory / LATEST).write_text(text, encoding="utf-8")
     return path
+
+
+def _entries(path: Path) -> Dict[str, Tuple[int, int]]:
+    """`{case: (passed, runs)}` of a kept run."""
+    return {e["case"]: (e["passed"], e["runs"])
+            for e in json.loads(path.read_text(encoding="utf-8")) if e["runs"]}
+
+
+def compare_runs(a: Path, b: Path) -> List[str]:
+    """One line per case: its pass rate in `a`, in `b`, and the change."""
+    before, after = _entries(a), _entries(b)
+
+    def rate(entry: Optional[Tuple[int, int]]) -> str:
+        return "   -" if entry is None else f"{entry[0] / entry[1]:4.0%}"
+
+    lines = []
+    for case in sorted(before.keys() | after.keys()):
+        x, y = before.get(case), after.get(case)
+        change = "" if x is None or y is None else f"  {y[0] / y[1] - x[0] / x[1]:+.0%}"
+        lines.append(f"{rate(x)} -> {rate(y)}{change}  {case}")
+    return lines
+
+
+def previous_runs(path: Path) -> List[Path]:
+    """The model's last `RATCHET_RUNS` kept runs before `path` (names start with the time)."""
+    kept = sorted(p for p in path.parent.glob("*.json") if p.name != LATEST and p.name < path.name)
+    return kept[-RATCHET_RUNS:]
+
+
+def ratchet_drops(path: Path, previous: Sequence[Path]) -> List[str]:
+    """Cases whose pass rate in `path` is below their best in `previous` by more than one
+    run's share: with `--repeat 3`, 100% -> 33% is flagged, 100% -> 67% is noise."""
+    best: Dict[str, float] = {}
+    for p in previous:
+        for case, (passed, runs) in _entries(p).items():
+            best[case] = max(best.get(case, 0.0), passed / runs)
+    drops = []
+    for case, (passed, runs) in _entries(path).items():
+        if case in best and passed / runs < best[case] - 1 / runs - 1e-9:
+            drops.append(f"{case}: {passed}/{runs} runs, best of the last {len(previous)} kept "
+                         f"run(s) {best[case]:.0%}")
+    return drops
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -231,7 +300,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--repeat", type=int, default=1, help="runs per case (live)")
     parser.add_argument("--validator", type=Path, default=STUB_VALIDATOR,
                         help="validator script, e.g. menger's run-sandboxed.sh (default: stub)")
+    parser.add_argument("--compare", nargs=2, type=Path, metavar=("A", "B"),
+                        help="print two kept live runs' pass rates per case, and exit")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.compare:
+        print("\n".join(compare_runs(*args.compare)))
+        return 0
     live = get_model_adapter() if args.live else None
     manifest = load_manifest(ROOT / "reference" / "dsl-manifest.json")
     corpus = load_corpus(ROOT / "reference" / "dsl-corpus.json")
@@ -249,7 +323,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     all_passed = sum(all(r.passed for r in results) for results in runs.values())
     print(f"{all_passed}/{len(runs)} cases pass")
     if live is not None:
-        print(f"written: {_write_live_results(live, runs)}")
+        path = _write_live_results(live, runs)
+        print(f"written: {path}")
+        drops = ratchet_drops(path, previous_runs(path))
+        for drop in drops:
+            print(f"  dropped: {drop}")
+        if drops:
+            print(f"{len(drops)} case(s) below their recent best")
     return 0 if all_passed == len(runs) else 1
 
 
