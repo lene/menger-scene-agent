@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.11.0",
-  "contentRevision": "d922f0f92d73ef30950d1f31e449bf6f996607efceddfd607f525cc6e359f1ef",
+  "contentRevision": "b5a7eb0875fbb3c21db4370620dc372faf6a6d1faceae600ad8ae92d4a53e631",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.9",
+  "optixJniVersion": "0.4.10",
   "minDriverVersion": "580.65",
   "conventions": [
     "Scene budget: besides each field's own max, a whole scene must stay within 16000000 mesh triangles (both levels of a fractional sponge count; one VolumeFilling sponge at level 5 fits, two do not), 128 renders per frame (accumulation times 2^k for k fractional-level glass objects, k + 1 above 4) and 2000000000 caustics photons per frame (photonsPerIteration x iterations x renders per frame). The validator reports a `scene-budget` finding naming what to lower.",
@@ -17,7 +17,7 @@
     "Animation: `def scene(t: Float): Scene` plus `val durationSeconds = <seconds>f` in the same object; t is seconds in [0, durationSeconds]. The window plays it in real time, looping, and the validator checks the scene at 25 evenly spaced times from t = 0 to t = durationSeconds. The older name `val duration` is deprecated but still read. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46). The scene has no frame count. The scene agent's window plays it with every frame rendered (25 steps per second at most; a slow frame slows the playback instead of skipping scene time) and loops; menger's default real-time mode follows the wall clock and skips scene time when rendering is slow, which the window title says. A playing window with no input for 10 minutes pauses itself (Space resumes); frame counts are menger-app command-line options only. Editing the scene file reloads an animated scene live in the window, but the window cannot switch between a static and an animated scene -- it must be restarted then (usability review 2026-10, session 3, F57, F84). The window has playback keys: Space pauses and resumes, Left/Right step 0.01 s (with Shift 0.1 s), Home/End jump to the start/end -- so a looping animation CAN be stopped at any frame (usability review 2026-10, session 4, F92).",
     "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `wScale = 0`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). `Projection4DSpec(wScale = s)` scales the object's w coordinate before the 4D rotation (default 1, must be >= 0): 0 flattens a Tesseract to a cube, and animating it from 0 to 1 grows the tesseract out of the cube along w -- the nearest the DSL has to extruding a 3D object into 4D. There is no 5D object (menger#65, #59). For the hand-over from a 3D Cube or Sponge to be seamless: keep rotXW, rotYW and rotZW at 0 while wScale grows (a 4D rotation turns x into w, so wScale 0 is then not the cube), give the 4D object size s * eyeW / (eyeW - screenW) for a 3D object of size s, the same material and the same `edgeRadius`/`edgeMaterial` on both (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), show the 3D object only while wScale is exactly 0 and the 4D object from any wScale above 0 (at 0 the 4D object's faces and edges lie on top of each other in pairs, which a transparent material shows as speckle), and let the extrusion take at least 3 s; rotate in 4D only after wScale reaches 1 (usability review 2026-10, session 5, F124, menger#132; example: CubeToTesseract).",
     "Procedural colouring (`proceduralType`) is evaluated at the hit point's world position (11 xyz_rgb_local: in the object's own box). For a 4D object that is the projected 3D position, after `projection` and `pos`, so the colours follow the projected shape and change when the 4D rotation changes (usability review 2026-09, session 2, F43); its box is taken from `size` before projection, so xyz_rgb_local only approximately spans 0..1 on a 4D object.",
-    "Shadows of transparent objects are opaque unless the scene enables them: `RenderSettings(transparentShadows = true)`. Then a transparent object casts the colour seen through it, its procedural colour included -- e.g. rainbow shadows of a glass object with xyz_rgb_local (usability review 2026-10, session 3, F67).",
+    "Shadows of transparent objects: `RenderSettings(transparentShadows = ...)` is `Auto` by default, which makes a transparent object cast the colour seen through it when one is tinted or procedurally coloured -- e.g. rainbow shadows of a glass object with xyz_rgb_local (usability review 2026-10, session 3, F67; session 5, F111). `true` turns it on for every transparent object, `false` keeps shadows opaque. A scene without `render = Some(RenderSettings(...))` keeps opaque shadows. `caustics` turns transparent shadows on in any case.",
     "Image textures and texture maps (`texture`, `videoTexture`, `normalMap`, `roughnessMap`) need surface UV coordinates. 4D objects, edge tubes (`edgeRadius`), curves and an L-system's branches have no UV coordinates, so these fields have no effect on them; use a material colour or a `proceduralType` there instead.",
     "Glass on a TesseractSponge from level 2 up renders as chaotic, fragmented refraction: the projected sponge has thousands of overlapping refracting layers and a ray gets at most 5 bounces. Prefer an opaque or metal material there, or level 1 for glass, and say so if the user asks for glass (usability review 2026-09, session 2, F55). Thin transparent `Film` shows every inner layer of a 4D sponge at once, so its holes and their walls can't be told apart from the front face; an opaque material with a directional light shows the hole shapes (menger#56).",
     "Camera: the horizontal field of view is fixed at 45 degrees (not adjustable per scene). To frame or zoom to fit a scene, move `Camera.position` -- aim `lookAt` at the scene's centre and set the eye's distance from it to at least radius / sin(22.5deg), where radius is the scene's bounding-sphere radius, with a margin for comfortable framing."
@@ -1901,6 +1901,14 @@
         "Off",
         "Final"
       ]
+    },
+    {
+      "name": "TransparentShadows",
+      "values": [
+        "On",
+        "Off",
+        "Auto"
+      ]
     }
   ],
   "sceneComposition": [
@@ -2564,8 +2572,8 @@
       },
       {
         "name": "transparentShadows",
-        "type": "boolean",
-        "default": "false"
+        "type": "menger.dsl.TransparentShadows",
+        "default": "Auto"
       },
       {
         "name": "antialiasing",
