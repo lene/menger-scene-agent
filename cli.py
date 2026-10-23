@@ -105,6 +105,7 @@ from adapters.render_window import (
     refresh_render_window,
     wait_for_window_event,
 )
+from adapters.scene_export import export_scene
 from adapters.scene_store import SceneStore
 from adapters.scene_validator import validate_scene
 from core.consult import answer_consult
@@ -181,6 +182,11 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "/open: lists every warning and Not done item that still holds for the current "
             "scene. A turn prints only the new ones and counts the rest as \"earlier ... still "
             "apply\".\n"
+            "\n"
+            "/export image [t] or /export video [seconds]: renders the accepted scene with "
+            "menger to <session>/window/export/NNN.png (at t, default 0) or NNN.mp4 (t from 0 "
+            "to seconds, default the scene's duration), in the same container as the window. "
+            "No model call.\n"
             "\n"
             "needs_clarification: when a turn is rejected for being too ambiguous, your "
             "next line is automatically threaded back into the original request (not sent "
@@ -481,6 +487,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         report_frame_build_failures=_report_frame_build_failures,
         make_window_watcher=_WindowWatcher,
         close_render_window=close_render_window,
+        export_scene=export_scene,
     )
     # SIGHUP and SIGTERM unwind through run_repl's `finally` too, which closes the window
     # (menger#104).

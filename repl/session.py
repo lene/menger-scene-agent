@@ -18,7 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from adapters.render_window import describe_window_state, read_window_state
+from adapters.render_window import (
+    describe_window_state,
+    read_window_state,
+    render_window_scene_path,
+)
+from adapters.scene_export import ExportError
 from adapters.scene_store import SceneStore, SceneStoreError
 from adapters.tickets import (
     OPEN_ISSUES_FILE,
@@ -29,6 +34,7 @@ from adapters.tickets import (
     write_draft,
 )
 from core.prompt_checks import cut_off_reason
+from core.scene_facts import scene_duration
 from core.types import ConsultError, TurnResult
 from repl.formatting import (
     _format_hand_edit_result,
@@ -48,6 +54,10 @@ logger = logging.getLogger("cli")
 
 # Recognized verbatim as the first whitespace-separated token of a line (story 11, 19).
 CONSULT_PREFIXES = ("/ask", "/question")
+# Takes arguments too, so it is matched by first word (msa#56).
+EXPORT_COMMAND = "/export"
+_EXPORT_USAGE = ("Export: /export image [t] (a PNG at t, default 0) or /export video [seconds] "
+                 "(an mp4, default the scene's duration).")
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,7 @@ class Ports:
     report_frame_build_failures: Callable[[SceneStore, int], int]
     make_window_watcher: Callable[[SceneStore], Any]
     close_render_window: Callable[[Optional[subprocess.Popen[str]]], None]
+    export_scene: Callable[..., Any]
 
 
 @dataclass
@@ -338,6 +349,51 @@ def _consult(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
         _record_consult_safely(ctx.store, question, answer=result)
 
 
+def _export_request(line: str) -> Optional[Tuple[str, Optional[float]]]:
+    """`(kind, value)` of an `/export` line, or `None` when it does not parse."""
+    words = line.split()
+    if len(words) not in (2, 3) or words[1] not in ("image", "video"):
+        return None
+    try:
+        return words[1], float(words[2]) if len(words) == 3 else None
+    except ValueError:
+        return None
+
+
+def _export(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
+    """`/export image [t]`, `/export video [seconds]` (msa#56): the accepted scene rendered by
+    menger in the contained launcher, without a model call."""
+    request = _export_request(line)
+    if request is None:
+        print(_EXPORT_USAGE)
+        return
+    kind, value = request
+    scene_file = render_window_scene_path(ctx.store.session_dir)
+    if state.prior_scene is None or not scene_file.is_file():
+        print("Export: no accepted scene yet.")
+        return
+    seconds = None
+    if kind == "video":
+        seconds = value if value is not None else scene_duration(scene_file.read_text())
+        if seconds is None or seconds <= 0:
+            print("Export: the scene declares no duration -- give the length: "
+                  "/export video <seconds>")
+            return
+    print(f"... exporting {kind}")
+    try:
+        outcome = ports.export_scene(
+            scene_file, ctx.render_launcher_path, kind,
+            t=value if kind == "image" else None, seconds=seconds,
+        )
+    except KeyboardInterrupt:
+        print("Export interrupted (Ctrl-C).")
+        return
+    if isinstance(outcome, ExportError):
+        print(f"Export error: {outcome.message}")
+    else:
+        print(f"Exported: {outcome.path}")
+
+
 def _new(ctx: Context, ports: Ports, state: TurnState, _line: str) -> None:
     # ponytail: a fresh scene inside a session breaks AD-13 (the last file on disk is the
     # current scene; the old one would come back as a "hand edit"), so a new session it is.
@@ -346,7 +402,7 @@ def _new(ctx: Context, ports: Ports, state: TurnState, _line: str) -> None:
 
 def _unknown(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
     """Session 5 (F107): `/exit`, `/new` and a pasted file path went to the model as requests."""
-    names = sorted([*COMMANDS, *EXIT_COMMANDS, *CONSULT_PREFIXES])
+    names = sorted([*COMMANDS, *EXIT_COMMANDS, *CONSULT_PREFIXES, EXPORT_COMMAND])
     print(f"Unknown command {line.split(None, 1)[0]!r} (not sent to the model). "
           f"Commands: {', '.join(names)}.")
 
@@ -372,6 +428,8 @@ def command_for(line: str) -> Optional[Command]:
     first = stripped.split(None, 1)[0]
     if first in CONSULT_PREFIXES:
         return _consult
+    if first == EXPORT_COMMAND:
+        return _export
     if _STATUS_ECHO.match(stripped):
         return _status_echo
     if first.startswith("/"):

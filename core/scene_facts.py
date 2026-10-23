@@ -298,6 +298,14 @@ def _duration_expr(env: dict[str, str]) -> Optional[str]:
     return env.get("durationSeconds", env.get("duration"))
 
 
+def scene_duration(text: str) -> Optional[float]:
+    """The scene's declared length in seconds; `None` for a still scene or one whose length
+    this module cannot evaluate (`/export video`, msa#56)."""
+    env = _local_vals(text)
+    expr = _duration_expr(env)
+    return _evaluate(expr, env, 0.0) if expr else None
+
+
 def _level_upper_bound(expr: str, env: dict[str, str]) -> Optional[float]:
     """Highest value of a `level` expression over an animation: it is evaluated at t = 0 and
     t = duration (as the renderer's validator does), so a monotonic ramp is bounded exactly."""
