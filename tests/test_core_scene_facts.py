@@ -528,3 +528,20 @@ def test_caustics_caveats_name_every_refractive_object():
     assert caveats("Sphere(material = Material.Glass), Cube(material = Material.Film)") == []
     assert "no object has a refractive material" in caveats("Cube(material = Material.Gold)")[0]
     assert caveats("Cube(material = Material.Film)", caustics="") == []
+
+
+def test_no_occlusion_warning_for_objects_never_shown_together():
+    # Session 6, 8a: a cube phase and a tesseract phase, one `if` apart, were "hidden inside".
+    scene = (
+        "Tesseract(pos = Vec3(0f, 0f, 0f), size = 2.8f, material = Some(Material.Plastic))\n"
+        "Cube(pos = Vec3(0f, 0f, 0f), size = 1.4f, material = Some(Material.Plastic))\n"
+    )
+    facts = extract_scene_facts(scene)
+    phases = [{"t": 0, "objects": [{"dslType": "Cube"}]},
+              {"t": 4, "objects": [{"dslType": "Tesseract"}]}]
+    together = [{"t": 0, "objects": [{"dslType": "Cube"}, {"dslType": "Tesseract"}]},
+                {"t": 4, "objects": [{"dslType": "Cube"}, {"dslType": "Tesseract"}]}]
+
+    assert len(occlusion_warnings(facts)) == 1
+    assert occlusion_warnings(facts, phases) == []
+    assert len(occlusion_warnings(facts, together)) == 1

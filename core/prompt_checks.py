@@ -61,6 +61,32 @@ def unknown_material_hint(prompt: str, manifest: dict) -> Optional[str]:
     )
 
 
+# Colouring by the coordinates a 4D object has before its rotation and projection. Session 4
+# (F80b) declined it; session 6 accepted it 3/3 with xyz_rgb_local and the false claim that it
+# uses pre-projection coordinates. The manifest says procedural colour is evaluated at the
+# projected 3D position.
+_COLOUR_WORDS = re.compile(r"\b(colou?r\w*|rgb|xyz)\b", re.IGNORECASE)
+_BEFORE_WORDS = re.compile(
+    r"\b(before|original|prior to|untransformed|unrotated|unprojected|pre-?(projection|rotation))",
+    re.IGNORECASE,
+)
+_TRANSFORM_WORDS = re.compile(r"\b(rotat\w*|project\w*|4d)\b", re.IGNORECASE)
+
+
+def pre_projection_colour_hint(prompt: str) -> Optional[str]:
+    if not (_COLOUR_WORDS.search(prompt) and _BEFORE_WORDS.search(prompt)
+            and _TRANSFORM_WORDS.search(prompt)):
+        return None
+    return (
+        "If the request asks to colour a 4D object by its coordinates before the 4D rotation or "
+        "projection: the DSL cannot. Procedural colouring (xyz_rgb, xyz_rgb_local) is evaluated "
+        "at the projected 3D position, after `projection` (manifest conventions), so respond "
+        "UNSUPPORTED naming that, with the nearest: xyz_rgb_local, which follows the projected "
+        "shape. Never claim xyz_rgb_local uses pre-projection coordinates (session 4, F80b; "
+        "session 6)."
+    )
+
+
 # A request that points at what the render window shows ("keep them like that", "the current
 # view", "this angle"): the window's own state (4D rotation, camera) is then part of the
 # context. Session 4, 4.11/4.12 (F96): "keep them like that" had nothing to keep.

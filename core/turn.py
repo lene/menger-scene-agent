@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 from core.generation import generate, revise
 from core.ports import ModelAdapter, SceneStore, SceneStoreError
 from core.prompt_checks import (
     play_once_note,
+    pre_projection_colour_hint,
     refers_to_window,
     unknown_material_hint,
     window_state_hint,
@@ -168,23 +169,27 @@ def _with_first_attempt(rejection: TurnResult, first_candidate: str, rounds_done
     )
 
 
+# Over budget, the repair keeps what the user named instead of lowering it (F87), so the user
+# decides (session 5, F109); asked on every over-budget rejection (session 6, msa#48).
+BUDGET_QUESTION = "Lower it (name a level), or /drop this request?"
+
+
 def _unrepaired_note(feedback: List[str]) -> str:
-    """What to say when the repair returned the same scene. Over budget, the repair keeps what
-    the user named instead of lowering it (F87), so the user decides (session 5, F109)."""
+    """What to say when the repair returned the same scene."""
     if any(f.startswith("scene-budget") for f in feedback):
-        return (
-            "The scene is over the budget above, and the automatic repair keeps the level you "
-            "asked for. Lower it (name a level), or /drop this request?"
-        )
+        return ("The scene is over the budget above, and the automatic repair keeps the level "
+                f"you asked for. {BUDGET_QUESTION}")
     return "The automatic repair returned the same scene, so it was stopped."
 
 
-def scene_warnings(facts, scene_text: str, manifest: dict) -> List[str]:
+def scene_warnings(
+    facts, scene_text: str, manifest: dict, snapshots: Sequence[dict] = ()
+) -> List[str]:
     """Warnings that are properties of a scene itself, not of a turn's changes: an occluded
     object (F23), a slow level or glass on a 4D sponge (F36, #4c), an animated camera that ends
     up looking at nothing (F83)."""
     return (
-        occlusion_warnings(facts)
+        occlusion_warnings(facts, snapshots)
         + caveat_warnings(
             facts, manifest_warn_levels(manifest), manifest_subtype_warn_levels(manifest)
         )
@@ -308,6 +313,7 @@ def run_turn(
     repair_rounds: int = MAX_REPAIR_ROUNDS,
     window_state: Optional[str] = None,
     answered: bool = False,
+    context_note: Optional[str] = None,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -335,7 +341,10 @@ def run_turn(
 
     `answered`: `prompt` threads the user's answer to a question the model asked (session 5,
     F104/F105). The material hint is then left out, and a second question gets one round that
-    asks for the scene instead: one clarification per request."""
+    asks for the scene instead: one clarification per request.
+
+    `context_note`: what the request refers back to that the scene does not hold, e.g. the
+    `/ask` question and answer just before "keep them like that" (session 6, msa#49)."""
 
     def _emit(stage: StageName) -> None:
         if on_stage is None:
@@ -348,8 +357,11 @@ def run_turn(
     _emit("generating")
     # F93: a material with no preset is a question, not a silent approximation. Only the
     # model's copy of the request carries the hint; history and tickets keep the user's words.
-    hint = None if answered else unknown_material_hint(prompt, manifest)
-    model_prompt = f"{prompt}\n\n({hint})" if hint else prompt
+    hints = [] if answered else [unknown_material_hint(prompt, manifest)]
+    hints.append(pre_projection_colour_hint(prompt))
+    model_prompt = "".join([prompt, *(f"\n\n({h})" for h in hints if h)])
+    if context_note:
+        model_prompt += f"\n\n({context_note})"
     if window_state and refers_to_window(prompt):
         # F96: "keep them like that" -- the window's own state (a description of the file
         # `<current.scala>.window-state.json`, passed by the REPL) is context for the model.
@@ -567,9 +579,9 @@ def run_turn(
 
         # F91: a scene warning or a Not done part the previous scene already had was reported
         # then; it is counted, not repeated (session 4: one warning printed 8 times).
-        current_warnings = scene_warnings(new_facts, scene_text, manifest)
+        current_warnings = scene_warnings(new_facts, scene_text, manifest, snapshots)
         earlier_warnings = (
-            set(scene_warnings(prior_facts, prior_scene, manifest))
+            set(scene_warnings(prior_facts, prior_scene, manifest, prior_snapshots))
             if prior_scene is not None and prior_facts is not None
             else set()
         )

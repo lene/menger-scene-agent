@@ -18,3 +18,5 @@ Pairs with menger 0.9.0 (DSL manifest 1.11.0); first release not yet tagged.
   run identity on every history entry (#31).
 - `--check`: does this agent fit the installed menger's launchers and images (#32).
 - A replay eval of recorded usability turns in the unit suite (`evals/`, #30).
+- `/export image [t]` and `/export video [seconds]`; an export asked for in words ("save the
+  animation as mp4") gets that hint instead of a model call (#56).

@@ -75,3 +75,15 @@ def test_play_once_on_an_animated_scene_notes_that_the_preview_loops():
     assert "loops" in play_once_note(prompt, animated)
     assert play_once_note("rotate it about the xw plane", animated) is None
     assert play_once_note(prompt, "object A:\n  val scene = Scene()\n") is None
+
+
+def test_colouring_before_the_4d_rotation_gets_the_unsupported_hint():
+    # Session 6: accepted 3/3 with the false claim that xyz_rgb_local is pre-projection (F80b).
+    from core.prompt_checks import pre_projection_colour_hint
+
+    hint = pre_projection_colour_hint(
+        "x,y,z in the xyz -> RGB should be the original x,y,z values before 4D rotation and "
+        "projection to 3D, not *after*")
+    assert hint is not None and "UNSUPPORTED" in hint
+    assert pre_projection_colour_hint("colour it by its local x, y, z") is None
+    assert pre_projection_colour_hint("rotate it in 4D before the next step") is None

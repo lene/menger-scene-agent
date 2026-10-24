@@ -1661,7 +1661,8 @@ def test_value_changes_come_from_the_validator_snapshots(tmp_path, monkeypatch):
 
 
 def test_a_scene_check_finding_gets_a_repair_round(tmp_path, monkeypatch):
-    # Session 4, 4.9: green under a kept xyz_rgb_local; the repair drops the procedural.
+    # Session 4, 4.9: green under a kept xyz_rgb_local; the repair drops the procedural. A colour
+    # request: a glow over the pattern is kept and marked NOT DONE (session 6, msa#51).
     store = _make_store(tmp_path)
     prior = "object A:\n  val scene = Scene()\n"
     store.write_snapshots(store.accept(prior, "first"), _fixture("t4-015")["snapshots"])
@@ -1672,7 +1673,7 @@ def test_a_scene_check_finding_gets_a_repair_round(tmp_path, monkeypatch):
     ])
 
     result = run_turn(
-        "make the sponge glow green", prior, _REAL_MANIFEST, VALID_CORPUS, adapter, store,
+        "make the sponge green", prior, _REAL_MANIFEST, VALID_CORPUS, adapter, store,
         _SCRIPT_PATH, repair_rounds=2,
     )
 
@@ -1689,7 +1690,7 @@ def test_an_unfixed_scene_check_finding_is_a_warning_not_a_rejection(tmp_path, m
     same = "object A:\n  val scene = Scene() // green\n"
 
     result = run_turn(
-        "make the sponge glow green", prior, _REAL_MANIFEST, VALID_CORPUS,
+        "make the sponge green", prior, _REAL_MANIFEST, VALID_CORPUS,
         _SequenceAdapter([same]), store, _SCRIPT_PATH, repair_rounds=2,
     )
 

@@ -95,18 +95,35 @@ def test_summarise_omits_default_render_settings():
 
 
 def test_a_kept_procedural_under_a_new_colour_is_a_finding():
-    # Session 4, 4.9: the sponge "glow green" kept xyz_rgb_local, which replaces the colour.
+    # Session 4, 4.9 (F89): the sponge turned green but kept xyz_rgb_local, which replaces the
+    # colour. A colour request; a glow request is the conflict rule 21 keeps (session 6, msa#51).
     result = check_turn(
         _load("t4-015")["snapshots"],
         _load("t4-016")["snapshots"],
         [],
-        "make the 24-cell glow orange and the sponge glow green",
+        "make the 24-cell orange and the sponge green",
         _MANIFEST,
     )
 
     assert len(result.findings) == 1
     assert "proceduralType 11 (xyz_rgb_local)" in result.findings[0]
     assert "replaces the new colour" in result.findings[0]
+
+
+def test_a_glow_over_a_replacing_pattern_keeps_the_pattern():
+    # Session 6 (msa#51): F89's "drop it" made the model resolve the glow-vs-xyz_rgb_local
+    # conflict by dropping the colouring; rule 21 keeps it and marks the glow NOT DONE.
+    before, after = _load("t4-015")["snapshots"], _load("t4-016")["snapshots"]
+    prompt = "make the 24-cell glow orange and the sponge glow green"
+
+    assert check_turn(before, after, [], prompt, _MANIFEST).findings == []
+
+    dropped = [dict(s, objects=[dict(o, proceduralType=0) for o in s["objects"]]) for s in after]
+    findings = check_turn(before, dropped, [], prompt, _MANIFEST).findings
+    assert len(findings) == 1
+    assert "dropped its proceduralType 11 (xyz_rgb_local)" in findings[0]
+    assert "NOT DONE" in findings[0]
+    assert check_turn(before, dropped, [], "make it green", _MANIFEST).findings == []
 
 
 def test_no_procedural_finding_when_the_request_asks_for_the_pattern():

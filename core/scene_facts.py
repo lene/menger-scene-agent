@@ -24,7 +24,7 @@ import ast
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Sequence
 
 from core.vocabulary import (
     HOLED_TYPES,
@@ -586,7 +586,19 @@ def camera_gaze_warnings(facts: SceneFacts, text: str) -> list[str]:
     ]
 
 
-def occlusion_warnings(facts: SceneFacts) -> list[str]:
+def _types_shown_together(snapshots: Sequence[dict]) -> Optional[set[tuple[str, str]]]:
+    """The pairs of DSL types some snapshot holds at the same t; `None` for a scene sampled at
+    one t (static), where every pair is shown together."""
+    if len(snapshots) < 2:
+        return None
+    pairs: set[tuple[str, str]] = set()
+    for snapshot in snapshots:
+        types = {o.get("dslType") for o in snapshot.get("objects") or []} - {None}
+        pairs |= {(a, b) for a in types for b in types}
+    return pairs
+
+
+def occlusion_warnings(facts: SceneFacts, snapshots: Sequence[dict] = ()) -> list[str]:
     """F23: an object whose entire bounding sphere fits inside another, opaque object's
     bounding sphere is never visible from any angle -- a size-aware extension of the
     "distance from center < size" heuristic `gauntlet/lint.py`'s
@@ -598,8 +610,11 @@ def occlusion_warnings(facts: SceneFacts) -> list[str]:
     one, e.g. Glass, doesn't hide anything. Coarse and conservative like the rest of this
     module's heuristics: a compact, indeterminate-opacity occluder is treated as opaque
     (`ObjectFact.is_opaque`), so this can under-warn on a thin/elongated occluder more
-    readily than it over-warns on a compact one."""
+    readily than it over-warns on a compact one. Given an animation's snapshots, only for two
+    types some t shows together: 8a's phases (a cube, then a tesseract) are one `if` apart in
+    the text and never on screen at once (session 6)."""
     warnings: list[str] = []
+    together = _types_shown_together(snapshots)
     for occluder in facts.objects:
         if occluder.pos is None or occluder.size is None or not occluder.is_opaque:
             continue
@@ -607,6 +622,8 @@ def occlusion_warnings(facts: SceneFacts) -> list[str]:
             continue
         for obj in facts.objects:
             if obj is occluder or obj.pos is None or obj.size is None:
+                continue
+            if together is not None and (obj.type_name, occluder.type_name) not in together:
                 continue
             if _distance(obj.pos, occluder.pos) + obj.size < occluder.size:
                 warnings.append(

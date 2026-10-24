@@ -2637,6 +2637,17 @@ def test_a_budget_finding_is_labelled_over_budget():
     assert formatting._format_turn_result(other).startswith("Rejected (lint findings)")
 
 
+def test_every_over_budget_rejection_asks_for_a_level_once():
+    # Session 6 (msa#48): a repair that changed the scene ended with the totals and no question.
+    from core.turn import BUDGET_QUESTION
+
+    plain = TurnResult(tag="lint_findings", messages=["scene-budget: 50331648 triangles"])
+    assert formatting._format_turn_result(plain).count(BUDGET_QUESTION) == 1
+    asked = TurnResult(tag="lint_findings",
+                       messages=["scene-budget: 50331648 triangles", f"Over. {BUDGET_QUESTION}"])
+    assert formatting._format_turn_result(asked).count(BUDGET_QUESTION) == 1
+
+
 def test_not_done_parts_are_printed():
     result = TurnResult(
         tag="accepted", messages=[], ordinal=2, readback_summary="a tesseract",

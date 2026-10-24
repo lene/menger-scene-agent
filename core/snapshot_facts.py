@@ -296,15 +296,22 @@ _PATTERN_WORDS = re.compile(
 )
 
 
+# A glow request on an object whose colour a pattern replaces is a conflict the scene keeps
+# (generation rule 21): composed with a NOT DONE line, not resolved by dropping the pattern.
+_GLOW_WORDS = re.compile(r"\b(glow\w*|emissi\w*|emit\w*|shine|shining|light up)\b", re.I)
+
+
 def procedural_override_findings(
     before: list[dict], after: list[dict], prompt: str, manifest: dict
 ) -> list[str]:
     """F89: a turn changed an object's material or colour but kept a non-zero procedural, which
     either imitates the old material (wood on aluminium) or replaces the new colour (green
-    under xyz_rgb_local)."""
+    under xyz_rgb_local). Not for a replacing pattern under a glow request: that conflict is
+    kept and marked NOT DONE (session 6, msa#51; `dropped_pattern_findings`)."""
     if not before or not after or _PATTERN_WORDS.search(prompt):
         return []
     replacing = colour_replacing_procedurals(manifest)
+    glow = _GLOW_WORDS.search(prompt) is not None
     names = procedural_names(manifest)
     old_objects, new_objects = before[0].get("objects") or [], after[0].get("objects") or []
     findings = []
@@ -312,7 +319,7 @@ def procedural_override_findings(
         if o_old.get("objectType") != o_new.get("objectType"):
             continue
         proc = int(o_new.get("proceduralType", 0))
-        if proc == 0 or int(o_old.get("proceduralType", 0)) != proc:
+        if proc == 0 or int(o_old.get("proceduralType", 0)) != proc or (glow and proc in replacing):
             continue
         old_mat = material_name(o_old.get("material"), manifest)
         new_mat = material_name(o_new.get("material"), manifest)
@@ -330,6 +337,31 @@ def procedural_override_findings(
             "unless the request asked for that pattern"
         )
     return findings
+
+
+def dropped_pattern_findings(
+    before: list[dict], after: list[dict], prompt: str, manifest: dict
+) -> list[str]:
+    """Session 6 (msa#51): "make the 24-cell glow orange" on an xyz_rgb_local 24-cell replaced
+    the colouring with an orange material, reported only as a removed property. The glow
+    conflicts with a pattern that replaces the colour; rule 21 keeps the pattern and marks the
+    glow NOT DONE with a nearest."""
+    if not before or not after or _PATTERN_WORDS.search(prompt) or not _GLOW_WORDS.search(prompt):
+        return []
+    replacing = colour_replacing_procedurals(manifest)
+    names = procedural_names(manifest)
+    old_objects, new_objects = before[0].get("objects") or [], after[0].get("objects") or []
+    return [
+        f"{label}: the request asks for a glow, and this turn dropped its proceduralType {proc} "
+        f"({names.get(proc, '?')}), which the request did not ask to drop. Keep proceduralType "
+        f"{proc}: it replaces the colour, so the glow colour conflicts with it. Compose the rest "
+        "and mark the glow NOT DONE with that conflict and a nearest (an emissive shell around "
+        "the object)"
+        for label, o_old, o_new in zip(_labels(new_objects), old_objects, new_objects)
+        if o_old.get("objectType") == o_new.get("objectType")
+        and (proc := int(o_old.get("proceduralType", 0))) in replacing
+        and int(o_new.get("proceduralType", 0)) == 0
+    ]
 
 
 _SAME_MATERIAL_WORDS = re.compile(r"\bsame\b[\w\s,]{0,20}\bmaterial\b", re.I)
@@ -524,6 +556,7 @@ def check_turn(
     result = camera_path_check(camera_path, after, prompt)
     result.findings = (
         procedural_override_findings(before, after, prompt, manifest)
+        + dropped_pattern_findings(before, after, prompt, manifest)
         + same_material_edge_findings(after, prompt)
         + result.findings
     )

@@ -276,29 +276,58 @@ def describe_window_state(state: dict, snapshots: Sequence[dict] = ()) -> str:
     return "; ".join(parts)
 
 
+def _snapshot_t(snapshot: dict) -> float:
+    return float(snapshot.get("t") or 0.0)
+
+
+def _projected(snapshot: dict) -> List[dict]:
+    return [o for o in snapshot.get("objects", []) if isinstance(o.get("projection"), dict)]
+
+
+def _bracket(snapshots: Sequence[dict], t: float) -> Tuple[dict, dict, float]:
+    """The snapshots at or just before and at or just after `t`, and how far `t` is between
+    them (0..1). Outside the sampled range, the end snapshot twice."""
+    ordered = sorted(snapshots, key=_snapshot_t)
+    before = [s for s in ordered if _snapshot_t(s) <= t] or ordered[:1]
+    after = [s for s in ordered if _snapshot_t(s) >= t] or ordered[-1:]
+    a, b = before[-1], after[0]
+    span = _snapshot_t(b) - _snapshot_t(a)
+    return a, b, (t - _snapshot_t(a)) / span if span > 0 else 0.0
+
+
 def _shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Optional[str]:
-    """Per projected object, the scene file's own 4D values at the window's t (the nearest
-    snapshot) plus the window's rotation. Session 5 (F115, msa#49): the rotation was animated in
-    the file, the window state held only the offset, and "keep them like that" lost it."""
+    """Per projected object, the scene file's own 4D values at the window's t plus the window's
+    rotation. Session 5 (F115, msa#49): the rotation was animated in the file, the window state
+    held only the offset, and "keep them like that" lost it. The validator samples an animation
+    25 times, so the values are interpolated between the two snapshots around t: session 6 read
+    the snapshot at t = 2 for a window paused at 2.16, 9.6 degrees off."""
     if not snapshots:
         return None
     t = float(state.get("t") or 0.0)
-    snapshot = min(snapshots, key=lambda s: abs(float(s.get("t") or 0.0) - t))
-    objects = [o for o in snapshot.get("objects", []) if isinstance(o.get("projection"), dict)]
-    if not objects:
+    a, b, share = _bracket(snapshots, t)
+    first, second = _projected(a), _projected(b)
+    if len(second) != len(first):
+        second, share = first, 0.0
+    if not first:
         return None
 
-    def values(obj: dict) -> str:
-        p = obj["projection"]
+    def at_t(pa: dict, pb: dict, key: str) -> float:
+        start = float(pa.get(key) or 0)
+        return start + (float(pb.get(key) or 0) - start) * share
+
+    def values(obj_a: dict, obj_b: dict) -> str:
+        pa, pb = obj_a["projection"], obj_b["projection"]
         rotations = ", ".join(
-            f"{k} {round(float(p.get(k) or 0) + float(state.get(k) or 0), 2):g}"
+            f"{k} {round(at_t(pa, pb, k) + float(state.get(k) or 0), 2):g}"
             for k in ("rotXW", "rotYW", "rotZW")
         )
-        return (f"{obj.get('dslType') or obj.get('objectType')}: {rotations}, "
-                f"eyeW {float(p.get('eyeW') or 0):g}, wScale {float(p.get('wScale') or 0):g}")
+        return (f"{obj_a.get('dslType') or obj_a.get('objectType')}: {rotations}, "
+                f"eyeW {round(at_t(pa, pb, 'eyeW'), 3):g}, "
+                f"wScale {round(at_t(pa, pb, 'wScale'), 3):g}")
 
-    return (f"4D values the window shows (the file's at t = {float(snapshot.get('t') or 0):g} s "
-            "plus the window's rotation): " + "; ".join(values(o) for o in objects))
+    sampled = "" if share == 0.0 else ", interpolated between the validator's samples"
+    return (f"4D values the window shows (the file's at t = {round(t, 2):g} s{sampled}, plus the "
+            "window's rotation): " + "; ".join(values(oa, ob) for oa, ob in zip(first, second)))
 
 
 def sync_render_window_scene(scene_file: Union[str, Path], session_dir: Union[str, Path]) -> Path:

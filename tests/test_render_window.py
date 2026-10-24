@@ -755,7 +755,8 @@ def test_the_window_state_next_to_current_scala_is_read_and_described(tmp_path):
 
 def test_the_window_state_names_the_4d_values_the_window_shows(tmp_path):
     # Session 5 (F115, msa#49): the rotation was animated in the file; the state held only the
-    # window's offset, so "keep them like that" lost it. The nearest snapshot to t gives it.
+    # window's offset, so "keep them like that" lost it. Session 6 (msa#49): the nearest
+    # snapshot was 9.6 degrees off at t = 2.16, so the values are interpolated at the window's t.
     from adapters.render_window import describe_window_state
 
     def snapshot(t, rot_yw):
@@ -769,10 +770,16 @@ def test_the_window_state_names_the_4d_values_the_window_shows(tmp_path):
     text = describe_window_state(_WINDOW_STATE, [snapshot(0, 0), snapshot(3.4, 40),
                                                  snapshot(6.8, 80)])
 
-    assert ("4D values the window shows (the file's at t = 3.4 s plus the window's rotation): "
-            "TesseractSponge: rotXW -61.5, rotYW 41.2, rotZW 0, eyeW 3, wScale 1") in text
+    # t = 3.5: rotYW 40 + 40 * 0.1 / 3.4 = 41.18 in the file, plus the window's 1.2.
+    assert ("4D values the window shows (the file's at t = 3.5 s, interpolated between the "
+            "validator's samples, plus the window's rotation): "
+            "TesseractSponge: rotXW -61.5, rotYW 42.38, rotZW 0, eyeW 3, wScale 1") in text
     assert "Sphere" not in text
     assert "4D values" not in describe_window_state(_WINDOW_STATE)
+    on_sample = describe_window_state(dict(_WINDOW_STATE, t=3.4),
+                                      [snapshot(0, 0), snapshot(3.4, 40)])
+    assert "(the file's at t = 3.4 s, plus the window's rotation): " in on_sample
+    assert "rotYW 41.2," in on_sample
 
 
 def test_a_window_state_of_another_major_is_not_read(tmp_path):

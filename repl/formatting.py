@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from adapters.render_window import RenderWindowOutcome, RenderWindowResult
+from core.turn import BUDGET_QUESTION
 from core.types import TurnResult
 
 # A rejection's history `reason` starts with its turn tag ("compile_errors: ..."), which
@@ -31,6 +32,9 @@ def _rejection_line(tag: Optional[str], *messages: str) -> str:
         return "; ".join(messages)  # F76: not a rejection; it says "No change made: ..."
     if tag == "lint_findings" and messages and messages[0].startswith("scene-budget"):
         tag = "over_budget"  # session 5 (F109): the validator reports the budget as a finding
+        # Session 6 (msa#48): only an identical repair asked; a changed one ended with no question.
+        if not any(BUDGET_QUESTION in m for m in messages):
+            messages += (BUDGET_QUESTION,)
     head = f"Rejected ({_tag_label(tag)})" if tag else "Rejected"
     lines = []
     for message in messages:

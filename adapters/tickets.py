@@ -86,12 +86,26 @@ def _title(missing_capability: str) -> str:
 # Words that say nothing about which capability a title names (de-dupe, F79).
 _GENERIC_WORDS = frozenset({
     "support", "the", "and", "around", "with", "for", "from", "that", "this", "object",
-    "objects", "effect", "effects", "scene", "any", "into", "onto",
+    "objects", "effect", "effects", "scene", "any", "into", "onto", "of", "to", "in", "on",
+    "by", "its", "is", "as", "at", "an", "real",
 })
+# "falls off" and "falloff" name one thing (session 6, msa#55: a glow decline missed
+# menger#60 "Glow: emission with falloff ...").
+_PARTICLES = ("off", "up", "out")
+
+
+def _stem(word: str) -> str:
+    """A light stem, enough for titles: lights/light, colouring/colour, falls/fall."""
+    for suffix in ("ing", "ed"):
+        if word.endswith(suffix) and len(word) > len(suffix) + 2:
+            return word[: -len(suffix)]
+    return word[:-1] if word.endswith("s") and not word.endswith("ss") and len(word) > 3 else word
 
 
 def _content_words(title: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 1} - _GENERIC_WORDS
+    words = [_stem(w) for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 1]
+    joined = [a + b for a, b in zip(words, words[1:]) if b in _PARTICLES]
+    return (set(words) | set(joined)) - _GENERIC_WORDS - set(_PARTICLES)
 
 
 def _same_capability(a: str, b: str) -> bool:
@@ -129,15 +143,16 @@ def tracked_issue(missing_capability: str, open_issues: list[dict]) -> Optional[
 
 
 def related_issues(missing_capability: str, open_issues: list[dict], limit: int = 3) -> list[dict]:
-    """Open issues that share at least three content words and 40% with the capability: maybe
+    """Open issues that share at least two content words and 40% with the capability: maybe
     the same request in other words, so the draft names them and the filer decides. Session 5's
-    pre-projection colouring decline shared only 4 of 9 words with the issue that asks for it."""
+    pre-projection colouring decline shared only 4 of 9 words with the issue that asks for it;
+    session 6's glow decline 2 of 4 with menger#60 (msa#55)."""
     words = _content_words(_title(missing_capability))
 
     def overlap(issue: dict) -> float:
         other = _content_words(issue["title"])
         shared = len(words & other)
-        return shared / min(len(words), len(other)) if shared >= 3 else 0.0
+        return shared / min(len(words), len(other)) if shared >= 2 else 0.0
 
     scored = sorted(((overlap(i), i) for i in open_issues), key=lambda p: -p[0])
     return [i for score, i in scored if score >= 0.4][:limit]

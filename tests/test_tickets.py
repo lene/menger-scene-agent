@@ -313,3 +313,20 @@ def test_a_loosely_matching_open_issue_is_named_in_the_draft(tmp_path):
     assert related_issues(decline, issues) == [issues[0]]
     draft = Path(write_draft(decline, PROMPT, tmp_path, related=issues[:1])).read_text()
     assert "## Possibly tracked by\n\n- #49 F15: procedural colouring" in draft
+
+
+def test_a_reworded_decline_names_the_open_issue(tmp_path):
+    # Session 6 (msa#55): "falls off" vs "falloff" left only "glow" in common with menger#60.
+    from adapters.tickets import related_issues, tracked_issue
+
+    issues = [
+        {"number": 60, "title": "Glow: emission with falloff that lights nearby geometry",
+         "url": "https://github.com/lene/menger/issues/60"},
+        {"number": 59, "title": "Rising dimensionality: extrude a solid along w into a 4D "
+                                "hypervolume, and 5D objects (penteract)", "url": "u"},
+    ]
+    glow = "a real glow that falls off with distance around the orb"
+
+    assert tracked_issue(glow, issues) is None
+    assert related_issues(glow, issues) == [issues[0]]
+    assert tracked_issue("a penteract, and any extrusion into 5D", issues) == issues[1]

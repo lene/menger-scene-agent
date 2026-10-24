@@ -99,6 +99,15 @@ class TurnState:
     frame_failures_reported: int = 0
     # The hand edit last rejected, so the idle check reports it once (msa#47).
     rejected_edit: Optional[str] = None
+    # The last `/ask` (question, answer), for the next request only: "keep them like that"
+    # after "/ask what are the 4D parameters now?" had no referent (session 6, msa#49).
+    last_consult: Optional[Tuple[str, str]] = None
+
+
+def _consult_note(consult: Tuple[str, str]) -> str:
+    question, answer = consult
+    return (f"The request follows this /ask, which is what words like \"them\" or \"that\" refer "
+            f"to: question: {question} -- answer: {answer}")
 
 
 # Once per REPL process: the validator could not evaluate a scene's values.
@@ -231,6 +240,7 @@ def execute_turn(
     refreshes the window -- the one path a typed request, a `/retry` resend and nothing else
     take (story 22). A `run_turn()` exception is printed as "Turn error: ..." and returns
     `None` ("a single bad turn must not kill the REPL"); Ctrl-C abandons the turn (F51)."""
+    consult, state.last_consult = state.last_consult, None
     try:
         result = ports.run_turn(
             prompt,
@@ -243,6 +253,7 @@ def execute_turn(
             on_stage=_print_stage,
             **_window_state_kwargs(ctx.store),
             **({"answered": True} if answered else {}),
+            **({"context_note": _consult_note(consult)} if consult else {}),
         )
         _end_stage_line()
         logger.info("turn: %s, ordinal %s", result.tag, result.ordinal)
@@ -347,6 +358,7 @@ def _consult(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
     else:
         print(result)
         _record_consult_safely(ctx.store, question, answer=result)
+        state.last_consult = (question, result)
 
 
 def _export_request(line: str) -> Optional[Tuple[str, Optional[float]]]:
@@ -411,6 +423,11 @@ def _status_echo(ctx: Context, ports: Ports, state: TurnState, _line: str) -> No
     print("Ignored: that is the agent's own status line, not a request.")
 
 
+def _export_hint(ctx: Context, ports: Ports, state: TurnState, _line: str) -> None:
+    print("Not sent to the model: a scene file cannot write an image or a video. "
+          "To save the scene: /export video [seconds] (mp4) or /export image [t] (png).")
+
+
 Command = Callable[[Context, Ports, TurnState, str], None]
 
 # Exact stripped lines. The consult prefixes take arguments and are matched by first word.
@@ -419,6 +436,14 @@ COMMANDS: Dict[str, Command] = {"/retry": _retry, "/open": _open, "/drop": _drop
 EXIT_COMMANDS = ("/exit", "/quit")
 # A pasted copy of `_print_stage`'s line ("... generating, validating"), session 5 (F107).
 _STATUS_ECHO = re.compile(r"^\.\.\. (generating|validating|repairing|reading back)\b")
+# "save the rendered animation as mp4": an export, which the model cannot do and declined with a
+# ticket draft for `/export` itself (session 6, msa#56). A saving verb with an image or video
+# word, or "as/to an mp4".
+_EXPORT_REQUEST = re.compile(
+    r"\b(save|export|write|record|store|download)\b.*\b(mp4|video|movie|gif|png|jpe?g|image|"
+    r"picture)\b|\b(as|to|into) an? (mp4|png|gif|jpe?g|video|movie)\b",
+    re.IGNORECASE,
+)
 
 
 def command_for(line: str) -> Optional[Command]:
@@ -434,6 +459,8 @@ def command_for(line: str) -> Optional[Command]:
         return _status_echo
     if first.startswith("/"):
         return COMMANDS.get(stripped, _unknown)
+    if _EXPORT_REQUEST.search(stripped):
+        return _export_hint
     return None
 
 
