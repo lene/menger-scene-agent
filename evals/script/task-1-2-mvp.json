@@ -23,7 +23,7 @@
         "questions_at_most": 0,
         "objects": ["TesseractSponge"],
         "materials": ["Glass"],
-        "contains": ["\\b1(\\.0)?f\\s*\\+|level\\s*=\\s*1(\\.0)?f\\b|math\\.max\\(1(\\.0)?f"]
+        "contains": ["\\b1(\\.0)?f\\s*\\+|level\\s*=\\s*1(\\.0)?f\\b|math\\.max\\(1(\\.0)?f|[Ss]tart\\w*\\s*=\\s*1(\\.0)?f\\b"]
       }
     }
   ]

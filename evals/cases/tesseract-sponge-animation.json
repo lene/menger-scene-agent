@@ -17,8 +17,8 @@
         ],
         "dark_background": true,
         "contains": [
-          "Duration\\s*=\\s*10(\\.0)?f",
-          "level\\s*=[^\\n]*\\bp\\b"
+          "[Dd]uration\\w*\\s*=\\s*10(\\.0)?f",
+          "level\\s*=[^\\n]*\\b(p|progress|t)\\b"
         ]
       }
     },
@@ -37,8 +37,8 @@
         ],
         "dark_background": true,
         "contains": [
-          "Duration\\s*=\\s*(1[1-9]|[2-9]\\d)",
-          "level\\s*=\\s*1(\\.0)?f\\s*\\+"
+          "[Dd]uration\\w*\\s*=\\s*(1[1-9]|[2-9]\\d)",
+          "level\\s*=\\s*1(\\.0)?f\\s*\\+|[Ss]tart\\w*\\s*=\\s*1(\\.0)?f\\b"
         ]
       }
     }
