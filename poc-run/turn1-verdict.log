@@ -1,0 +1,13 @@
+[info] loading settings for project menger-build from plugins.sbt...
+[info] loading settings for project root from build.sbt...
+[info] loading settings for project mengerGeometry from build.sbt...
+[info] loading settings for project mengerApp from build.sbt...
+[info] set current project to menger-root (in build file:/home/lene/workspace/menger-toplevel/menger/)
+[info] Building library with native build tool CMake
+[info] -- Build files have been written to: /home/lene/workspace/menger-toplevel/menger/menger-geometry/target/native/x86_64-linux/build
+[info] [ 50%] Building CUDA object CMakeFiles/menger_4d_shaders.dir/shaders/menger_4d_module.ptx
+[info] [ 50%] Building CXX object CMakeFiles/mengergeometry.dir/VideoLoader.cpp.o
+[success] Libraries built in /home/lene/workspace/menger-toplevel/menger/menger-geometry/target/native/x86_64-linux/bin/libmengergeometry.so
+[info] 22:08:10.175 INFO  menger.dsl.SceneLoader$ - Loading scene: /home/lene/workspace/menger-toplevel/menger-scene-agent/poc-run/turn1-generated.scala
+[info] 22:08:12.134 INFO  menger.dsl.SceneLoader$ - Successfully loaded compiled scene: poc.TesseractSpongeGrowth
+[success] Total time: 8 s, completed Sep 2, 2026, 10:08:13 PM

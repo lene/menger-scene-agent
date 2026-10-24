@@ -1,0 +1,46 @@
+{
+  "id": "tesseract-sponge-animation",
+  "source": "session-20261008T113345774297-9e236b26 turns 1-2",
+  "turns": [
+    {
+      "prompt": "a tesseract sponge that gets more intricate as it turns, about ten seconds, glass, dark background",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.Projection4DSpec\nimport menger.dsl._\n\n/**\n * Animated 4D tesseract sponge: level climbs from 0.5 to 2 while the sponge rotates one full\n * turn about Y and its 4D projection sweeps, over ten seconds, looping. Glass material against\n * a dark background.\n */\nobject TurningGlassTesseractSponge:\n  private val Duration = 10f\n  val durationSeconds = Duration\n  private val EyeW = 3.0f\n  private val ScreenW = 1.5f\n  private val SpongeSize = 2.0f\n  private val TwoPi = (2.0 * math.Pi).toFloat\n\n  def scene(t: Float): Scene =\n    val p = math.max(0f, math.min(t / Duration, 1f))\n    val level = 0.5f + p * 1.5f\n    val angle = p * TwoPi\n\n    Scene(\n      camera = Camera(\n        position = (0f, 1.5f, 5.5f),\n        lookAt   = (0f, 0f, 0f)\n      ),\n      objects = List(\n        TesseractSponge(\n          spongeType = SurfaceSubdividing,\n          level      = level,\n          material   = Some(Material.Glass),\n          size       = SpongeSize,\n          rotation   = Vec3(0f, angle, 0f),\n          projection = Some(Projection4DSpec(\n            eyeW    = EyeW,\n            screenW = ScreenW,\n            rotXW   = p * 90f,\n            rotYW   = p * 45f\n          ))\n        )\n      ),\n      lights = List(\n        Directional(direction = (1f, -1f, -1f), intensity = 1.5f)\n      ),\n      background = Some(Color(0.02f, 0.02f, 0.04f))\n    )```",
+        "Animated tesseract sponge, level climbing from 0.5 to 2, size 2 units, glass, rotating about Y with a sweeping 4D projection, directional light from above, camera 5.7 units out looking at the origin."
+      ],
+      "expect": {
+        "objects": [
+          "TesseractSponge"
+        ],
+        "materials": [
+          "Glass"
+        ],
+        "dark_background": true,
+        "contains": [
+          "[Dd]uration\\w*\\s*=\\s*10(\\.0)?f",
+          "level\\s*=[^\\n]*\\b(p|progress|t)\\b"
+        ]
+      }
+    },
+    {
+      "prompt": "slower, and start it already at level 1",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.Projection4DSpec\nimport menger.dsl._\n\n/**\n * Animated 4D tesseract sponge starting at level 1: over twenty seconds the level climbs from\n * 1 to 2 while the sponge rotates one full turn about Y and its 4D projection sweeps, looping.\n * Glass material against a dark background.\n */\nobject TurningGlassTesseractSponge:\n  private val Duration = 20f\n  val durationSeconds = Duration\n  private val EyeW = 3.0f\n  private val ScreenW = 1.5f\n  private val SpongeSize = 2.0f\n  private val TwoPi = (2.0 * math.Pi).toFloat\n\n  def scene(t: Float): Scene =\n    val p = math.max(0f, math.min(t / Duration, 1f))\n    val level = 1.0f + p * 1.0f\n    val angle = p * TwoPi\n\n    Scene(\n      camera = Camera(\n        position = (0f, 1.5f, 5.5f),\n        lookAt   = (0f, 0f, 0f)\n      ),\n      objects = List(\n        TesseractSponge(\n          spongeType = SurfaceSubdividing,\n          level      = level,\n          material   = Some(Material.Glass),\n          size       = SpongeSize,\n          rotation   = Vec3(0f, angle, 0f),\n          projection = Some(Projection4DSpec(\n            eyeW    = EyeW,\n            screenW = ScreenW,\n            rotXW   = p * 90f,\n            rotYW   = p * 45f\n          ))\n        )\n      ),\n      lights = List(\n        Directional(direction = (1f, -1f, -1f), intensity = 1.5f)\n      ),\n      background = Some(Color(0.02f, 0.02f, 0.04f))\n    )```",
+        "Nothing the facts cover changed; a size-2 glass tesseract sponge over 20 seconds going from level 1 to 2, transparent, with a 4D projection, lit by a directional light from above, camera 5.7 units out looking at the origin."
+      ],
+      "expect": {
+        "objects": [
+          "TesseractSponge"
+        ],
+        "materials": [
+          "Glass"
+        ],
+        "dark_background": true,
+        "contains": [
+          "[Dd]uration\\w*\\s*=\\s*(1[1-9]|[2-9]\\d)",
+          "level\\s*=\\s*1(\\.0)?f\\s*\\+|[Ss]tart\\w*\\s*=\\s*1(\\.0)?f\\b"
+        ]
+      }
+    }
+  ]
+}

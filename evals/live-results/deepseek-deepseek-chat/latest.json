@@ -1,0 +1,207 @@
+[
+  {
+    "case": "luna-answered-material-is-not-asked-again",
+    "passed": 3,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [],
+      [],
+      []
+    ]
+  },
+  {
+    "case": "luna-answered-type-is-not-asked-again",
+    "passed": 3,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [],
+      [],
+      []
+    ]
+  },
+  {
+    "case": "sponge-materials-and-local-colour",
+    "passed": 1,
+    "runs": 3,
+    "questions": [
+      [
+        "NEEDS_CLARIFICATION: which approximation of aluminium would you like -- a metal colour via `Material.metal(...)` (e.g. a light silver-grey, roughness ~0.25), a Glass or Diamond material with a colour or IOR tint, or a preset (e.g. Chrome) with a procedural pattern?"
+      ],
+      [],
+      [
+        "NEEDS_CLARIFICATION: \"aluminum\" has no DSL preset -- which approximation would you like: a metallic aluminium colour via `Material.metal(Color(0.85, 0.87, 0.9))`, or a rougher brushed version of that same metal?"
+      ]
+    ],
+    "problems": [
+      [
+        "turn 3 ('no, make it aluminum'): tag needs_clarification, expected accepted",
+        "turn 3 ('no, make it aluminum'): messages: ['which approximation of aluminium would you like -- a metal colour via `Material.metal(...)` (e.g. a light silver-grey, roughness ~0.25), a Glass or Diamond material with a colour or IOR tint, or a preset (e.g. Chrome) with a procedural pattern?']",
+        "turn 4 ('level 2.5'): scene text does not match 'Material\\\\.metal\\\\('"
+      ],
+      [],
+      [
+        "turn 3 ('no, make it aluminum'): tag needs_clarification, expected accepted",
+        "turn 3 ('no, make it aluminum'): messages: ['\"aluminum\" has no DSL preset -- which approximation would you like: a metallic aluminium colour via `Material.metal(Color(0.85, 0.87, 0.9))`, or a rougher brushed version of that same metal?']",
+        "turn 4 ('level 2.5'): scene text does not match 'Material\\\\.metal\\\\('"
+      ]
+    ]
+  },
+  {
+    "case": "tesseract-sponge-and-24-cell",
+    "passed": 3,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [],
+      [],
+      []
+    ]
+  },
+  {
+    "case": "tesseract-sponge-animation",
+    "passed": 0,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'Duration\\\\s*=\\\\s*10(\\\\.0)?f'",
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'level\\\\s*=[^\\\\n]*\\\\bp\\\\b'",
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match 'Duration\\\\s*=\\\\s*(1[1-9]|[2-9]\\\\d)'",
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match 'level\\\\s*=\\\\s*1(\\\\.0)?f\\\\s*\\\\+'"
+      ],
+      [
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'Duration\\\\s*=\\\\s*10(\\\\.0)?f'",
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'level\\\\s*=[^\\\\n]*\\\\bp\\\\b'",
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match 'Duration\\\\s*=\\\\s*(1[1-9]|[2-9]\\\\d)'"
+      ],
+      [
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'Duration\\\\s*=\\\\s*10(\\\\.0)?f'",
+        "turn 1 ('a tesseract sponge that gets more intric'): scene text does not match 'level\\\\s*=[^\\\\n]*\\\\bp\\\\b'",
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match 'Duration\\\\s*=\\\\s*(1[1-9]|[2-9]\\\\d)'",
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match 'level\\\\s*=\\\\s*1(\\\\.0)?f\\\\s*\\\\+'"
+      ]
+    ]
+  },
+  {
+    "case": "script-task-1-2-mvp",
+    "passed": 1,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match '\\\\b1(\\\\.0)?f\\\\s*\\\\+|level\\\\s*=\\\\s*1(\\\\.0)?f\\\\b|math\\\\.max\\\\(1(\\\\.0)?f'"
+      ],
+      [],
+      [
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match '\\\\b1(\\\\.0)?f\\\\s*\\\\+|level\\\\s*=\\\\s*1(\\\\.0)?f\\\\b|math\\\\.max\\\\(1(\\\\.0)?f'"
+      ]
+    ]
+  },
+  {
+    "case": "script-task-3-4-build-up",
+    "passed": 0,
+    "runs": 3,
+    "questions": [
+      [
+        "NEEDS_CLARIFICATION: \"aluminum\" has no material preset in this DSL \u2014 which approximation should I use: a bright metal colour via `Material.metal(Color(\"#B8BCC0\"))` (roughness ~0.3, no pattern), or a Chrome preset copy with its roughness raised (`Material.Chrome.copy(roughness = 0.35f)`) for a slightly brushed look?"
+      ],
+      [],
+      [
+        "NEEDS_CLARIFICATION: the DSL has no aluminium preset -- which approximation would you like: a brushed-metal look from `Material.metal(Color(0.75f, 0.77f, 0.80f))` with a little roughness, a bare shiny Chrome/Gold-style preset toned to a silver-grey colour, or a matte light-grey Plastic/Matte finish with a procedural noise pattern for a cast-metal surface?"
+      ]
+    ],
+    "problems": [
+      [
+        "turn 7 ('make it glass and show its shadow on the'): no Plane object (objects: ['Sponge'])",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): tag accepted, expected unsupported",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): messages: []",
+        "turn 16 ('make the 24-cell glow orange and the spo'): fewer than 2 matches of 'emission\\\\s*='",
+        "turn 19 ('add caustics'): tag generation_failed, expected accepted",
+        "turn 19 ('add caustics'): messages: [\"Model response's 'object' declaration is past line 60 -- SceneLoader.detectObjectName would miss it\"]"
+      ],
+      [
+        "turn 7 ('make it glass and show its shadow on the'): no Plane object (objects: ['Sponge'])",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): tag accepted, expected unsupported",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): messages: []"
+      ],
+      [
+        "turn 7 ('make it glass and show its shadow on the'): no Plane object (objects: ['Sponge'])",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): tag accepted, expected unsupported",
+        "turn 10 ('x,y,z in the xyz -> RGB should be the or'): messages: []"
+      ]
+    ]
+  },
+  {
+    "case": "script-task-8a-rising-dimensionality",
+    "passed": 2,
+    "runs": 3,
+    "questions": [
+      [],
+      [],
+      []
+    ],
+    "problems": [
+      [],
+      [
+        "turn 1 ('Cube to sponge level 4 and back, extrude'): tag generation_failed, expected accepted",
+        "turn 1 ('Cube to sponge level 4 and back, extrude'): messages: [\"Model response has no top-level 'object' declaration -- not scene text\"]"
+      ],
+      []
+    ]
+  },
+  {
+    "case": "script-task-8b-camera-flight",
+    "passed": 0,
+    "runs": 3,
+    "questions": [
+      [
+        "NEEDS_CLARIFICATION: \"steel\" and \"ruby\" have no DSL preset -- which approximations would you like? Options: steel = `Material.metal(Color(\"#B8BCC0\"))` (grey brushed metal), or Chrome with `roughness = 0.35`; ruby = `Material.Glass.copy(color = Color(0.8f, 0.06f, 0.12f, 0.05f))` (translucent red gem), or `Material.Diamond.copy(...)` tinted the same red, or a matte/plastic red material (opaque red, not gem-like)."
+      ],
+      [
+        "NEEDS_CLARIFICATION: steel and ruby have no DSL material preset -- which approximations do you want? For steel: a metallic metal colour via `Material.metal(Color(0.55f, 0.57f, 0.6f))` with roughness ~0.35, or Chrome `Material.Chrome.copy(roughness = 0.3f)`. For ruby: Glass with a deep red tint `Material.Glass.copy(color = Color(0.7f, 0.05f, 0.1f, 0.05f))`, Diamond with the same red tint (higher IOR 2.42, more sparkle), or an opaque red Plastic/Matte gem look."
+      ],
+      [
+        "NEEDS_CLARIFICATION: saving a rendered animation as an mp4 is a render-output/export feature of the app, not scene content the DSL can express -- say which scene you want the animation rendered from (and its duration in seconds), and save it with the app's frame/save options rather than a scene file."
+      ]
+    ],
+    "problems": [
+      [
+        "turn 2 ('save the rendered animation as mp4'): tag accepted, expected unsupported",
+        "turn 2 ('save the rendered animation as mp4'): messages: []"
+      ],
+      [
+        "turn 2 ('save the rendered animation as mp4'): tag accepted, expected unsupported",
+        "turn 2 ('save the rendered animation as mp4'): messages: []"
+      ],
+      [
+        "turn 1 ('Camera flight through a 3D Menger sponge'): tag generation_failed, expected accepted",
+        "turn 1 ('Camera flight through a 3D Menger sponge'): messages: [\"Model response has no top-level 'object' declaration -- not scene text\"]",
+        "turn 2 ('save the rendered animation as mp4'): 1 question(s), at most 0",
+        "turn 2 ('save the rendered animation as mp4'): tag needs_clarification, expected unsupported",
+        "turn 2 ('save the rendered animation as mp4'): messages: [\"saving a rendered animation as an mp4 is a render-output/export feature of the app, not scene content the DSL can express -- say which scene you want the animation rendered from (and its duration in seconds), and save it with the app's frame/save options rather than a scene file.\"]"
+      ]
+    ]
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "id": "sponge-materials-and-local-colour",
+  "source": "session-20261008T122658068514-618da240 turns 1-5",
+  "turns": [
+    {
+      "prompt": "a menger sponge level 2",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2 Menger sponge (VolumeFilling), lit by a key/fill/rim three-point rig\n * over a dark floor.\n */\nobject MengerSpongeLevelTwo:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"menger-sponge-level-two\", scene)```",
+        "level-2 volume-filling sponge, size 2.5, gold, three directional lights (one from above, one from above, one from below), dark floor plane, camera 7.8 units out looking at the origin."
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "level\\s*=\\s*2(\\.0)?f"
+        ]
+      }
+    },
+    {
+      "prompt": "make it from wood",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2 Menger sponge (VolumeFilling) in a warm wood finish, with a wood-grain\n * procedural pattern over a matte brown base. Lit by a key/fill/rim three-point rig\n * over a dark floor.\n */\nobject WoodMengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Matte.copy(color = Color(0.55f, 0.33f, 0.14f))),\n        size = 2.5f,\n        proceduralType = 5,\n        proceduralScale = 0.4f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"wood-menger-sponge\", scene)```",
+        "Now a matte brown sponge at level 2 with size 2.5 and a wood-grain procedural pattern, key/fill/rim directional lights from above and below, dark floor plane, camera 7.8 units out."
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "proceduralType\\s*=\\s*5"
+        ]
+      }
+    },
+    {
+      "prompt": "no, make it aluminum",
+      "answer": "yes",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2 Menger sponge (VolumeFilling) in a brushed-aluminium finish: a matte\n * metal-grey base lit by a key/fill/rim three-point rig over a dark floor.\n */\nobject AluminumMengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.metal(Color(0.75f, 0.76f, 0.78f))),\n        size = 2.5f,\n        proceduralType = 5,\n        proceduralScale = 0.4f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"aluminum-menger-sponge\", scene)```",
+        "The sponge material is now metal instead of matte, so: level-2 volume-filling sponge, 2.5 units, metal, a directional light from above shining toward +x and -z, another from above toward -x and -z, one from below toward +z, camera 7.8 units out looking at the origin with a dark grey floor plane."
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "Material\\.metal\\("
+        ]
+      }
+    },
+    {
+      "prompt": "level 2.5",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2.5 Menger sponge (VolumeFilling) in a brushed-aluminium finish: a matte\n * metal-grey base lit by a key/fill/rim three-point rig over a dark floor.\n */\nobject AluminumMengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2.5f,\n        material = Some(Material.metal(Color(0.75f, 0.76f, 0.78f))),\n        size = 2.5f,\n        proceduralType = 5,\n        proceduralScale = 0.4f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"aluminum-menger-sponge\", scene)```",
+        "This turn changed the sponge from level 2 to level 2.5; now a level-2.5 VolumeFilling sponge, size 2.5, brushed-aluminium metal finish, lit by three directional lights (one from above travelling toward +x and -z, one from above travelling toward -x and -z, one from below travelling toward +z) over a dark grey floor plane, camera 7.8 units out."
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "level\\s*=\\s*2\\.5f",
+          "Material\\.metal\\("
+        ]
+      }
+    },
+    {
+      "prompt": "color the sponge so that its local x, y, z values (running from 0 to 1 each) map to its r, g and b values",
+      "responses": [
+        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2.5 Menger sponge (VolumeFilling) coloured by its own local coordinates: the\n * x, y, z position inside the sponge's box (0..1 each) maps directly to r, g, b, so every\n * colour appears once across the object. A key/fill/rim three-point rig lights it over a\n * dark floor.\n */\nobject XyzColoredMengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2.5f,\n        material = Some(Material.metal(Color(0.75f, 0.76f, 0.78f))),\n        size = 2.5f,\n        proceduralType = 11,\n        proceduralScale = 1f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"xyz-colored-menger-sponge\", scene)```",
+        "Nothing changed this turn; a level-2.5 volume-filling sponge, size 2.5, metal, lit by three directional lights (one from above toward +x and -z, one from above toward -x and -z, one from below toward +z) over a dark floor, camera 7.8 units out."
+      ],
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "proceduralType\\s*=\\s*11",
+          "level\\s*=\\s*2\\.5f"
+        ]
+      }
+    }
+  ]
+}
