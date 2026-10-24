@@ -40,7 +40,14 @@ from core.scene_facts import (
     occlusion_warnings,
     scene_changes,
 )
-from core.snapshot_facts import CheckResult, check_turn, snapshot_changes, unrequested_changes
+from core.snapshot_facts import (
+    CheckResult,
+    asks_to_keep_view,
+    check_turn,
+    kept_view_findings,
+    snapshot_changes,
+    unrequested_changes,
+)
 from core.types import (
     GenerationError,
     GenerationResult,
@@ -314,6 +321,7 @@ def run_turn(
     window_state: Optional[str] = None,
     answered: bool = False,
     context_note: Optional[str] = None,
+    window_shown: Optional[Tuple[float, List[Tuple[str, dict]]]] = None,
 ) -> TurnResult:
     """Runs one agent turn end to end: derive scene text (CAP-1 `generate()` when
     `prior_scene` is `None`, CAP-2 `revise()` otherwise), gate it through the agent-side
@@ -344,7 +352,10 @@ def run_turn(
     asks for the scene instead: one clarification per request.
 
     `context_note`: what the request refers back to that the scene does not hold, e.g. the
-    `/ask` question and answer just before "keep them like that" (session 6, msa#49)."""
+    `/ask` question and answer just before "keep them like that" (session 6, msa#49).
+
+    `window_shown`: the window's t and the 4D values it shows there; a request to keep the view
+    gets a finding for each value the new scene no longer gives at that t (msa#49)."""
 
     def _emit(stage: StageName) -> None:
         if on_stage is None:
@@ -500,6 +511,8 @@ def run_turn(
                     checks = check_turn(
                         prior_snapshots, outcome.snapshots, outcome.camera_path, prompt, manifest
                     )
+                    if window_shown is not None and asks_to_keep_view(prompt):
+                        checks.findings.extend(kept_view_findings(*window_shown, outcome.snapshots))
                     if not checks.findings or rounds_done >= repair_rounds:
                         break
                     feedback = list(checks.findings)

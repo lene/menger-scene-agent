@@ -87,7 +87,10 @@ def _title(missing_capability: str) -> str:
 _GENERIC_WORDS = frozenset({
     "support", "the", "and", "around", "with", "for", "from", "that", "this", "object",
     "objects", "effect", "effects", "scene", "any", "into", "onto", "of", "to", "in", "on",
-    "by", "its", "is", "as", "at", "an", "real",
+    "by", "its", "is", "as", "at", "an", "real", "after", "only", "then", "are", "be", "but",
+    "not", "can", "it", "start", "back",
+    # in nearly every title here, so they say nothing about the capability (msa#55)
+    "menger", "sponge", "level",
 })
 # "falls off" and "falloff" name one thing (session 6, msa#55: a glow decline missed
 # menger#60 "Glow: emission with falloff ...").
@@ -142,20 +145,25 @@ def tracked_issue(missing_capability: str, open_issues: list[dict]) -> Optional[
     return next((i for i in open_issues if _same_capability(i["title"], title)), None)
 
 
-def related_issues(missing_capability: str, open_issues: list[dict], limit: int = 3) -> list[dict]:
-    """Open issues that share at least two content words and 40% with the capability: maybe
-    the same request in other words, so the draft names them and the filer decides. Session 5's
-    pre-projection colouring decline shared only 4 of 9 words with the issue that asks for it;
-    session 6's glow decline 2 of 4 with menger#60 (msa#55)."""
+def related_issues(
+    missing_capability: str, open_issues: list[dict], prompt: str = "", limit: int = 3
+) -> list[dict]:
+    """Open issues that share at least two content words with the capability and the request
+    that asked for it, one of them the capability's: maybe the same request in other words, so
+    the draft names them and the filer decides, most shared words first. Session 5's
+    pre-projection colouring decline shared 4 of 9 words with the issue that asks for it. In the
+    session 6 follow-up, a brief decline missed what a share threshold let through: "a real glow
+    around the orb" has only "glow" in common with menger#60, its request adds "fall off"; a
+    penteract decline shared 2 of 6 words with menger#59 (msa#55)."""
     words = _content_words(_title(missing_capability))
+    context = _content_words(prompt)
 
-    def overlap(issue: dict) -> float:
+    def shared(issue: dict) -> int:
         other = _content_words(issue["title"])
-        shared = len(words & other)
-        return shared / min(len(words), len(other)) if shared >= 2 else 0.0
+        return len((words | context) & other) if words & other else 0
 
-    scored = sorted(((overlap(i), i) for i in open_issues), key=lambda p: -p[0])
-    return [i for score, i in scored if score >= 0.4][:limit]
+    scored = sorted(((shared(i), i) for i in open_issues), key=lambda p: -p[0])
+    return [i for count, i in scored if count >= 2][:limit]
 
 
 def _existing_draft(drafts_dir: Path, title: str) -> Optional[Path]:

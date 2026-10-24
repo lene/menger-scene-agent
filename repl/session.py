@@ -22,6 +22,7 @@ from adapters.render_window import (
     describe_window_state,
     read_window_state,
     render_window_scene_path,
+    shown_4d_values,
 )
 from adapters.scene_export import ExportError
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -136,6 +137,19 @@ def _window_state_kwargs(store: SceneStore) -> dict:
     return {"window_state": text} if text is not None else {}
 
 
+def _window_shown_kwargs(store: SceneStore) -> dict:
+    """`{"window_shown": (t, values)}`: the 4D values the window shows at its t, which a "keep
+    them like that" scene must still give there (session 6 follow-up, msa#49)."""
+    try:
+        state = read_window_state(store.session_dir)
+        if state is None:
+            return {}
+        shown, _ = shown_4d_values(state, store.current_snapshots())
+        return {"window_shown": (float(state.get("t") or 0.0), shown)} if shown else {}
+    except (KeyError, TypeError, ValueError):
+        return {}
+
+
 def _format_open_items(ports: Ports, scene_text: Optional[str], manifest: dict) -> str:
     """`/open`: every warning and Not done item that holds for the current scene. Each turn
     prints only the new ones (usability review 2026-10, session 4, F91), so this is where the
@@ -183,7 +197,7 @@ def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:
     if issue is not None:
         print(f"  Already tracked: {issue_link(issue)}")
         return
-    related = related_issues(missing or prompt, open_issues)
+    related = related_issues(missing or prompt, open_issues, prompt=prompt)
     drafts_dir = store.session_dir / "tickets"
     try:
         drafts_dir.mkdir(exist_ok=True)
@@ -252,6 +266,7 @@ def execute_turn(
             ctx.script_path,
             on_stage=_print_stage,
             **_window_state_kwargs(ctx.store),
+            **_window_shown_kwargs(ctx.store),
             **({"answered": True} if answered else {}),
             **({"context_note": _consult_note(consult)} if consult else {}),
         )

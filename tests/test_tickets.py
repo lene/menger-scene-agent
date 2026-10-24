@@ -330,3 +330,32 @@ def test_a_reworded_decline_names_the_open_issue(tmp_path):
     assert tracked_issue(glow, issues) is None
     assert related_issues(glow, issues) == [issues[0]]
     assert tracked_issue("a penteract, and any extrusion into 5D", issues) == issues[1]
+
+
+def test_a_brief_decline_names_the_open_issue_through_its_request():
+    # Session 6 follow-up (msa#55): "a real glow around the orb" shares only "glow" with
+    # menger#60, its request adds "fall off"; the penteract decline shared 2 of 6 words with #59.
+    from adapters.tickets import related_issues
+
+    issues = [
+        {"number": 60, "title": "Glow: emission with falloff that lights nearby geometry",
+         "url": "u"},
+        {"number": 59, "title": "Rising dimensionality: extrude a solid along w into a 4D "
+                                "hypervolume, and 5D objects (penteract)", "url": "u"},
+        {"number": 94, "title": "F94: edge-rendered 4D sponges ignore fractional levels and "
+                                "stop at level 2", "url": "u"},
+        {"number": 1, "title": "Session directory, ticket drafts and SceneLoader fallback are "
+                               "trusted after lint only", "url": "u"},
+    ]
+    falloff = "sharper center of the orb... and let the glow intensity fall off like a bell curve"
+
+    assert related_issues("a real glow around the orb", issues, prompt=falloff) == [issues[0]]
+    assert related_issues("a real glow around the orb", issues) == []
+    assert related_issues(
+        "a 5D penteract to continue the extrusion after the tesseract", issues,
+        prompt="start with a 3D cube that becomes a menger sponge up to level 4 and back, and "
+               "only then switch to the tesseract phase",
+    ) == [issues[1]]
+    # The request's words alone link nothing, and "sponge", "level", "after" say nothing.
+    assert related_issues("a sponge made of real fur", issues,
+                          prompt="make the menger sponge level 2 out of fur") == []

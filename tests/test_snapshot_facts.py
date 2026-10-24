@@ -297,3 +297,47 @@ def test_same_material_between_4d_objects_names_missing_edge_tubes():
     assert len(findings) == 1
     assert findings[0].startswith("Icositetrachoron: ") and "edgeRadius 0.005" in findings[0]
     assert same_material_edge_findings(after, "make the 24-cell bigger") == []
+
+
+# --- "keep them like that": the scene still gives the shown 4D values at the window's t -----
+
+
+def _rotation(t: float, rot_xw: float, rot_yw: float = 10.0) -> dict:
+    projection = {"rotXW": rot_xw, "rotYW": rot_yw, "rotZW": 0, "eyeW": 3, "wScale": 1}
+    return {"t": t, "objects": [{"dslType": "TesseractSponge", "projection": projection}]}
+
+
+def test_keeping_the_view_finds_a_value_the_scene_no_longer_gives_at_the_windows_t():
+    # Session 6 follow-up (msa#49), session 62661e2e: paused at t = 5.04, the window showed
+    # rotXW 145.44 and rotYW 25 (the file's 181.44 and 10 plus -36 / +15). The kept scene shifted
+    # rotXW correctly but left rotYW unset, whose default is 10.
+    from core.snapshot_facts import kept_view_findings
+
+    shown = [("TesseractSponge", {"rotXW": 145.44, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0,
+                                  "wScale": 1.0})]
+    kept = [_rotation(5.0, 144.0), _rotation(5.4167, 159.0)]
+
+    findings = kept_view_findings(5.04, shown, kept)
+
+    assert len(findings) == 1
+    assert "rotYW 25 at t = 5.04 s, but the scene now gives 10" in findings[0]
+    assert "add 15 to TesseractSponge's rotYW" in findings[0]
+    # Session 155a99f8: the other way round, rotXW left unshifted by the window's -36.
+    unshifted = [_rotation(4.5833, 165.0, 25.0), _rotation(5.0, 180.0, 25.0)]
+    shown_e = [("TesseractSponge", {"rotXW": 132.48, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0,
+                                    "wScale": 1.0})]
+    assert "add -36 to TesseractSponge's rotXW" in kept_view_findings(4.68, shown_e, unshifted)[0]
+    right = [_rotation(5.0, 144.0, 25.0), _rotation(5.4167, 159.0, 25.0)]
+    assert kept_view_findings(5.04, shown, right) == []
+    # A full turn later is the same view.
+    assert kept_view_findings(5.04, shown, [_rotation(5.04, 505.44, 25.0)]) == []
+
+
+def test_only_a_request_to_keep_the_view_is_checked_against_the_window():
+    from core.snapshot_facts import asks_to_keep_view
+
+    assert asks_to_keep_view("ok, keep them like that for further prompts")
+    assert asks_to_keep_view("leave it as it is")
+    assert not asks_to_keep_view("keep it gold and spin it faster")
+    assert not asks_to_keep_view("rotate it 45 degrees about xy")
+    assert not asks_to_keep_view("make it glass")

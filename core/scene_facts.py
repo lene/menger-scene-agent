@@ -425,6 +425,9 @@ def _normalized(text: Optional[str]) -> Optional[str]:
 # Words that show the request asked for a kind of change, so facts_diff doesn't report it back
 # as a side effect (F39). Coarse on purpose: a false silence costs less than a warning that
 # tells the user their own request was an unrequested change.
+# "Keep them like that" asks for what the window shows: its camera and 4D view (session 6
+# follow-up, msa#49: the requested rotation came back as four "also changed" warnings).
+_WINDOW_PHRASES = ("like that", "as it is", "as is", "what i see", "this angle")
 _ASKED_FOR = {
     "pos": ("move", "position", "place", "put", "shift", "above", "below", "left", "right",
             "next to", "beside", "closer", "further", "higher", "lower", "centre", "center"),
@@ -433,8 +436,10 @@ _ASKED_FOR = {
                  "plastic", "matte", "diamond", "water", "film", "transparent", "opaque"),
     "camera": ("camera", "view", "zoom", "frame", "angle", "closer", "further",
                # a flight moves the camera (session 4, 8b)
-               "fly", "flight", "flies", "flying", "through", "tunnel", "turn into", "look along"),
-    "projection": ("rotate", "rotation", "turn", "spin", "tilt", "4d", "projection"),
+               "fly", "flight", "flies", "flying", "through", "tunnel", "turn into", "look along",
+               *_WINDOW_PHRASES),
+    "projection": ("rotate", "rotation", "turn", "spin", "tilt", "4d", "projection",
+                   *_WINDOW_PHRASES),
 }
 
 

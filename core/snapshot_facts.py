@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Sequence
 
 # --- formatting -----------------------------------------------------------------------------
 
@@ -386,6 +386,81 @@ def same_material_edge_findings(after: list[dict], prompt: str) -> list[str]:
         + "; copy them, or say in the doc comment why not"
         for label, o in four_d
         if not o.get("edgeRadius")
+    ]
+
+
+PROJECTION_KEYS = ("rotXW", "rotYW", "rotZW", "eyeW", "wScale")
+_ROTATION_KEYS = PROJECTION_KEYS[:3]
+
+
+def _snapshot_t(snapshot: dict) -> float:
+    return float(snapshot.get("t") or 0.0)
+
+
+def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str, dict]], bool]:
+    """Per projected object, its DSL name and its 4D values at `t`, and whether they are
+    interpolated: the validator samples an animation 25 times, so the values come from the two
+    snapshots around t (session 6 read the sample at t = 2 for a window paused at 2.16, 9.6
+    degrees off; msa#49). Outside the sampled range, the end snapshot. `[]` without snapshots."""
+    ordered = sorted(snapshots, key=_snapshot_t)
+    if not ordered:
+        return [], False
+    a = ([s for s in ordered if _snapshot_t(s) <= t] or ordered[:1])[-1]
+    b = ([s for s in ordered if _snapshot_t(s) >= t] or ordered[-1:])[0]
+    span = _snapshot_t(b) - _snapshot_t(a)
+    share = (t - _snapshot_t(a)) / span if span > 0 else 0.0
+    first, second = (
+        [o for o in s.get("objects", []) if isinstance(o.get("projection"), dict)] for s in (a, b)
+    )
+    if len(second) != len(first):
+        second, share = first, 0.0
+
+    def at_t(pa: dict, pb: dict, key: str) -> float:
+        start = float(pa.get(key) or 0)
+        return start + (float(pb.get(key) or 0) - start) * share
+
+    return [
+        (str(oa.get("dslType") or oa.get("objectType")),
+         {k: at_t(oa["projection"], ob["projection"], k) for k in PROJECTION_KEYS})
+        for oa, ob in zip(first, second)
+    ], share != 0.0
+
+
+# "Keep them like that": the view the window shows, with no new rotation asked for (session 6
+# follow-up, msa#49). "Keep it gold and spin it faster" is not one.
+_KEEP_VIEW_WORDS = re.compile(
+    r"\bkeep (them|it|this|that|these|the (view|rotation|angle|projection)s?)\b|"
+    r"\blike (that|this)\b|\bas it is\b|\bwhat i see\b|\bthis angle\b", re.I
+)
+_NEW_ROTATION_WORDS = re.compile(r"\b(rotate|spin|turn|faster|slower|degrees?)\b|\d", re.I)
+_SHOWN_TOLERANCE = 0.5
+
+
+def asks_to_keep_view(prompt: str) -> bool:
+    return bool(_KEEP_VIEW_WORDS.search(prompt)) and not _NEW_ROTATION_WORDS.search(prompt)
+
+
+def kept_view_findings(t: float, shown: list[tuple[str, dict]], after: list[dict]) -> list[str]:
+    """After "keep them like that", the scene must give at the window's t what the window
+    showed there. Session 6 follow-up (msa#49): the shown values became the animation's start
+    (a 40 degree jump at the paused t), and then an unset rotYW, whose default is 10, dropped
+    the window's +15."""
+    actual, _ = projections_at(after, t)
+    if not shown or len(actual) != len(shown):
+        return []
+
+    def shift(key: str, want: float, got: float) -> float:
+        diff = want - got
+        return (diff + 180.0) % 360.0 - 180.0 if key in _ROTATION_KEYS else diff
+
+    return [
+        f"{name}: the window showed {key} {_num(want)} at t = {_num(t)} s, but the scene now gives "
+        f"{_num(got[key])} there; add {_num(round(shift(key, want, got[key]), 2))} to {name}'s "
+        f"{key} (to the animated expression if it is animated, keeping its rate), and write an "
+        "unset rotation explicitly: its default is not 0"
+        for (name, values), (_, got) in zip(shown, actual)
+        for key, want in values.items()
+        if abs(shift(key, want, got[key])) > _SHOWN_TOLERANCE
     ]
 
 

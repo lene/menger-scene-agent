@@ -66,6 +66,24 @@ def test_a_request_about_what_the_window_shows_is_recognised():
     assert not refers_to_window("make it glass")
 
 
+def test_the_window_hint_keeps_an_animated_value_at_the_windows_t():
+    # Session 6 follow-up (msa#49): "keep them like that" wrote the shown rotation as the
+    # animation's start, so the paused frame jumped 40 degrees.
+    from core.prompt_checks import window_state_hint
+
+    hint = window_state_hint("animation at t = 8.88 s, paused")
+    assert "AT THE WINDOW'S t" in hint and "not as its value at t = 0" in hint
+
+
+def test_keep_them_like_that_asks_for_the_window_s_4d_view_and_camera():
+    # Session 6 follow-up (msa#49): the requested rotation came back as "also changed".
+    from core.scene_facts import _asked_for
+
+    assert _asked_for("projection", "ok, keep them like that for further prompts")
+    assert _asked_for("camera", "keep it as it is")
+    assert not _asked_for("projection", "make it glass")
+
+
 def test_play_once_on_an_animated_scene_notes_that_the_preview_loops():
     # Session 5 (F119): "one 360 degree rotation ..., then stop" was accepted silently.
     from core.prompt_checks import play_once_note
