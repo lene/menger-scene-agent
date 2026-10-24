@@ -1,0 +1,15 @@
+[
+  {
+    "case": "script-task-1-2-mvp",
+    "passed": 0,
+    "runs": 1,
+    "questions": [
+      []
+    ],
+    "problems": [
+      [
+        "turn 2 ('slower, and start it already at level 1'): scene text does not match '\\\\b1(\\\\.0)?f\\\\s*\\\\+|level\\\\s*=\\\\s*1(\\\\.0)?f\\\\b|math\\\\.max\\\\(1(\\\\.0)?f'"
+      ]
+    ]
+  }
+]
