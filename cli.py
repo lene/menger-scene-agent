@@ -110,6 +110,7 @@ from adapters.scene_store import SceneStore
 from adapters.scene_validator import validate_scene
 from core.consult import answer_consult
 from core.generation import validate_artifacts
+from core.safe_text import SafeStream
 from core.turn import (
     MAX_REPAIR_ROUNDS,
     check_hand_edit,
@@ -406,6 +407,17 @@ def _exit_on_termination_signals() -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # msa#42: what this run prints carries model replies, replayed history and lines the
+    # render window wrote, where the generated scene runs: no terminal control sequences.
+    stdout = sys.stdout
+    sys.stdout = SafeStream(stdout)  # type: ignore[assignment]
+    try:
+        return _main(argv)
+    finally:
+        sys.stdout = stdout
+
+
+def _main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
 
     if args.check:

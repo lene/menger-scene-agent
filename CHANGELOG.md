@@ -9,6 +9,20 @@ All notable changes to this project are documented in this file. The format is b
 
 Pairs with menger 0.9.0 (DSL manifest 1.11.0); first release not yet tagged.
 
+### Security
+
+- The agent no longer follows what the generated scene leaves in `<session>/window/`, the
+  directory the window and export containers can write (menger#88). Opening the window logs
+  for writing followed a symlink there, so a scene could create or overwrite a host file, for
+  example one the user's shell sources, and fill it with the next window's output, which the
+  scene controls. Logs are now created fresh, without following symlinks. Window state,
+  events, logs and exports are read as regular files only, size-capped; a symlinked `export/`
+  gets nothing. The window state must be finite, in-range numbers or it is ignored, and window
+  events keep only the contract's kinds.
+- Everything the REPL prints goes through `safe_text`: no terminal control or escape
+  sequences, and no bidirectional overrides, from model replies, replayed history or window
+  events (msa#42).
+
 ### Added
 
 - The REPL agent: generate, revise, validate (sandboxed) and render menger DSL scenes, with

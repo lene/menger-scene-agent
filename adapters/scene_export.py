@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 
+from adapters import window_files
 from adapters.render_window import _TERMINATE_GRACE_SECONDS, _terminate, _window_environment
 
 # menger's `--video` frame rate (WithVideoExport.videoFps).
@@ -58,7 +59,7 @@ def export_args(kind: str, out: Path, t: Optional[float], seconds: Optional[floa
 def _failure_message(log: Path, returncode: int, kind: str) -> str:
     """menger's own `Error:` line when it printed one (it can exit 0 after one), else the
     log's last lines."""
-    lines = [ln for ln in log.read_text(errors="replace").splitlines() if ln.strip()]
+    lines = [ln for ln in window_files.read_text(log).splitlines() if ln.strip()]
     errors = [ln for ln in lines if ln.startswith("Error:")]
     if errors:
         return f"{errors[-1]} (log: {log})"
@@ -80,14 +81,21 @@ def export_scene(
     that writes no file are all `ExportError`s. Ctrl-C stops the render (and its container)
     and propagates."""
     directory = export_dir(scene_file)
-    directory.mkdir(parents=True, exist_ok=True)
+    # The window directory is the scene's to write (menger#88): `export` may be a symlink to a
+    # host directory by now. Nothing is written through one.
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return ExportError(f"cannot use {directory}: {e}")
+    if directory.is_symlink():
+        return ExportError(f"{directory} is a symlink, not a directory: nothing written there")
     stem = _next_stem(directory)
     out = directory / f"{stem}.{'png' if kind == 'image' else 'mp4'}"
     log = directory / f"{stem}.log"
     cmd = [str(launcher_path), "--scene", str(scene_file)] + export_args(kind, out, t, seconds)
     timeout = IMAGE_TIMEOUT_SECONDS if kind == "image" else VIDEO_TIMEOUT_SECONDS
     try:
-        with open(log, "w") as output:
+        with window_files.create(log) as output:
             # Its own session, like the window: stopping it signals the group, so the
             # launcher's trap removes the container.
             process = subprocess.Popen(
@@ -104,6 +112,6 @@ def export_scene(
     except KeyboardInterrupt:
         _terminate(process, _TERMINATE_GRACE_SECONDS)
         raise
-    if returncode != 0 or not out.is_file():
+    if returncode != 0 or not window_files.is_file(out):
         return ExportError(_failure_message(log, returncode, kind))
     return ExportResult(out)

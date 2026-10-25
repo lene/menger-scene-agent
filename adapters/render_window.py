@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -33,14 +34,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple, Union
 
+from adapters import window_files
 from adapters.child_env import child_environment
 from adapters.process_contract import (
+    WINDOW_EVENT_KINDS,
     WINDOW_EVENT_VERSION,
     WINDOW_STATE_SCHEMA_VERSION,
     result_problem,
     same_major,
 )
 from adapters.scene_validator import REFERENCE_DSL_REVISION
+from core.safe_text import safe_text
 from core.snapshot_facts import projections_at
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
@@ -178,7 +182,9 @@ def refresh_render_window(
     with suppress(OSError):
         events_path(scene_file).unlink()
     try:
-        with open(stdout_log, "w") as out, open(stderr_log, "w") as err:
+        # The window directory is the scene's to write: never `open(..., "w")` a name in it
+        # (menger#88).
+        with window_files.create(stdout_log) as out, window_files.create(stderr_log) as err:
             # Its own session: the terminal's Ctrl-C (SIGINT to the foreground process group)
             # interrupts the turn, not the window (usability review 2026-10, session 4, F88).
             # The REPL still closes it on exit (`close_render_window`).
@@ -202,8 +208,8 @@ def refresh_render_window(
         return RenderWindowResult(process=process)
 
     return _parse_fast_exit(
-        stdout_log.read_text(errors="replace"),
-        stderr_log.read_text(errors="replace"),
+        window_files.read_text(stdout_log),
+        window_files.read_text(stderr_log),
         process.returncode,
     )
 
@@ -243,12 +249,37 @@ def read_window_state(session_dir: Union[str, Path]) -> Optional[dict]:
     menger this agent cannot read -- the file has carried a version since menger#82)."""
     path = Path(str(render_window_scene_path(session_dir)) + ".window-state.json")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(window_files.read_text(path))
+    except ValueError:
         return None
     if not isinstance(data, dict):
         return None
-    return data if same_major(data.get("schemaVersion"), WINDOW_STATE_SCHEMA_VERSION) else None
+    if not same_major(data.get("schemaVersion"), WINDOW_STATE_SCHEMA_VERSION):
+        return None
+    return data if _valid_window_state(data) else None
+
+
+# The window writes this file from inside its container, where the generated scene runs, so the
+# scene can forge it. It reaches the model's prompt and `/ask` (menger#88): numbers only, finite
+# and in range, or the whole file is ignored.
+_WINDOW_STATE_MAX_ABS = 1e6
+
+
+def _number(value: object) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and abs(value) <= _WINDOW_STATE_MAX_ABS)
+
+
+def _valid_window_state(data: dict) -> bool:
+    vectors_ok = all(
+        isinstance(data.get(key), list) and len(data[key]) == 3 and all(map(_number, data[key]))
+        for key in ("cameraEye", "cameraLookAt")
+    )
+    rotations_ok = all(_number(data.get(key)) for key in ("rotXW", "rotYW", "rotZW"))
+    t = data.get("t")
+    playing = data.get("playing")
+    return (vectors_ok and rotations_ok and (t is None or (_number(t) and t >= 0))
+            and (playing is None or isinstance(playing, bool)))
 
 
 def _vec(value: object) -> str:
@@ -333,9 +364,9 @@ def _rotate(log: Path, keep: int = _KEPT_LOGS) -> None:
         return log.with_name(f"{log.stem}.{n}{log.suffix}")
     with suppress(OSError):
         for n in range(keep - 1, 0, -1):
-            if numbered(n).exists():
+            if os.path.lexists(numbered(n)):
                 numbered(n).replace(numbered(n + 1))
-        if log.exists():
+        if os.path.lexists(log):
             log.replace(numbered(1))
 
 
@@ -374,10 +405,7 @@ def crash_report(
     if returncode == 0:
         return None
     startup_failures = [e.detail for e in _read_events(scene_file, 0) if e.kind == "startup_failed"]
-    try:
-        text = log_paths(scene_file)[1].read_text(errors="replace")
-    except OSError:
-        text = ""
+    text = window_files.read_text(log_paths(scene_file)[1])
     # Stack-frame lines ("at ...") never name the cause; prefer the last line that does.
     lines = [s for s in (raw.strip() for raw in text.splitlines()) if s and not s.startswith("at ")]
     errors = [s for s in lines if "error" in s.lower() or "exception" in s.lower()]
@@ -421,21 +449,13 @@ class WindowEvent:
 def log_size(scene_file: Union[str, Path]) -> int:
     """How much of the events file exists now: the offset from which a wait reads only what the
     window reports after an action. 0 when there is no file yet."""
-    try:
-        return events_path(scene_file).stat().st_size
-    except OSError:
-        return 0
+    return window_files.size(events_path(scene_file))
 
 
 def _read_events(scene_file: Union[str, Path], offset: int) -> List[WindowEvent]:
     """The window's events after `offset`. A line of another event version, or not an event at
     all, is skipped: never a guess at what it meant."""
-    try:
-        with open(events_path(scene_file), "rb") as handle:
-            handle.seek(offset)
-            text = handle.read().decode(errors="replace")
-    except OSError:
-        return []
+    text = window_files.read_bytes(events_path(scene_file), offset).decode(errors="replace")
     events = []
     for line in text.splitlines():
         try:
@@ -445,7 +465,10 @@ def _read_events(scene_file: Union[str, Path], offset: int) -> List[WindowEvent]
         if not isinstance(raw, dict) or raw.get("v") != WINDOW_EVENT_VERSION:
             continue
         kind, detail = raw.get("kind"), raw.get("detail", "")
-        if isinstance(kind, str) and isinstance(detail, str):
+        # Only the contract's kinds; the detail is the scene's to write, so it reaches the
+        # prompt and the terminal without control characters (menger#88, msa#42).
+        if isinstance(kind, str) and kind in WINDOW_EVENT_KINDS and isinstance(detail, str):
+            detail = safe_text(detail)
             events.append(WindowEvent(kind, detail[:_STDOUT_PREVIEW_LENGTH]))
     return events
 
@@ -464,7 +487,7 @@ def wait_for_window_event(
     its events file, or its process ends, or `timeout` seconds pass (then `None`). A window this
     adapter did not start (no log next to the scene) has nothing to wait for: `unavailable`.
     Never raises; this is how "Render window: reloaded" stops being a guess (F57)."""
-    if not log_paths(scene_file)[1].exists():
+    if not window_files.is_file(log_paths(scene_file)[1]):
         return WindowEvent("unavailable")
     wanted = tuple(wanted) + ("startup_failed",)
     deadline = monotonic() + timeout

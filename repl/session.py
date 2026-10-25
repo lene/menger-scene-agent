@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from adapters import window_files
 from adapters.render_window import (
     describe_window_state,
     read_window_state,
@@ -396,12 +397,12 @@ def _export(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
         return
     kind, value = request
     scene_file = render_window_scene_path(ctx.store.session_dir)
-    if state.prior_scene is None or not scene_file.is_file():
+    if state.prior_scene is None or not window_files.is_file(scene_file):
         print("Export: no accepted scene yet.")
         return
     seconds = None
     if kind == "video":
-        seconds = value if value is not None else scene_duration(scene_file.read_text())
+        seconds = value if value is not None else scene_duration(window_files.read_text(scene_file))
         if seconds is None or seconds <= 0:
             print("Export: the scene declares no duration -- give the length: "
                   "/export video <seconds>")

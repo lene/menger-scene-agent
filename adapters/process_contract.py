@@ -17,6 +17,7 @@ CONTRACT: dict = json.loads(_CONTRACT_PATH.read_text(encoding="utf-8"))
 RESULT_SCHEMA_VERSION: str = CONTRACT["schemaVersion"]
 EXIT_CODES: dict = CONTRACT["exitCodes"]
 WINDOW_EVENT_VERSION: int = CONTRACT["windowEvents"]["version"]
+WINDOW_EVENT_KINDS: frozenset = frozenset(CONTRACT["windowEvents"]["kinds"])
 WINDOW_STATE_SCHEMA_VERSION: str = CONTRACT["windowStateSchemaVersion"]
 
 
