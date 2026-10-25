@@ -123,7 +123,7 @@ call or session is created:
 | Env var | Points to |
 |---|---|
 | `MENGER_SCENE_VALIDATOR_SCRIPT` | the renderer-side scene validator script, e.g. `../menger/docker/scene-validator/run-sandboxed.sh` |
-| `MENGER_RENDER_LAUNCHER` | the contained render window, `../menger/docker/scene-validator/run-render-window.sh` (build its image together with the validator's: `../menger/docker/scene-validator/build.sh`). It needs Docker with the NVIDIA Container Toolkit (CDI) and an X display. |
+| `MENGER_RENDER_LAUNCHER` | the contained render window, `../menger/docker/scene-validator/run-render-window.sh` (build its image together with the validator's: `../menger/docker/scene-validator/build.sh`). It needs Docker with the NVIDIA Container Toolkit (CDI), an X display, and Xephyr and Xvfb (`apt install xserver-xephyr xvfb`): the window gets a nested X server of its own, never your display. |
 
 Optional: `MENGER_AGENT_SESSIONS_DIR` (default `./sessions`).
 
