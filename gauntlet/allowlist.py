@@ -17,10 +17,11 @@ bypasses the wildcard import (e.g. `java.io.File(...)` used inline, never import
 
 from __future__ import annotations
 
+import itertools
 import re
 
 from core.vocabulary import IMPORT_EXACT, IMPORT_ROOTS
-from gauntlet._scala_text import line_of, strip_comments_and_strings
+from gauntlet._scala_text import line_of, strip_keeping_splices
 from gauntlet.types import Finding
 
 _STAGE = "allowlist"
@@ -66,12 +67,15 @@ _DOTTED_PATH_RE = re.compile(r"^(?:_root_\.)?[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*
 # A qualified reference used inline without an import, rooted in a package namespace (not a
 # local value's member access like `scene.objects`): `java.io.File`, `scala.sys.process.Process`,
 # `_root_.java.lang.Runtime`. The old pattern required a capitalised last segment and missed
-# `scala.sys.process.stringToProcess` (#36).
+# `scala.sys.process.stringToProcess` (#36). Whitespace may surround each dot, and a blanked
+# comment leaves whitespace too: `java . nio`, `java/**/.nio` (menger#78).
 _PACKAGE_NAMESPACES = ("java", "javax", "jdk", "sun", "scala", "dotty", "menger", "com", "org",
                        "io", "net", "examples")
 _QUALIFIED_REF_RE = re.compile(
-    r"(?<![\w.])((?:_root_\.)?(?:" + "|".join(_PACKAGE_NAMESPACES) + r")(?:\.[A-Za-z_]\w*)+)"
+    r"(?<![\w.])((?:_root_\s*\.\s*)?(?:" + "|".join(_PACKAGE_NAMESPACES)
+    + r")(?:\s*\.\s*[A-Za-z_]\w*)+)"
 )
+_WHITESPACE_RE = re.compile(r"\s+")
 
 # Names every Scala file sees without an import (`java.lang._`, `scala._`, `Predef`) that reach
 # the process, the environment, threads or reflection. Unqualified, they are invisible to the
@@ -81,6 +85,8 @@ _IMPLICIT_DANGEROUS_RE = re.compile(
     r"(?<![\w.])(System|Runtime|ProcessBuilder|Process|ProcessHandle|Thread|ClassLoader|Class|"
     r"SecurityManager|sys|classOf|getClass)\b"
 )
+# The same reach as a member of any value: `this.getClass.getClassLoader` (menger#78).
+_REFLECTIVE_MEMBER_RE = re.compile(r"\.\s*(getClass|getClassLoader)\b")
 
 
 def _root_of(raw_clause: str) -> str | None:
@@ -123,12 +129,12 @@ def check_allowlist(scene_text: str) -> list[Finding]:
     """AD-4 rule 1: flags any import whose target doesn't root in an allowed package, and
     any literal fully-qualified reference outside an import line that does the same.
 
-    Runs against comment/string-stripped text (review round 1): a disallowed import or
+    Runs against comment/string-stripped text, splice code kept (review round 1): a disallowed import or
     reference hidden inside a `//`/`/* */` comment or a string literal must not evade this
     check, and a string that merely *contains* lint-shaped text must not false-positive.
     Line numbers stay correct against the original `scene_text` since stripping only blanks
     content, never removes a newline (`strip_comments_and_strings`)."""
-    text = strip_comments_and_strings(scene_text)
+    text = strip_keeping_splices(scene_text)
     findings: list[Finding] = []
     import_spans: list[tuple[int, int]] = []
 
@@ -158,7 +164,7 @@ def check_allowlist(scene_text: str) -> list[Finding]:
 
     seen_outside_imports: set[str] = set()
     for match in _QUALIFIED_REF_RE.finditer(text):
-        candidate = match.group(1).removeprefix("_root_.")
+        candidate = _WHITESPACE_RE.sub("", match.group(1)).removeprefix("_root_.")
         if (not outside_imports(match.start()) or candidate in seen_outside_imports
                 or _is_allowed(candidate)):
             continue
@@ -175,7 +181,8 @@ def check_allowlist(scene_text: str) -> list[Finding]:
             )
         )
 
-    for match in _IMPLICIT_DANGEROUS_RE.finditer(text):
+    for match in itertools.chain(_IMPLICIT_DANGEROUS_RE.finditer(text),
+                                 _REFLECTIVE_MEMBER_RE.finditer(text)):
         name = match.group(1)
         if not outside_imports(match.start()) or name in seen_outside_imports:
             continue

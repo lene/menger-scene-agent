@@ -22,6 +22,9 @@ Pairs with menger 0.9.0 (DSL manifest 1.11.0); first release not yet tagged.
 - Everything the REPL prints goes through `safe_text`: no terminal control or escape
   sequences, and no bidirectional overrides, from model replies, replayed history or window
   events (msa#42).
+- The allowlist check now sees references in an interpolated string's `${...}` splices, with
+  whitespace or a comment around their dots, and `getClass`/`getClassLoader` called on any
+  value (menger#78). It stays advisory; the containers are the barrier.
 
 ### Added
 

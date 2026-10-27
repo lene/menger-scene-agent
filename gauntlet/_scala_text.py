@@ -52,6 +52,50 @@ def strip_comments_and_strings(text: str) -> str:
     return text
 
 
+_SPLICE_START = re.compile(r"\$\{")
+_MAX_SPLICE_NESTING = 20
+
+
+def _splice_end(text: str, open_brace_index: int) -> int:
+    """The index just past the `}` closing the splice whose `{` is at `open_brace_index`.
+    String literals inside the splice are skipped whole, so `${ "}" + x }` ends at the last
+    brace, not inside the string."""
+    depth, i = 0, open_brace_index
+    while i < len(text):
+        if text[i] == '"':
+            literal = STRING_LITERAL.match(text, i)
+            i = literal.end() if literal else i + 1
+            continue
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+        if depth == 0:
+            break
+    return i
+
+
+def strip_keeping_splices(text: str, _nesting: int = 0) -> str:
+    """`strip_comments_and_strings`, but the code inside an interpolated string's `${...}`
+    splices stays: `s"${System.getenv("KEY")}"` is a call, and blanking it with the string hid
+    it from the allowlist (menger#78). Each splice is stripped the same way, so a splice inside
+    a splice's string is code too. Length and line breaks are preserved.
+
+    ponytail: a `${...}` inside a comment is treated as code too (fails closed); nesting beyond
+    `_MAX_SPLICE_NESTING` returns the text unstripped, also closed."""
+    if _nesting > _MAX_SPLICE_NESTING:
+        return text
+    stripped = strip_comments_and_strings(text)
+    out = list(stripped)
+    position = 0
+    for match in _SPLICE_START.finditer(text):
+        start = match.start()
+        if start < position or not stripped[start].isspace():
+            continue
+        end = _splice_end(text, match.end() - 1)
+        out[start + 2 : end - 1] = strip_keeping_splices(text[start + 2 : end - 1], _nesting + 1)
+        position = end
+    return "".join(out)
+
+
 def strip_strings_only(text: str) -> str:
     """Blanks only string-literal contents, leaving comments intact -- for a check whose
     signal legitimately lives inside a comment (e.g. a leftover `// TODO` note), where

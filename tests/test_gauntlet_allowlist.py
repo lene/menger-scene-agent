@@ -3,6 +3,8 @@ processing, no compiler, no network."""
 
 from __future__ import annotations
 
+import pytest
+
 from gauntlet.allowlist import check_allowlist
 
 CLEAN_SCENE = (
@@ -230,4 +232,45 @@ def test_scala3_wildcard_and_rename_of_allowed_roots_pass():
 
 def test_member_access_on_local_values_is_not_a_package_reference():
     scene = "import menger.dsl._\nobject Foo:\n  val io = 1\n  val x = scene.objects.size + io\n"
+    assert check_allowlist(scene) == []
+
+
+# --- menger#78: references hidden by string splices, spacing or member calls -------------
+
+HIDDEN_REFERENCES = {
+    "interpolated splice": 'val k = s"${System.getenv("KEY")}"',
+    "brace inside splice string": 'val k = s"${ "}" + System.getenv("KEY") }"',
+    "splice inside splice": 'val k = s"${ s"${System.getenv("KEY")}" }"',
+    "triple-quoted splice": 'val k = s"""${System.getenv("KEY")}"""',
+    "member getClass": "val l = this.getClass.getClassLoader",
+    "spaced dots": "val f = java . nio . file . Files . readString(null)",
+    "comment between segments": "val f = java/**/.nio.file.Files.readString(null)",
+    "dot on the next line": "val f = java\n    .nio.file.Files.readString(null)",
+}
+
+
+@pytest.mark.parametrize("snippet", HIDDEN_REFERENCES.values(), ids=HIDDEN_REFERENCES.keys())
+def test_reference_hidden_by_syntax_is_flagged(snippet):
+    scene = f"import menger.dsl._\nobject Foo:\n  {snippet}\n"
+    assert check_allowlist(scene), snippet
+
+
+def test_spaced_reference_is_reported_without_its_spaces():
+    scene = "import menger.dsl._\nobject Foo:\n  val f = java . io . File(null)\n"
+    assert [f.identifier for f in check_allowlist(scene)] == ["java.io.File"]
+
+
+def test_splice_finding_names_the_splice_line():
+    scene = 'import menger.dsl._\nobject Foo:\n  val a = 1\n  val k = s"${System.getenv("K")}"\n'
+    assert [f.line for f in check_allowlist(scene)] == [4]
+
+
+def test_plain_splices_and_strings_naming_dangerous_things_pass():
+    scene = (
+        "import menger.dsl._\n"
+        "object Foo:\n"
+        "  val i = 3\n"
+        '  val label = s"frame ${i + 1} of $i, see System.getenv"\n'
+        '  val note = "java.io.File and this.getClass"\n'
+    )
     assert check_allowlist(scene) == []
