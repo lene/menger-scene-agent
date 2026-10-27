@@ -274,6 +274,59 @@ def test_no_occlusion_warning_inside_a_sponge_because_it_has_holes():
         assert occlusion_warnings(extract_scene_facts(scene)) == [], occluder
 
 
+def test_occlusion_warning_inside_a_level_0_sponge_which_has_no_holes_yet():
+    # F23 itself (msa#5): "a glowing orb in the empty center" of a level-0, so solid, sponge.
+    for occluder in ("Sponge", "TesseractSponge"):
+        scene = (
+            f"{occluder}(pos = (0f, 0f, 0f), size = 2f, level = 0f, material = Some(Material.Gold))\n"
+            "Sphere(pos = (0f, 0f, 0f), size = 0.3f)\n"
+        )
+
+        warnings = occlusion_warnings(extract_scene_facts(scene))
+        assert len(warnings) == 1, occluder
+        assert "holes start at level 1" in warnings[0]
+
+
+def test_nested_shells_inside_one_occluder_give_one_warning():
+    # The live check of msa#5: a core sphere and four glow shells, one text five times.
+    shells = "".join(f"Sphere(pos = (0f, 0f, 0f), size = {s}f, material = Some(Material.Glass))\n"
+                     for s in (0.1, 0.2, 0.3))
+    scene = "Cube(pos = (0f, 0f, 0f), size = 2f, material = Some(Material.Gold))\n" + shells
+
+    assert len(occlusion_warnings(extract_scene_facts(scene))) == 1
+
+
+def test_no_occlusion_warning_inside_a_sponge_from_level_1_or_a_fractional_level():
+    for level in ("1f", "0.5f", "2.5f", "t * 3f"):
+        scene = (
+            f"Sponge(pos = (0f, 0f, 0f), size = 2f, level = {level}, material = Some(Material.Gold))\n"
+            "Sphere(pos = (0f, 0f, 0f), size = 0.3f)\n"
+        )
+
+        assert occlusion_warnings(extract_scene_facts(scene)) == [], level
+
+
+def test_no_occlusion_warning_inside_an_inline_material_with_a_low_alpha():
+    # Session 6 (96f7b22e): an alpha-0.15 sphere was called "opaque".
+    scene = (
+        "Sphere(pos = (0f, 1.9f, 0f), size = 1.75f, material = Some(Material(\n"
+        "  color = Color(1.0f, 0.45f, 0.05f, 0.15f), roughness = 1.0f, emission = 0.6f)))\n"
+        "Cube(pos = (0f, 1.9f, 0f), size = 0.5f, material = Some(Material.Gold))\n"
+    )
+
+    assert occlusion_warnings(extract_scene_facts(scene)) == []
+
+
+def test_occlusion_warning_inside_an_inline_opaque_material():
+    scene = (
+        "Sphere(pos = (0f, 0f, 0f), size = 2f, material = Some(Material(\n"
+        "  color = Color(1.0f, 0.45f, 0.05f), roughness = 1.0f)))\n"
+        "Cube(pos = (0f, 0f, 0f), size = 0.5f)\n"
+    )
+
+    assert len(occlusion_warnings(extract_scene_facts(scene))) == 1
+
+
 def test_no_occlusion_warning_when_the_containing_object_is_transparent():
     scene = (
         "Cube(pos = Vec3(0f, 0f, 0f), size = 5f, material = Some(Material.Glass))\n"

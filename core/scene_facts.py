@@ -128,7 +128,7 @@ def _material_name(value: str, local_vals: dict[str, str]) -> Optional[str]:
     return _material_name(local_vals[name], {}) or name
 
 
-def _material_opacity(material: str, value: str, local_vals: dict[str, str]) -> float:
+def _material_opacity(material: Optional[str], value: str, local_vals: dict[str, str]) -> float:
     """Coarse opacity of a material (F23): the alpha of a `Color` its definition sets (the DSL
     defaults alpha to 1), else the preset hint."""
     name = re.sub(r"^Some\(|\)$", "", value.strip()).strip()
@@ -357,7 +357,9 @@ def _extract_objects(text: str) -> list[ObjectFact]:
             color = _parse_color_literal_option(color_arg) if color_arg is not None else None
             material = _material_name(args["material"], local_vals) if "material" in args else None
             opacity = None
-            if material is not None:
+            # An inline `Material(color = Color(r, g, b, a), ...)` has no name but has an alpha
+            # (session 6: an alpha-0.15 sphere was called "opaque").
+            if "material" in args:
                 opacity = _material_opacity(material, args["material"], local_vals)
             elif color_arg is not None:
                 alpha = _parse_color_alpha(
@@ -623,8 +625,12 @@ def occlusion_warnings(facts: SceneFacts, snapshots: Sequence[dict] = ()) -> lis
     for occluder in facts.objects:
         if occluder.pos is None or occluder.size is None or not occluder.is_opaque:
             continue
-        if occluder.type_name in _HOLED_TYPES:
+        # Level 0 has no holes yet: a level-0 sponge is a solid cube (F23's own case, msa#5).
+        if occluder.type_name in _HOLED_TYPES and occluder.level != 0:
             continue
+        way_out = (f" (a level-0 {occluder.type_name} is solid: its holes start at level 1, "
+                   "or give it a transparent material)"
+                   if occluder.type_name in _HOLED_TYPES else "")
         for obj in facts.objects:
             if obj is occluder or obj.pos is None or obj.size is None:
                 continue
@@ -633,9 +639,10 @@ def occlusion_warnings(facts: SceneFacts, snapshots: Sequence[dict] = ()) -> lis
             if _distance(obj.pos, occluder.pos) + obj.size < occluder.size:
                 warnings.append(
                     f"the {obj.type_name} at {obj.pos} may be entirely hidden inside the "
-                    f"opaque {occluder.type_name} at {occluder.pos}"
+                    f"opaque {occluder.type_name} at {occluder.pos}{way_out}"
                 )
-    return warnings
+    # Several same-type objects at one spot (a glow's nested shells) give the same text once.
+    return list(dict.fromkeys(warnings))
 
 
 _CHAOTIC_TRANSPARENT_SPONGE_LEVEL = 2.0
