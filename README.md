@@ -235,6 +235,18 @@ cp contracts/process-result.json ../menger-scene-agent/reference/process-result.
 the render window print when they end at once, the exit code of each tag, and the window's
 event and state versions. `tests/test_process_contract.py` holds the agent's parsers to it.
 
+The recorded eval cases (`evals/cases/`) hold what the validator answered for each of their
+scenes. The unit suite replays those answers. Every night, menger-toplevel's
+`agent-contract.yml` runs the cases against menger's real validator, and any answer that
+differs from the recording fails the job. Re-record a case after such a menger change:
+
+```bash
+uv run python -m evals.recorded --record --validator ../menger/docker/scene-validator/run-sandboxed.sh evals/cases/<case>.json
+```
+
+If the agent now makes model calls that the recording lacks (a new check asks for a repair),
+add `--live`. This sends the prompts to the configured provider, so it costs money.
+
 ## Running the tests
 
 The unit test suite constructs every provider's adapter (each with a monkey-patched client,

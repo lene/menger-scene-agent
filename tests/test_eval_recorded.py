@@ -5,6 +5,8 @@ right fails the gate."""
 from __future__ import annotations
 
 import copy
+import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -64,7 +66,7 @@ def test_live_mode_counts_the_questions_the_model_asks():
 
 # --- msa#57: conditions per usability-script request ---------------------------------------
 
-_TURN_KEYS = {"prompt", "answer", "answered", "responses", "expect"}
+_TURN_KEYS = {"prompt", "answer", "answered", "responses", "expect", "validator"}
 _EXPECT_KEYS = {
     "questions_at_most", "tag", "message", "objects", "no_objects", "object_count", "materials",
     "lights", "levels", "above", "contains", "not_contains", "min_count", "changed",
@@ -165,3 +167,43 @@ def test_the_ratchet_flags_a_drop_of_more_than_one_run_s_share(monkeypatch, tmp_
     # without history has no best.
     assert ratchet_drops(latest, previous) == [
         "a: 1/3 runs, best of the last 3 kept run(s) 100%"]
+
+
+# --- recorded validator results (menger#78) -------------------------------------------------
+
+
+def test_every_recorded_case_has_its_validator_results():
+    for case in CASES:
+        assert all(turn.get("validator") for turn in case["turns"]), case["id"]
+
+
+def test_the_recorded_validator_results_answer_the_replay():
+    case = copy.deepcopy(CASES[0])
+    case["turns"][0]["validator"] = [{"exit": 1, "result": {
+        "tag": "lint-findings", "messages": [], "schemaVersion": "1.2.0",
+        "findings": [{"invariant": "scene-budget", "message": "over budget"}]}}]
+    problems = run_case(case, MANIFEST, CORPUS).problems
+    assert any("tag lint_findings" in p for p in problems), problems
+
+
+def test_a_real_validator_that_answers_differently_is_reported(tmp_path):
+    # The stub prints a bare "ok": no snapshots, unlike the recorded results.
+    validator = tmp_path / "validator.sh"
+    validator.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{recorded.STUB_VALIDATOR}" "$@"\n')
+    validator.chmod(0o755)
+    problems = run_case(CASES[0], MANIFEST, CORPUS, validator=validator).problems
+    assert any("snapshots differs from the recording" in p for p in problems), problems
+
+
+def test_record_writes_the_validator_results_into_the_case(tmp_path):
+    case = copy.deepcopy(CASES[0])
+    for turn in case["turns"]:
+        del turn["validator"]
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(case))
+    assert main(["--record", str(path)]) == 0
+    written = json.loads(path.read_text())
+    assert [len(t["validator"]) for t in written["turns"]] == [1] * len(case["turns"])
+    assert written["turns"][0]["validator"][0]["result"]["tag"] == "ok"
+    assert {k: v for k, v in written.items() if k != "turns"} == {
+        k: v for k, v in case.items() if k != "turns"}

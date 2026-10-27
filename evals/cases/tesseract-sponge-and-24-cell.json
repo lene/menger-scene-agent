@@ -4,76 +4,509 @@
   "turns": [
     {
       "prompt": "a menger sponge level 2.5",
-      "responses": [
-        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2.5f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```",
-        "level-2.5 sponge, size 2.5 units, gold, three directional lights, camera 7.8 units out looking at the origin from above."
-      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2.5f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```", "level-2.5 sponge, size 2.5 units, gold, three directional lights, camera 7.8 units out looking at the origin from above."],
       "expect": {
-        "objects": [
-          "Sponge"
-        ],
-        "contains": [
-          "level\\s*=\\s*2\\.5f"
-        ]
-      }
+        "objects": ["Sponge"],
+        "contains": ["level\\s*=\\s*2\\.5f"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sponge-volume",
+                    "dslType": "Sponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
     },
     {
       "prompt": "ok now turn the sponge into a tesseract-sponge",
-      "responses": [
-        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```",
-        "Gold tesseract sponge at level 2.5, size 2.5, lit by three directional lights, camera about 7.8 units out looking at the origin, and note the sponge reaches level 2.5 so rendering gets slow from level 2."
-      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```", "Gold tesseract sponge at level 2.5, size 2.5, lit by three directional lights, camera about 7.8 units out looking at the origin, and note the sponge reaches level 2.5 so rendering gets slow from level 2."],
       "expect": {
-        "objects": [
-          "TesseractSponge"
-        ]
-      }
+        "objects": ["TesseractSponge"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-surface",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
     },
     {
       "prompt": "make the material glass",
-      "responses": [
-        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Glass),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```",
-        "level-2.5 tesseract sponge, 2.5 units, glass, three directional lights, plus a dark floor plane, camera 7.8 units out at about 27\u00b0, though note level 2.5 gets slow to render and glass this fine looks chaotic and fragmented."
-      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Glass),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```", "level-2.5 tesseract sponge, 2.5 units, glass, three directional lights, plus a dark floor plane, camera 7.8 units out at about 27\u00b0, though note level 2.5 gets slow to render and glass this fine looks chaotic and fragmented."],
       "expect": {
-        "objects": [
-          "TesseractSponge"
-        ],
-        "materials": [
-          "Glass"
-        ]
-      }
+        "objects": ["TesseractSponge"],
+        "materials": ["Glass"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-surface",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 1, 1, 0.02],
+                      "ior": 1.5,
+                      "roughness": 0,
+                      "metallic": 0,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
     },
     {
       "prompt": "make the material film with thin edges, say 0.01 diameter",
-      "responses": [
-        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Film),\n        size = 2.5f,\n        edgeRadius = Some(0.005f),\n        edgeMaterial = Some(Material.Film)\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```",
-        "level-2.5 surface-subdividing tesseract sponge, size 2.5, transparent film material, three directional lights, camera 4,3,6 looking at the origin, plus a dark grey ground plane, though render times grow past level 2 and this film material will look chaotic rather than clearly shaped."
-      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Film),\n        size = 2.5f,\n        edgeRadius = Some(0.005f),\n        edgeMaterial = Some(Material.Film)\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```", "level-2.5 surface-subdividing tesseract sponge, size 2.5, transparent film material, three directional lights, camera 4,3,6 looking at the origin, plus a dark grey ground plane, though render times grow past level 2 and this film material will look chaotic rather than clearly shaped."],
       "expect": {
-        "objects": [
-          "TesseractSponge"
-        ],
-        "materials": [
-          "Film"
-        ],
-        "contains": [
-          "edgeRadius\\s*=\\s*Some\\(0\\.005f\\)"
-        ]
-      }
+        "objects": ["TesseractSponge"],
+        "materials": ["Film"],
+        "contains": ["edgeRadius\\s*=\\s*Some\\(0\\.005f\\)"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-surface",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 1, 1, 0.2],
+                      "ior": 1.33,
+                      "roughness": 0.1,
+                      "metallic": 0,
+                      "specular": 0.5,
+                      "emission": 0,
+                      "filmThickness": 500,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": 0.005,
+                    "edgeMaterial": {
+                      "color": [1, 1, 1, 0.2],
+                      "ior": 1.33,
+                      "roughness": 0.1,
+                      "metallic": 0,
+                      "specular": 0.5,
+                      "emission": 0,
+                      "filmThickness": 500,
+                      "dispersion": 0
+                    },
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
     },
     {
       "prompt": "add a 24-cell above the sponge",
-      "responses": [
-        "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Film),\n        size = 2.5f,\n        edgeRadius = Some(0.005f),\n        edgeMaterial = Some(Material.Film)\n      ),\n      Icositetrachoron(\n        pos = (0f, 2.5f, 0f),\n        material = Some(Material.Film),\n        size = 0.8f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```",
-        "A level-2.5 tesseract sponge (size 2.5, translucent film material) and a size-0.8 icositetrachoron (also film material) above it on a dark gray floor plane, lit by three directional lights (one from upper-front-right at 1.5 intensity, one from upper-front-left at 0.5, one from below-front at 0.8), viewed from a camera 7.8 units out at about 27\u00b0 \u2014 though note the sponge's level 2.5 will render slowly and produce chaotic, fragmented refraction."
-      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\nobject SpongeLevel25:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        spongeType = SurfaceSubdividing,\n        pos = (0f, 0f, 0f),\n        level = 2.5f,\n        material = Some(Material.Film),\n        size = 2.5f,\n        edgeRadius = Some(0.005f),\n        edgeMaterial = Some(Material.Film)\n      ),\n      Icositetrachoron(\n        pos = (0f, 2.5f, 0f),\n        material = Some(Material.Film),\n        size = 0.8f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"sponge-level-2-5\", scene)```", "A level-2.5 tesseract sponge (size 2.5, translucent film material) and a size-0.8 icositetrachoron (also film material) above it on a dark gray floor plane, lit by three directional lights (one from upper-front-right at 1.5 intensity, one from upper-front-left at 0.5, one from below-front at 0.8), viewed from a camera 7.8 units out at about 27\u00b0 \u2014 though note the sponge's level 2.5 will render slowly and produce chaotic, fragmented refraction."],
       "expect": {
-        "objects": [
-          "TesseractSponge",
-          "Icositetrachoron"
-        ]
-      }
+        "objects": ["TesseractSponge", "Icositetrachoron"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-surface",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 1, 1, 0.2],
+                      "ior": 1.33,
+                      "roughness": 0.1,
+                      "metallic": 0,
+                      "specular": 0.5,
+                      "emission": 0,
+                      "filmThickness": 500,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": 0.005,
+                    "edgeMaterial": {
+                      "color": [1, 1, 1, 0.2],
+                      "ior": 1.33,
+                      "roughness": 0.1,
+                      "metallic": 0,
+                      "specular": 0.5,
+                      "emission": 0,
+                      "filmThickness": 500,
+                      "dispersion": 0
+                    },
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  },
+                  {
+                    "objectType": "24-cell",
+                    "dslType": "Icositetrachoron",
+                    "pos": [0, 2.5, 0],
+                    "size": 0.8,
+                    "level": null,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 1, 1, 0.2],
+                      "ior": 1.33,
+                      "roughness": 0.1,
+                      "metallic": 0,
+                      "specular": 0.5,
+                      "emission": 0,
+                      "filmThickness": 500,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
     }
   ]
 }

@@ -5,9 +5,11 @@ A case is a usability-session request sequence with the model's recorded raw res
 per turn, objective expectations from the request itself: which object types, materials and
 lights the scene must have, what its text must say. `run_case` replays it through the real
 `run_turn()` -- prompt composition, extraction, both gauntlets, the scene checks, repair
-rounds, readback -- with `ReplayModelAdapter` in place of the model and a validator stub that
-answers "ok" under menger's process contract. So a change to the agent that breaks a turn the
-model once got right fails here, without a model call or a GPU.
+rounds, readback -- with `ReplayModelAdapter` in place of the model, and each validator call
+answered from the turn's recorded `validator` results (menger's result JSON, snapshots
+included), so the agent's snapshot and budget checks run too (menger#78). A turn without them
+gets the stub's bare "ok". So a change to the agent that breaks a turn the model once got
+right fails here, without a model call or a GPU.
 
 `--live` sends the prompts to the configured provider instead (paid: the user's call), the
 recorded cases and `evals/script/` -- every usability-script request with its conditions, no
@@ -17,15 +19,20 @@ and the questions asked are kept per run in
 `latest.json`. A case whose pass rate falls below its best in the model's last
 `RATCHET_RUNS` kept runs by more than one run's share is flagged. `--compare A B` prints two
 kept runs' pass rates per case. `--validator` takes menger's `run-sandboxed.sh` instead of the
-stub, so compile errors and the scene budget count too.
+stub; its answers must then equal the recorded ones (the nightly job in menger-toplevel's
+agent-contract.yml). `--record` writes the validator results seen, and live the model's
+responses, into each named case that passes: after a menger change, without `--live`; when the
+agent now makes calls the recording lacks, with it.
 
-Usage: uv run python -m evals.recorded [--live [--repeat N] [--validator SCRIPT]] [case.json ...]
+Usage: uv run python -m evals.recorded [--live [--repeat N]] [--validator SCRIPT] [--record]
+                                       [case.json ...]
        uv run python -m evals.recorded --compare A.json B.json
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -36,14 +43,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
+import core.turn
 from adapters.artifacts import load_corpus, load_manifest
 from adapters.model import ModelError, ModelRequest, ModelResult
 from adapters.model_factory import get_model_adapter, selected_provider
+from adapters.process_contract import EXIT_CODES
 from adapters.scene_store import SceneStore
-from adapters.scene_validator import validate_scene
+from adapters.scene_validator import _parse_stdout, validate_scene
 from core.ports import ModelAdapter
 from core.scene_facts import extract_scene_facts
-from core.turn import run_turn, use_default_validator
+from core.turn import Validator, run_turn, use_default_validator
+from core.types import ValidationError, ValidationOutcome
 from gauntlet._scala_text import strip_comments_and_strings
 from repl.state import _build_clarification_prompt, _ClarificationState
 
@@ -57,6 +67,10 @@ RATCHET_RUNS = 3
 # The usability script's requests with conditions and no recorded responses: live runs only.
 SCRIPT_DIR = Path(__file__).resolve().parent / "script"
 DARK = 0.15  # every background channel at or below this is "dark"
+# An indented JSON array of plain values (no nested array or object): one per line as
+# json.dumps writes it. A raw newline never occurs inside a JSON string, so joining at
+# newlines changes only whitespace between tokens.
+_SCALAR_ARRAY = re.compile(r"\[\n *([^\[\]{}\n]+(?:\n *[^\[\]{}\n]+)*)\n *\]")
 
 
 @dataclass
@@ -162,6 +176,7 @@ class CaseResult:
     case_id: str
     problems: List[str]
     questions: List[str] = field(default_factory=list)
+    recorded: Optional[List[dict]] = None  # `--record`: the case's turns as this run saw them
 
     @property
     def passed(self) -> bool:
@@ -170,47 +185,121 @@ class CaseResult:
 
 @dataclass
 class _QuestionCounter:
-    """Passes calls on and keeps every question the model asked."""
+    """Passes calls on and keeps every response, and every question the model asked."""
 
     inner: ModelAdapter
     questions: List[str] = field(default_factory=list)
+    responses: List[ModelResult] = field(default_factory=list)
 
     def complete(self, request: ModelRequest) -> ModelResult:
         result = self.inner.complete(request)
+        self.responses.append(result)
         if isinstance(result, str) and result.lstrip().startswith("NEEDS_CLARIFICATION"):
             self.questions.append(result.strip())
         return result
 
 
+def _as_entry(outcome: ValidationOutcome) -> dict:
+    """A validator outcome as a case records it: menger's result JSON and its exit code."""
+    if isinstance(outcome, ValidationError):
+        return {"error": outcome.kind, "message": outcome.message}
+    wire_tag = outcome.tag.replace("_", "-")
+    return {"exit": EXIT_CODES[wire_tag], "result": {
+        "tag": wire_tag, "messages": outcome.messages,
+        "findings": [{"invariant": f.invariant, "message": f.message} for f in outcome.findings],
+        "scene": outcome.scene, "schemaVersion": outcome.schema_version,
+        "snapshots": outcome.snapshots, "cameraPath": outcome.camera_path}}
+
+
+def _from_entry(entry: dict) -> ValidationOutcome:
+    if "error" in entry:
+        return ValidationError(kind=entry["error"], message=entry["message"])
+    return _parse_stdout(json.dumps(entry["result"]), "", entry["exit"])
+
+
+@dataclass
+class _ValidatorTape:
+    """One turn's validator calls (menger#78). With `recorded` it answers from the
+    case's recorded results, snapshots included, so the agent's snapshot and budget checks run
+    without menger; without, it runs `inner` and keeps what it said, for `--record` and for the
+    drift check against the real validator."""
+
+    inner: Validator
+    recorded: Optional[List[dict]] = None
+    entries: List[dict] = field(default_factory=list)
+
+    def __call__(self, *args: object, **kwargs: object) -> ValidationOutcome:
+        if self.recorded is None:
+            outcome = self.inner(*args, **kwargs)
+        elif len(self.entries) < len(self.recorded):
+            outcome = _from_entry(self.recorded[len(self.entries)])
+        else:
+            outcome = ValidationError(kind="subprocess_failed",
+                                      message="no recorded validator result left for this call")
+        self.entries.append(_as_entry(outcome))
+        return outcome
+
+
+def _drift(recorded: List[dict], seen: List[dict]) -> List[str]:
+    """Where the validator's answers differ from the recorded ones: the case was recorded
+    against a menger that validated differently, so it needs `--record` again."""
+    if len(recorded) != len(seen):
+        return [f"{len(seen)} validator call(s), {len(recorded)} recorded"]
+    return [f"validator call {k}: {key} differs from the recording"
+            for k, (old, new) in enumerate(zip(recorded, seen), start=1)
+            for key in sorted(old.get("result", old).keys() | new.get("result", new).keys())
+            if old.get("result", old).get(key) != new.get("result", new).get(key)]
+
+
 def run_case(
     case: dict, manifest: dict, corpus: dict, live: Optional[ModelAdapter] = None,
-    validator: Path = STUB_VALIDATOR,
+    validator: Path = STUB_VALIDATOR, record: bool = False,
 ) -> CaseResult:
     """Runs the case's turns in one session. A turn with an `answer` gets it threaded like the
-    REPL does (`repl.state`) when the model asks, once."""
+    REPL does (`repl.state`) when the model asks, once.
+
+    Against the stub, a recorded replay answers each validator call from the turn's recorded
+    `validator` results; against a real validator, those are what its answers must equal.
+    With `record`, a passing case's turns get the validator results seen (and, live, the model
+    responses) written into the returned `CaseResult.recorded`."""
     problems: List[str] = []
     questions: List[str] = []
     use_default_validator(validate_scene)  # the real adapter, by default against the stub
+    inner = core.turn.validate_scene
+    replay = live is None and validator == STUB_VALIDATOR and not record
+    recorded_turns = copy.deepcopy(case["turns"])
     prior: Optional[str] = None
     with tempfile.TemporaryDirectory() as tmp:
         store = SceneStore.create_session(Path(tmp), session_id="eval")
-        for n, turn in enumerate(case["turns"], start=1):
-            adapter = _QuestionCounter(live or ReplayModelAdapter(iter(turn["responses"])))
-            prompt = turn["prompt"]
-            result = run_turn(prompt, prior, manifest, corpus, adapter, store, validator,
-                              answered=turn.get("answered", False))
-            if result.tag == "needs_clarification" and "answer" in turn:
-                pending = _ClarificationState(pending_prompt=prompt, reason="; ".join(result.messages))
-                result = run_turn(_build_clarification_prompt(pending, turn["answer"]), prior,
-                                  manifest, corpus, adapter, store, validator, answered=True)
-            scene = store.current_scene() or ""
-            turn_problems = _turn_problems(turn.get("expect", {}), scene, result.tag,
-                                           result.messages, len(adapter.questions), prior or "")
-            problems += [f"turn {n} ({prompt[:40]!r}): {p}" for p in turn_problems]
-            questions += adapter.questions
-            if result.tag == "accepted":
-                prior = scene
-    return CaseResult(case["id"], problems, questions)
+        try:
+            for n, (turn, out) in enumerate(zip(case["turns"], recorded_turns), start=1):
+                adapter = _QuestionCounter(live or ReplayModelAdapter(iter(turn["responses"])))
+                tape = _ValidatorTape(inner, turn.get("validator") if replay else None)
+                core.turn.use_validator(tape)
+                prompt = turn["prompt"]
+                result = run_turn(prompt, prior, manifest, corpus, adapter, store, validator,
+                                  answered=turn.get("answered", False))
+                if result.tag == "needs_clarification" and "answer" in turn:
+                    pending = _ClarificationState(pending_prompt=prompt,
+                                                  reason="; ".join(result.messages))
+                    result = run_turn(_build_clarification_prompt(pending, turn["answer"]), prior,
+                                      manifest, corpus, adapter, store, validator, answered=True)
+                scene = store.current_scene() or ""
+                turn_problems = _turn_problems(turn.get("expect", {}), scene, result.tag,
+                                               result.messages, len(adapter.questions), prior or "")
+                if not replay and not record and live is None and "validator" in turn:
+                    turn_problems += _drift(turn["validator"], tape.entries)
+                problems += [f"turn {n} ({prompt[:40]!r}): {p}" for p in turn_problems]
+                questions += adapter.questions
+                out["validator"] = tape.entries
+                if live is not None:
+                    out["responses"] = adapter.responses
+                if result.tag == "accepted":
+                    prior = scene
+        finally:
+            core.turn.use_validator(inner)
+    return CaseResult(case["id"], problems, questions,
+                      recorded_turns if record and not problems else None)
 
 
 def load_cases(paths: Optional[List[Path]] = None, live: bool = False) -> List[dict]:
@@ -292,6 +381,18 @@ def ratchet_drops(path: Path, previous: Sequence[Path]) -> List[str]:
     return drops
 
 
+def _write_recording(path: Path, case: dict, turns: List[dict],
+                     live: Optional[ModelAdapter]) -> None:
+    case = {**case, "turns": turns}
+    if live is not None:
+        case["recorded_live"] = {
+            "provider": selected_provider(), "model": getattr(live, "model_name", "unknown"),
+            "date": datetime.now(timezone.utc).date().isoformat(), "agent": _agent_revision()}
+    text = _SCALAR_ARRAY.sub(lambda m: "[" + re.sub(r"\n *", " ", m.group(1)) + "]",
+                             json.dumps(case, indent=2))
+    path.write_text(text + "\n", encoding="utf-8")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.recorded")
     parser.add_argument("cases", nargs="*", type=Path)
@@ -302,17 +403,27 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="validator script, e.g. menger's run-sandboxed.sh (default: stub)")
     parser.add_argument("--compare", nargs=2, type=Path, metavar=("A", "B"),
                         help="print two kept live runs' pass rates per case, and exit")
+    parser.add_argument("--record", action="store_true",
+                        help="write the validator results (and, live, the model responses) of "
+                             "each named case that passes back into its file")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if args.compare:
         print("\n".join(compare_runs(*args.compare)))
         return 0
+    if args.record and not args.cases:
+        parser.error("--record rewrites case files: name them")
     live = get_model_adapter() if args.live else None
     manifest = load_manifest(ROOT / "reference" / "dsl-manifest.json")
     corpus = load_corpus(ROOT / "reference" / "dsl-corpus.json")
     runs: Dict[str, List[CaseResult]] = {}
-    for case in load_cases(args.cases or None, live=args.live):
-        runs[case["id"]] = [run_case(case, manifest, corpus, live, args.validator)
+    cases = load_cases(args.cases or None, live=args.live)
+    for path, case in zip(args.cases or [None] * len(cases), cases):
+        runs[case["id"]] = [run_case(case, manifest, corpus, live, args.validator, args.record)
                             for _ in range(args.repeat if args.live else 1)]
+        recorded = next((r.recorded for r in runs[case["id"]] if r.recorded), None)
+        if args.record and path is not None and recorded is not None:
+            _write_recording(path, case, recorded, live)
+            print(f"recorded: {path}")
     for case_id, results in runs.items():
         passed = sum(r.passed for r in results)
         asked = sum(len(r.questions) for r in results)
@@ -322,7 +433,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  {problem}")
     all_passed = sum(all(r.passed for r in results) for results in runs.values())
     print(f"{all_passed}/{len(runs)} cases pass")
-    if live is not None:
+    if live is not None and not args.record:  # a recording run measures nothing
         path = _write_live_results(live, runs)
         print(f"written: {path}")
         drops = ratchet_drops(path, previous_runs(path))
