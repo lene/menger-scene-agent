@@ -26,7 +26,7 @@ from adapters.render_window import (
     shown_4d_values,
 )
 from adapters.scene_export import ExportError
-from adapters.scene_store import SceneStore, SceneStoreError
+from adapters.scene_store import SceneStore, SceneStoreError, history_entry_problem
 from adapters.tickets import (
     OPEN_ISSUES_FILE,
     issue_link,
@@ -178,7 +178,7 @@ def _turn_paths(
             return store.current_scene_path(), None
         lines = store.history_path.read_text(encoding="utf-8").splitlines()
         last = json.loads(lines[-1]) if lines else {}
-        if (isinstance(last, dict) and last.get("outcome") == "rejected"
+        if (history_entry_problem(last) is None and last.get("outcome") == "rejected"
                 and last.get("prompt") == prompt and last.get("file")):
             return None, store.session_dir / last["file"]
     except Exception:  # noqa: BLE001 -- output detail only, must not kill the REPL

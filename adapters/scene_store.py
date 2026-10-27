@@ -67,6 +67,29 @@ _ORDINAL_WIDTH = 3
 _REJECTED_FILENAME = re.compile(r"^rejected-(\d{3,})\.scala$")
 
 _HISTORY_FILENAME = "history.jsonl"
+_HISTORY_OUTCOMES = frozenset({"accepted", "rejected", "consult"})
+_HISTORY_TEXT_FIELDS = ("prompt", "file", "readback_summary", "reason", "answer", "error")
+
+
+def history_entry_problem(entry: object) -> Optional[str]:
+    """Why a parsed `history.jsonl` line is not an entry this store writes, or None. A
+    session directory can come from someone else, so a resume reads it as untrusted
+    (menger#88): a non-string `file` or `reason` used to crash the replay, and `file` must
+    name a file in the session directory, never a path out of it."""
+    if not isinstance(entry, dict):
+        return f"not a JSON object (got {type(entry).__name__})"
+    if entry.get("outcome") not in _HISTORY_OUTCOMES:
+        return f"unknown outcome {entry.get('outcome')!r}"
+    for key in _HISTORY_TEXT_FIELDS:
+        if entry.get(key) is not None and not isinstance(entry[key], str):
+            return f"{key!r} is not a string"
+    ordinal = entry.get("ordinal")
+    if ordinal is not None and (isinstance(ordinal, bool) or not isinstance(ordinal, int)):
+        return "'ordinal' is not an integer"
+    file_name = entry.get("file")
+    if file_name and (Path(file_name).name != file_name or file_name == ".."):
+        return f"'file' is not a file name in the session directory: {file_name!r}"
+    return None
 
 
 # Defined in core.ports (msa#34): core catches it without importing this adapter.

@@ -753,6 +753,39 @@ def test_resume_with_malformed_history_line_skips_with_warning(monkeypatch, tmp_
     assert "malformed" in captured.err.lower()
 
 
+@pytest.mark.parametrize("bad_entry", [
+    {"outcome": "rejected", "prompt": "p", "file": 123, "reason": "local_finding: x"},
+    {"outcome": "rejected", "prompt": "p", "reason": ["local_finding: x"]},
+    {"outcome": "accepted", "prompt": "p", "file": "../../etc/passwd", "ordinal": 1},
+    {"outcome": "accepted", "prompt": "p", "file": "/etc/passwd", "ordinal": 1},
+    {"outcome": "rejected", "prompt": "p", "file": "..", "reason": "local_finding: x"},
+    {"outcome": "accepted", "prompt": "p", "file": "001.scala", "ordinal": "1"},
+    {"outcome": "deleted-everything", "prompt": "p"},
+])
+def test_resume_skips_a_history_entry_of_the_wrong_shape(monkeypatch, tmp_path, capsys, bad_entry):
+    # menger#88: a session directory can come from someone else; resume must neither crash on
+    # nor print a path out of it.
+    sessions_dir = tmp_path / "sessions"
+    store = SceneStore.create_session(sessions_dir, session_id="forged-history")
+    with open(store.history_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(bad_entry) + "\n")
+    store.record_rejected("prompt", "local_finding: bad thing")
+
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions_dir))
+    _stub_model_adapter(monkeypatch)
+    _refuse_run_turn(monkeypatch)
+    _refuse_render_window(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+
+    assert cli.main(["--session", "forged-history"]) == 0
+    captured = capsys.readouterr()
+    assert "Rejected (local finding): bad thing" in captured.out
+    assert "skipping history.jsonl line" in captured.err
+    assert "/etc/passwd" not in captured.out
+
+
 # --- run_turn() raises: "Turn error: ..." printed, loop continues instead of dying --------
 
 

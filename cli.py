@@ -106,7 +106,7 @@ from adapters.render_window import (
     wait_for_window_event,
 )
 from adapters.scene_export import export_scene
-from adapters.scene_store import SceneStore
+from adapters.scene_store import SceneStore, history_entry_problem
 from adapters.scene_validator import validate_scene
 from core.consult import answer_consult
 from core.generation import validate_artifacts
@@ -333,7 +333,8 @@ def _replay_history(store: SceneStore) -> None:
     to reuse"). A line that fails to parse as JSON, or that parses to something other than
     a JSON object, is skipped with a one-line warning on stderr rather than crashing
     resume with a raw traceback -- `history.jsonl` is append-only (AD-7) so a later valid
-    entry should still replay even if an earlier line is damaged."""
+    entry should still replay even if an earlier line is damaged. So is an entry of the
+    wrong shape (`history_entry_problem`, menger#88)."""
     if not store.history_path.is_file():
         return
     with open(store.history_path, "r", encoding="utf-8") as f:
@@ -349,12 +350,10 @@ def _replay_history(store: SceneStore) -> None:
                     file=sys.stderr,
                 )
                 continue
-            if not isinstance(entry, dict):
-                print(
-                    "warning: skipping history.jsonl line that is not a JSON object "
-                    f"(got {type(entry).__name__}): {line!r}",
-                    file=sys.stderr,
-                )
+            problem = history_entry_problem(entry)
+            if problem is not None:
+                print(f"warning: skipping history.jsonl line ({problem}): {line!r}",
+                      file=sys.stderr)
                 continue
             # F50: the replay shows what was asked, not only what came of it.
             if entry.get("outcome") != "consult" and entry.get("prompt"):
