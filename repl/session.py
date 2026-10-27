@@ -14,7 +14,8 @@ import logging
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -217,6 +218,26 @@ def _write_ticket_draft(store: SceneStore, message: str, prompt: str) -> None:
 _stage_line_open = False
 
 
+@dataclass
+class _StageClock:
+    """Wall time per stage of one turn, logged with its result (menger#91: turn latency was
+    never measured). A stage lasts until the next one starts, the last until the turn ends;
+    "generating" includes the local checks, "validating" the sandboxed validator."""
+
+    started: float = field(default_factory=time.monotonic)
+    marks: list = field(default_factory=list)
+
+    def __call__(self, stage: str) -> None:
+        self.marks.append((stage, time.monotonic()))
+        _print_stage(stage)
+
+    def summary(self) -> str:
+        end = time.monotonic()
+        ends = [t for _, t in self.marks[1:]] + [end]
+        parts = [f"{stage} {t1 - t0:.1f}s" for (stage, t0), t1 in zip(self.marks, ends)]
+        return ", ".join(parts + [f"total {end - self.started:.1f}s"])
+
+
 def _print_stage(stage: str) -> None:
     # Story 12 ("live status line"): a multi-second turn printed nothing until done. On stderr,
     # flushed, keeping stdout for the result line. Session 3 (msa#21): the stages of one turn
@@ -256,6 +277,7 @@ def execute_turn(
     take (story 22). A `run_turn()` exception is printed as "Turn error: ..." and returns
     `None` ("a single bad turn must not kill the REPL"); Ctrl-C abandons the turn (F51)."""
     consult, state.last_consult = state.last_consult, None
+    clock = _StageClock()
     try:
         result = ports.run_turn(
             prompt,
@@ -265,17 +287,17 @@ def execute_turn(
             ctx.adapter,
             ctx.store,
             ctx.script_path,
-            on_stage=_print_stage,
+            on_stage=clock,
             **_window_state_kwargs(ctx.store),
             **_window_shown_kwargs(ctx.store),
             **({"answered": True} if answered else {}),
             **({"context_note": _consult_note(consult)} if consult else {}),
         )
         _end_stage_line()
-        logger.info("turn: %s, ordinal %s", result.tag, result.ordinal)
+        logger.info("turn: %s, ordinal %s; %s", result.tag, result.ordinal, clock.summary())
     except Exception as e:  # noqa: BLE001 -- a single bad turn must not kill the REPL
         _end_stage_line()
-        logger.exception("turn error")
+        logger.exception("turn error; %s", clock.summary())
         print(f"Turn error: {e}")
         return None
     except KeyboardInterrupt:

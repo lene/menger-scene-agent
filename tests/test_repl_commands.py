@@ -4,6 +4,8 @@ command is covered end to end in test_cli.py."""
 
 from __future__ import annotations
 
+import re
+
 from repl.session import COMMANDS, _consult, _status_echo, _unknown, command_for
 
 
@@ -80,3 +82,28 @@ def test_the_request_after_an_ask_carries_it_once(tmp_path, capsys):
 
     assert "what are the 4D parameters now?" in calls[0] and "rotXW 93.6" in calls[0]
     assert calls[1] is None
+
+
+def test_a_turn_logs_how_long_each_stage_took(tmp_path, caplog):
+    # menger#91: turn latency was never measured; agent.log now has it per stage.
+    import logging
+    from types import SimpleNamespace
+
+    from adapters.scene_store import SceneStore
+    from core.types import TurnResult
+    from repl.session import TurnState, execute_turn
+
+    def run_turn(prompt, *args, on_stage, **kwargs):
+        for stage in ("generating", "validating", "reading back"):
+            on_stage(stage)
+        return TurnResult(tag="unchanged", messages=["No change made."])
+
+    ctx = SimpleNamespace(manifest={}, corpus={}, adapter=None,
+                          store=SceneStore.create_session(tmp_path), script_path=None,
+                          render_launcher_path="menger-app")
+    with caplog.at_level(logging.INFO, logger="cli"):
+        execute_turn(ctx, SimpleNamespace(run_turn=run_turn), TurnState(prior_scene=None), "x")
+
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("turn:"))
+    assert re.search(r"generating \d+\.\ds, validating \d+\.\ds, reading back \d+\.\ds, "
+                     r"total \d+\.\ds", line), line
