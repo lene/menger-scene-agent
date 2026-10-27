@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from core.prompt_checks import cut_off_reason, unknown_material_hint
+from core.prompt_checks import (
+    caustics_strength_question,
+    cut_off_reason,
+    undirected_placement_hint,
+    unknown_material_hint,
+)
 
 _MANIFEST = json.loads(
     (Path(__file__).resolve().parent.parent / "reference" / "dsl-manifest.json").read_text()
@@ -105,3 +110,23 @@ def test_colouring_before_the_4d_rotation_gets_the_unsupported_hint():
     assert hint is not None and "UNSUPPORTED" in hint
     assert pre_projection_colour_hint("colour it by its local x, y, z") is None
     assert pre_projection_colour_hint("rotate it in 4D before the next step") is None
+
+
+def test_a_placement_next_to_another_object_without_a_side_asks():
+    # msa#13: "add a 24-cell next to the sponge" was placed somewhere, unasked (live 2026-10-27).
+    for prompt in ("add a 24-cell next to the sponge", "put a sphere beside the cube",
+                   "a torus near the sponge"):
+        assert "NEEDS_CLARIFICATION" in undirected_placement_hint(prompt), prompt
+    for prompt in ("add a 24-cell to the left of the sponge", "a sphere next to the cube, on its right",
+                   "put a sphere above the sponge", "a cube behind and near the sponge",
+                   "make it darker"):
+        assert undirected_placement_hint(prompt) is None, prompt
+
+
+def test_stronger_caustics_ask_what_stronger_means():
+    # Session 4, 4.15b: "make the caustics stronger" was declined instead of asked.
+    for prompt in ("make the caustics stronger", "more intense caustics please", "weaker caustics"):
+        assert "sharper and less noisy" in caustics_strength_question(prompt), prompt
+    for prompt in ("make the caustics sharper", "more caustics photons", "brighter caustics",
+                   "less noisy caustics", "make the light stronger", "add caustics"):
+        assert caustics_strength_question(prompt) is None, prompt

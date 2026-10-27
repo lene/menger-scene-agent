@@ -87,6 +87,41 @@ def pre_projection_colour_hint(prompt: str) -> Optional[str]:
     )
 
 
+# Two guesses the system prompt's "ask instead of guessing" rule names, and the model still made
+# without asking (msa#13, 2026-10-27 live: 0 of 2). As a hint on the request itself it asks about
+# the placement, as the material hint does since session 5.
+_BESIDE_WORDS = re.compile(r"\b(next to|beside|alongside|close to|near)\b", re.IGNORECASE)
+_SIDE_WORDS = re.compile(
+    r"\b(left|right|above|below|over|under|on top|beneath|in front|behind|front|back|"
+    r"[+-]?[xyz]|side)\b",
+    re.IGNORECASE,
+)
+_CAUSTICS = re.compile(r"\bcaustics?\b", re.IGNORECASE)
+_STRONGER = re.compile(r"\b(strong(er)?|intens\w*|weak(er)?|more|less)\b", re.IGNORECASE)
+_CAUSTICS_SAID = re.compile(r"\b(photons?|iterations?|sharp\w*|nois\w*|bright\w*)\b", re.IGNORECASE)
+
+
+def undirected_placement_hint(prompt: str) -> Optional[str]:
+    if not _BESIDE_WORDS.search(prompt) or _SIDE_WORDS.search(prompt):
+        return None
+    return (
+        "The request places an object next to another without saying on which side. Unless "
+        "the request says it, respond with NEEDS_CLARIFICATION asking once which side (left, "
+        "right, in front or behind) and how far apart (session 4, F93)."
+    )
+
+
+def caustics_strength_question(prompt: str) -> Optional[str]:
+    """Asked before any model call: given the hint, the model still chose "sharper" and said so
+    in the doc comment (2026-10-27), and the question has only these two answers."""
+    if not (_CAUSTICS.search(prompt) and _STRONGER.search(prompt)) or _CAUSTICS_SAID.search(prompt):
+        return None
+    return (
+        "\"stronger\" caustics: sharper and less noisy (more photons), or brighter? The DSL has "
+        "no caustics brightness; the nearest is a brighter light (session 4, 4.15b)"
+    )
+
+
 # A request that points at what the render window shows ("keep them like that", "the current
 # view", "this angle"): the window's own state (4D rotation, camera) is then part of the
 # context. Session 4, 4.11/4.12 (F96): "keep them like that" had nothing to keep.

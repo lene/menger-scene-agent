@@ -22,9 +22,11 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union
 from core.generation import generate, revise
 from core.ports import ModelAdapter, SceneStore, SceneStoreError
 from core.prompt_checks import (
+    caustics_strength_question,
     play_once_note,
     pre_projection_colour_hint,
     refers_to_window,
+    undirected_placement_hint,
     unknown_material_hint,
     window_state_hint,
 )
@@ -365,10 +367,14 @@ def run_turn(
         except Exception:  # noqa: BLE001 -- cosmetic reporting must never abort a turn
             pass
 
+    question = None if answered else caustics_strength_question(prompt)
+    if question is not None:
+        return TurnResult(tag="needs_clarification", messages=[question])
     _emit("generating")
     # F93: a material with no preset is a question, not a silent approximation. Only the
     # model's copy of the request carries the hint; history and tickets keep the user's words.
-    hints = [] if answered else [unknown_material_hint(prompt, manifest)]
+    hints = [] if answered else [unknown_material_hint(prompt, manifest),
+                                 undirected_placement_hint(prompt)]
     hints.append(pre_projection_colour_hint(prompt))
     model_prompt = "".join([prompt, *(f"\n\n({h})" for h in hints if h)])
     if context_note:

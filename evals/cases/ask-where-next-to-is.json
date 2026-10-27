@@ -1,0 +1,113 @@
+{
+  "id": "ask-where-next-to-is",
+  "source": "msa#13 (F53/F93): session-4 examples where a question was due, and directives that need none",
+  "turns": [
+    {
+      "prompt": "a gold menger sponge level 2",
+      "expect": {
+        "objects": ["Sponge"],
+        "questions_at_most": 0
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sponge-volume",
+                    "dslType": "Sponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2 Menger sponge in gold, on a dark floor with three-point lighting.\n */\nobject GoldMengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f),\n      Directional(direction = (0f, 0.5f, 1f), intensity = 0.8f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"gold-menger-sponge\", scene)\n```", "level-2 volume-filling sponge, 2.5 units, gold, three directional lights (one from above shining toward +x and -z, one from above shining toward -x and -z, one from below shining toward +z), dark gray floor plane at y=-3, camera 7.8 units out at an elevated angle."]
+    },
+    {
+      "prompt": "add a 24-cell next to the sponge",
+      "expect": {
+        "tag": "needs_clarification"
+      },
+      "validator": [],
+      "responses": ["NEEDS_CLARIFICATION: \"next to\" the sponge does not say on which side (left, right, in front or behind) the 24-cell should go, or how far apart the two objects should be."]
+    }
+  ],
+  "recorded_live": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "date": "2026-10-27",
+    "agent": "3cf1c4e-dirty"
+  }
+}

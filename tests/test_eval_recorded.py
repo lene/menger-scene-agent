@@ -28,6 +28,8 @@ from gauntlet.types import Finding
 MANIFEST = load_manifest(ROOT / "reference" / "dsl-manifest.json")
 CORPUS = load_corpus(ROOT / "reference" / "dsl-corpus.json")
 CASES = load_cases()
+# A two-turn sponge case the tests below mutate; picked by id, not by sorted position.
+SPONGE = next(c for c in CASES if c["id"] == "luna-answered-material-is-not-asked-again")
 
 
 def test_there_are_cases():
@@ -41,7 +43,7 @@ def test_recorded_case_passes(case):
 
 
 def test_a_wrong_expectation_fails():
-    case = copy.deepcopy(CASES[0])
+    case = copy.deepcopy(SPONGE)
     case["turns"][0]["expect"] = {"objects": ["NoSuchType"]}
     assert run_case(case, MANIFEST, CORPUS).problems
 
@@ -59,7 +61,7 @@ def test_live_mode_counts_the_questions_the_model_asks():
     from tests.fakes import FakeModelAdapter
 
     asker = FakeModelAdapter(result="NEEDS_CLARIFICATION: which material?")
-    result = run_case(CASES[0], MANIFEST, CORPUS, live=asker)
+    result = run_case(SPONGE, MANIFEST, CORPUS, live=asker)
     assert not result.passed
     assert result.questions[0] == "NEEDS_CLARIFICATION: which material?"
 
@@ -116,7 +118,7 @@ def test_the_conditions_hold_on_a_scene_that_meets_them():
 
 
 def test_an_answer_is_threaded_when_the_model_asks():
-    scene = CASES[0]["turns"][0]["responses"]
+    scene = SPONGE["turns"][0]["responses"]
     case = {"id": "answer", "turns": [{
         "prompt": "a menger sponge level 2", "answer": "yes",
         "responses": ["NEEDS_CLARIFICATION: gold or glass?", *scene],
@@ -174,11 +176,12 @@ def test_the_ratchet_flags_a_drop_of_more_than_one_run_s_share(monkeypatch, tmp_
 
 def test_every_recorded_case_has_its_validator_results():
     for case in CASES:
-        assert all(turn.get("validator") for turn in case["turns"]), case["id"]
+        # A turn answered by a question before any model call has no validator call: [].
+        assert all("validator" in turn for turn in case["turns"]), case["id"]
 
 
 def test_the_recorded_validator_results_answer_the_replay():
-    case = copy.deepcopy(CASES[0])
+    case = copy.deepcopy(SPONGE)
     case["turns"][0]["validator"] = [{"exit": 1, "result": {
         "tag": "lint-findings", "messages": [], "schemaVersion": "1.2.0",
         "findings": [{"invariant": "scene-budget", "message": "over budget"}]}}]
@@ -191,12 +194,12 @@ def test_a_real_validator_that_answers_differently_is_reported(tmp_path):
     validator = tmp_path / "validator.sh"
     validator.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{recorded.STUB_VALIDATOR}" "$@"\n')
     validator.chmod(0o755)
-    problems = run_case(CASES[0], MANIFEST, CORPUS, validator=validator).problems
+    problems = run_case(SPONGE, MANIFEST, CORPUS, validator=validator).problems
     assert any("snapshots differs from the recording" in p for p in problems), problems
 
 
 def test_record_writes_the_validator_results_into_the_case(tmp_path):
-    case = copy.deepcopy(CASES[0])
+    case = copy.deepcopy(SPONGE)
     for turn in case["turns"]:
         del turn["validator"]
     path = tmp_path / "case.json"

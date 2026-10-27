@@ -1867,6 +1867,38 @@ def test_the_material_hint_is_given_on_the_request_but_not_on_its_answer(tmp_pat
     assert "no preset for" not in answered.requests[0].user_prompt
 
 
+def test_an_undirected_placement_hint_is_given_on_the_request_but_not_on_its_answer(
+        tmp_path, monkeypatch):
+    # msa#13: "add a 24-cell next to the sponge" was placed somewhere, unasked.
+    _ok_validator(monkeypatch)
+    asked = _SequencedModelAdapter(["NEEDS_CLARIFICATION: which side?"])
+    run_turn("add a sphere next to it", None, VALID_MANIFEST, VALID_CORPUS, asked,
+             _make_store(tmp_path), _SCRIPT_PATH)
+    assert "without saying on which side" in asked.requests[0].user_prompt
+
+    answered = _SequencedModelAdapter([CLEAN_SCENE_TEXT, CLEAN_SCENE_TEXT])
+    run_turn("add a sphere next to it\n\nUser's answer: on its left", None, VALID_MANIFEST,
+             VALID_CORPUS, answered, _make_store(tmp_path / "b"), _SCRIPT_PATH, answered=True)
+    assert "without saying on which side" not in answered.requests[0].user_prompt
+
+
+def test_stronger_caustics_are_asked_about_before_any_model_call(tmp_path, monkeypatch):
+    # Session 4, 4.15b; live 2026-10-27 the model chose "sharper" even with a hint.
+    _ok_validator(monkeypatch)
+    model = _SequencedModelAdapter([])
+    result = run_turn("make the caustics stronger", None, VALID_MANIFEST, VALID_CORPUS, model,
+                      _make_store(tmp_path), _SCRIPT_PATH)
+    assert result.tag == "needs_clarification"
+    assert "sharper and less noisy" in result.messages[0]
+    assert model.requests == []
+
+    answered = _SequencedModelAdapter([CLEAN_SCENE_TEXT, CLEAN_SCENE_TEXT])
+    result = run_turn("make the caustics stronger\n\nUser's answer: sharper", None,
+                      VALID_MANIFEST, VALID_CORPUS, answered, _make_store(tmp_path / "b"),
+                      _SCRIPT_PATH, answered=True)
+    assert result.tag == "accepted"
+
+
 def test_a_second_question_after_an_answer_gets_one_round_that_composes(tmp_path, monkeypatch):
     _ok_validator(monkeypatch)
     adapter = _SequencedModelAdapter(
