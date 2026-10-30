@@ -240,6 +240,12 @@ class _ValidatorTape:
         return outcome
 
 
+# What the result says about itself, not about the scene: an additive schema bump (menger#113's
+# loadError made it 1.3.0) must not make every recording drift. Whether the agent can read the
+# version is `adapters.process_contract.result_problem`'s job, on every real run.
+_METADATA_KEYS = frozenset({"schemaVersion"})
+
+
 def _drift(recorded: List[dict], seen: List[dict]) -> List[str]:
     """Where the validator's answers differ from the recorded ones: the case was recorded
     against a menger that validated differently, so it needs `--record` again."""
@@ -248,6 +254,7 @@ def _drift(recorded: List[dict], seen: List[dict]) -> List[str]:
     return [f"validator call {k}: {key} differs from the recording"
             for k, (old, new) in enumerate(zip(recorded, seen), start=1)
             for key in sorted(old.get("result", old).keys() | new.get("result", new).keys())
+            if key not in _METADATA_KEYS
             if old.get("result", old).get(key) != new.get("result", new).get(key)]
 
 

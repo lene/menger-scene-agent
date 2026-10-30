@@ -20,6 +20,12 @@ tagged.
   refused. The reference manifest and corpus are regenerated from menger: fields may carry a
   `unit` (degrees or radians), `Projection4DSpec` is a scene-composition type, and
   `Caustics.alpha` is `radiusReduction`.
+- The drift check of the recorded cases (`python -m evals.recorded --validator ...`, the nightly
+  `agent-contract.yml` step) no longer counts the validator result's `schemaVersion` as a changed
+  answer: menger's additive bump to 1.3.0 (menger#113) made all 8 cases drift, and the bump
+  carries no information about the scene. Compatibility of the version is still checked on
+  every real run (`result_problem`). Found by running that step locally before its first
+  nightly run: 23 validator calls differed, only in `schemaVersion`.
 - The recorded eval case `tesseract-sponge-animation` has the import of `Projection4DSpec` in
   its two stored responses migrated to `menger.spec.Projection4DSpec` (decided by the
   maintainer 2026-10-30 over a live re-record; nothing else in the responses changed). The

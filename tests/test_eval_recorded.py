@@ -198,6 +198,26 @@ def test_a_real_validator_that_answers_differently_is_reported(tmp_path):
     assert any("snapshots differs from the recording" in p for p in problems), problems
 
 
+def test_a_newer_result_schema_version_is_not_drift():
+    # menger#113: an additive schema bump changes only schemaVersion in every recorded answer.
+    old = {"exit": 0, "result": {"tag": "ok", "messages": [], "schemaVersion": "1.2.0"}}
+    new = {"exit": 0, "result": {"tag": "ok", "messages": [], "schemaVersion": "1.3.0"}}
+
+    assert recorded._drift([old], [new]) == []
+
+
+def test_a_changed_answer_is_still_drift_when_the_schema_version_differs_too():
+    old = {"exit": 0, "result": {"tag": "ok", "messages": [], "schemaVersion": "1.2.0"}}
+    new = {"exit": 1, "result": {"tag": "lint-findings", "messages": ["over budget"],
+                                 "schemaVersion": "1.3.0"}}
+
+    drift = recorded._drift([old], [new])
+
+    assert "validator call 1: tag differs from the recording" in drift
+    assert "validator call 1: messages differs from the recording" in drift
+    assert not any("schemaVersion" in d for d in drift)
+
+
 def test_record_writes_the_validator_results_into_the_case(tmp_path):
     case = copy.deepcopy(SPONGE)
     for turn in case["turns"]:
