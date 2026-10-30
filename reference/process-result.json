@@ -1,6 +1,6 @@
 {
   "description": "The tagged result every menger process the scene agent runs prints on stdout when it ends at once (SceneValidator, run-sandboxed.sh, run-render-window.sh, menger-app's render-lock refusal), and the exit code that goes with each tag. Owned by menger (review 2026-10-14, menger#82/#100); ProcessContractSuite holds every producer to it; the agent keeps a copy in reference/ and holds its parser to it. A wall-clock timeout (exit 124) prints nothing.",
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "1.3.0",
   "exitCodes": {
     "ok": 0,
     "compile-errors": 1,
@@ -17,7 +17,8 @@
   "optionalFields": {
     "scene": "string",
     "snapshots": "array",
-    "cameraPath": "array"
+    "cameraPath": "array",
+    "loadError": "object"
   },
   "windowEvents": {
     "description": "What the interactive window writes, one JSON object per line, to <scene file>.events.jsonl next to the scene it watches. Replaces reading the window's log lines (review 2026-10-14, menger#82). Scene code runs in the same process and could write one too: an event is a report, not proof.",

@@ -270,6 +270,23 @@ def _local_finding_reason(findings: List[Finding]) -> str:
     return "; ".join(f"{finding.stage}: {finding.message}" for finding in findings)
 
 
+def _compile_diagnostics(result: ValidationResult) -> List[str]:
+    """One "line N: message" per compiler error, from the validator's structured `loadError`
+    (result schema 1.3.0, menger#113); empty when the result has none, so the caller falls back
+    to the validator's own message text (an older image, or a failure that is not a compile)."""
+    load_error = result.load_error or {}
+    if load_error.get("kind") != "compile_failed":
+        return []
+    diagnostics = load_error.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return []
+    return [
+        f"line {d['line']}: {d['message']}" if d.get("line") else str(d.get("message", ""))
+        for d in diagnostics
+        if isinstance(d, dict) and d.get("message")
+    ]
+
+
 def _validation_messages(result: ValidationResult) -> List[str]:
     # `messages` alone can be empty for a `lint_findings` result (story 10's I/O & Edge-Case
     # Matrix: that row populates `findings`, not `messages`) -- folding both in keeps the
@@ -277,7 +294,7 @@ def _validation_messages(result: ValidationResult) -> List[str]:
     # renderer-domain tag produced it.
     # The validator also lists each finding in `messages` as "invariant: message" (F44 in
     # usability review session 2 showed it twice), so only add findings not already there.
-    messages = list(result.messages)
+    messages = _compile_diagnostics(result) or list(result.messages)
     for finding in result.findings:
         text = f"{finding.invariant}: {finding.message}"
         if text not in messages:

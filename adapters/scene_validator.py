@@ -186,6 +186,10 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
         if scene is not None and not isinstance(scene, str):
             raise TypeError("'scene' was not a string")
 
+        load_error = payload.get("loadError")
+        if load_error is not None and not isinstance(load_error, dict):
+            raise TypeError("'loadError' was not an object")
+
         schema_version = payload.get("schemaVersion", "")
         if not isinstance(schema_version, str):
             raise TypeError("'schemaVersion' was not a string")
@@ -214,6 +218,7 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
         tag=tag, messages=messages, findings=findings, scene=scene, schema_version=schema_version,
         snapshots=_list_of_objects(payload.get("snapshots")),
         camera_path=_list_of_objects(payload.get("cameraPath")),
+        load_error=load_error,
     )
 
 

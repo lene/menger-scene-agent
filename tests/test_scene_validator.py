@@ -84,6 +84,32 @@ def test_exit_1_compile_errors_returns_typed_result_messages_populated(monkeypat
     assert result.messages == ["Compilation of scene.scala failed: not found: value Sponge2"]
 
 
+def test_a_structured_load_error_is_kept_on_the_result(monkeypatch):
+    load_error = {"kind": "compile_failed", "diagnostics": [{"line": 3, "message": "Found: Int"}]}
+    payload = {
+        "tag": "compile-errors",
+        "messages": ["Compilation of 'scene.scala' failed:\nline 3: Found: Int"],
+        "findings": [],
+        "scene": None,
+        "schemaVersion": "1.3.0",
+        "loadError": load_error,
+    }
+    _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
+
+    result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
+
+    assert isinstance(result, ValidationResult)
+    assert result.load_error == load_error
+
+
+def test_a_load_error_that_is_not_an_object_is_a_typed_parse_error(monkeypatch):
+    payload = {"tag": "compile-errors", "messages": [], "findings": [], "schemaVersion": "1.3.0",
+               "loadError": "compile_failed"}
+    _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
+
+    assert isinstance(validate_scene(_SCENE_FILE, _SCRIPT_PATH), ValidationError)
+
+
 # --- Geometric check failure (exit 1, tag lint-findings) ------------------------------------
 
 

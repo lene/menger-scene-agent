@@ -25,6 +25,10 @@ tagged.
   maintainer 2026-10-30 over a live re-record; nothing else in the responses changed). The
   nightly run against menger's real validator is the check that its answers still match.
 
+- Reads validator result schema 1.3.0 (menger#113): `loadError` says why a scene did not load,
+  and a compile failure's repair feedback is one `line N: message` per compiler error instead
+  of one multi-line message. An older validator image (no `loadError`) behaves as before.
+
 ### Security
 
 - The agent no longer follows what the generated scene leaves in `<session>/window/`, the

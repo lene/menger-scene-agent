@@ -186,6 +186,9 @@ class ValidationResult:
     # `SceneSnapshot` writes. Empty from an older validator image. Read by core/snapshot_facts.
     snapshots: List[dict] = field(default_factory=list)
     camera_path: List[dict] = field(default_factory=list)
+    # Result schema 1.3.0 (menger#113): why the scene did not load, as `{"kind": ..., "diagnostics":
+    # [{"line": n, "message": ...}]}`. None from an older validator image or when the scene loaded.
+    load_error: Optional[dict] = None
 
 
 # validate_scene() returns either the renderer's typed tagged result, or a typed error --
