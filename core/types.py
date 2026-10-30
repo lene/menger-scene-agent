@@ -34,7 +34,11 @@ from gauntlet.types import Finding
 # (session 4, menger#71/#75).
 # 1.9.0 notes the render cost of fractional levels in refractive materials (both levels are
 # rendered and mixed) and that edge tubes of a fractional level blend (menger#69/#70).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "1.11.0"
+# 2.0.0 drops `compileSurface.types` (the compile surface is packages only, now with
+# `menger.spec`; menger#84), adds an optional field `unit` (degrees or radians; menger#95),
+# lists `Projection4DSpec` as a scene-composition type and renames `Caustics.alpha` to
+# `radiusReduction`.
+EXPECTED_MANIFEST_SCHEMA_VERSION = "2.0.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

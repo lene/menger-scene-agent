@@ -62,4 +62,3 @@ PRODUCT_CAPS: List[Tuple[str, Tuple[str, ...], float]] = [
 IMPORT_ROOTS: Tuple[str, ...] = tuple(MANIFEST["compileSurface"]["packages"]) + (
     "scala.math", "scala.language.implicitConversions",
 )
-IMPORT_EXACT: Tuple[str, ...] = tuple(MANIFEST["compileSurface"]["types"])

@@ -41,5 +41,6 @@ def test_the_vocabulary_is_read_from_the_manifest():
     assert {"Glass", "Film"} <= vocabulary.TRANSPARENT_MATERIALS
     assert vocabulary.REPLACING_PRESETS[11] == "xyz_rgb_local"
     assert "menger.dsl" in vocabulary.IMPORT_ROOTS
-    assert "menger.Projection4DSpec" in vocabulary.IMPORT_EXACT
+    assert "menger.spec" in vocabulary.IMPORT_ROOTS
+    assert not hasattr(vocabulary, "IMPORT_EXACT")
     assert len(vocabulary.DSL_REVISION) == 64

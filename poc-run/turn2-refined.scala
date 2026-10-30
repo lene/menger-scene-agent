@@ -2,7 +2,7 @@ package poc
 
 import scala.language.implicitConversions
 
-import menger.Projection4DSpec
+import menger.spec.Projection4DSpec
 import menger.dsl._
 
 /**

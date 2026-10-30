@@ -1,18 +1,18 @@
 {
-  "schemaVersion": "1.11.0",
-  "contentRevision": "cf32d068cd6266c764cf1c52453171f05af629dc2f5ae642ad84804057cd5d6b",
+  "schemaVersion": "2.0.0",
+  "contentRevision": "50c30eac613325c008cc0d73f2e235881a25e4570e37c2cfaee3e88544a95afb",
   "scalaVersion": "3.8.3",
-  "optixJniVersion": "0.4.11",
+  "optixJniVersion": "0.5.0",
   "minDriverVersion": "580.65",
   "conventions": [
     "Scene budget: besides each field's own max, a whole scene must stay within 16000000 mesh triangles (both levels of a fractional sponge count; one VolumeFilling sponge at level 5 fits, two do not), 128 renders per frame (accumulation times 2^k for k fractional-level glass objects, k + 1 above 4) and 2000000000 caustics photons per frame (photonsPerIteration x iterations x renders per frame). The validator reports a `scene-budget` finding naming what to lower.",
-    "Units: positions and sizes are world units; `pos` is an object's centre; 3D `rotation` angles are radians, but the 4D rotation angles of `Projection4DSpec` (`rotXW`, `rotYW`, `rotZW`) are DEGREES (usability review 2026-10, session 3, F74).",
+    "Units: positions and sizes are world units; `pos` is an object's centre; an angle-valued field names its unit in the manifest's `unit` key. 3D `rotation` angles are radians, but the 4D rotation angles of `Projection4DSpec` (`rotXW`, `rotYW`, `rotZW`), `LSystem.angleDegrees` and `Camera.fov` are DEGREES (usability review 2026-10, session 3, F74; menger#95).",
     "Axes: +y is up. The rendered image is currently mirrored horizontally: with the camera on +z looking toward -z, +x appears on the LEFT of the image.",
     "Directional light: `direction` is the direction the light TRAVELS. (0f, -1f, 0f) shines straight down; (1f, -1f, -1f) comes from above. Point and area lights are placed by `position`.",
     "Planes: `Y at -2f` is an infinite plane that faces the origin, so a floor below the scene is lit from above and receives shadows. Shadows are on by default.",
     "Colour and transparency: alpha 0 is fully transparent, 1 fully opaque. An object's explicit `color` tints only the material's RGB; the material's own alpha (its transparency) is preserved, so an opaque `color` on `Glass` or `Film` stays transparent (usability review 2026-09, F14).",
-    "Refractive materials (Glass, Diamond, Water, Film): `Material.Glass.copy(color = Color(r, g, b))` REPLACES the preset's colour including its alpha, and `Color(r, g, b)` has alpha 1, which for a refractive material means fully absorbing -- an opaque look. Tint a refractive material with a low alpha, e.g. `Color(0.8f, 0.06f, 0.12f, 0.05f)` (usability review 2026-10, session 3, F66).",
-    "Caustics has no intensity parameter (only `photonsPerIteration`, `iterations`, `initialRadius`, `alpha`): more photons or iterations reduce noise, they do not make the caustics brighter (usability review 2026-10, session 3, F69). Caustics are only visible where a CURVED refracting surface (e.g. a glass Sphere) focuses light onto a nearby diffuse surface: flat facets (polytopes, sponges) only shift light and thin Film bends it hardly at all, so they give faint or no caustics -- say so instead of promising patterns (usability review 2026-10, session 4, F98). Every transparent material with an IOR above 1 refracts, Film (1.33) and Water included, not only Glass and Diamond (session 5, F121).",
+    "Refractive materials (Glass, Diamond, Water, Film): `Material.Glass.copy(color = Color(r, g, b))` REPLACES the preset's colour including its alpha, and `Color(r, g, b)` has alpha 1, which for a refractive material means fully absorbing -- an opaque look. Tint a refractive material with a low alpha, e.g. `Color(0.8f, 0.06f, 0.12f, 0.05f)` or, naming what the alpha means there, `Color.tint(0.8f, 0.06f, 0.12f, absorption = 0.05f)` (for a refractive material the alpha is the ABSORPTION, not the opacity) (usability review 2026-10, session 3, F66).",
+    "Caustics has no intensity parameter (only `photonsPerIteration`, `iterations`, `initialRadius`, `radiusReduction`): more photons or iterations reduce noise, they do not make the caustics brighter (usability review 2026-10, session 3, F69). Caustics are only visible where a CURVED refracting surface (e.g. a glass Sphere) focuses light onto a nearby diffuse surface: flat facets (polytopes, sponges) only shift light and thin Film bends it hardly at all, so they give faint or no caustics -- say so instead of promising patterns (usability review 2026-10, session 4, F98). Every transparent material with an IOR above 1 refracts, Film (1.33) and Water included, not only Glass and Diamond (session 5, F121).",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val durationSeconds = <seconds>f` in the same object; t is seconds in [0, durationSeconds]. The window plays it in real time, looping, and the validator checks the scene at 25 evenly spaced times from t = 0 to t = durationSeconds. The older name `val duration` is deprecated but still read. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46). The scene has no frame count. The scene agent's window plays it with every frame rendered (25 steps per second at most; a slow frame slows the playback instead of skipping scene time) and loops; menger's default real-time mode follows the wall clock and skips scene time when rendering is slow, which the window title says. A playing window with no input for 10 minutes pauses itself (Space resumes); frame counts are menger-app command-line options only. Editing the scene file reloads an animated scene live in the window, but the window cannot switch between a static and an animated scene -- it must be restarted then (usability review 2026-10, session 3, F57, F84). The window has playback keys: Space pauses and resumes, Left/Right step 0.01 s (with Shift 0.1 s), Home/End jump to the start/end -- so a looping animation CAN be stopped at any frame (usability review 2026-10, session 4, F92).",
     "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `wScale = 0`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). `Projection4DSpec(wScale = s)` scales the object's w coordinate before the 4D rotation (default 1, must be >= 0): 0 flattens a Tesseract to a cube, and animating it from 0 to 1 grows the tesseract out of the cube along w -- the nearest the DSL has to extruding a 3D object into 4D. There is no 5D object (menger#65, #59). For the hand-over from a 3D Cube or Sponge to be seamless: keep rotXW, rotYW and rotZW at 0 while wScale grows (a 4D rotation turns x into w, so wScale 0 is then not the cube), give the 4D object size s * eyeW / (eyeW - screenW) for a 3D object of size s, the same material and the same `edgeRadius`/`edgeMaterial` on both (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), show the 3D object only while wScale is exactly 0 and the 4D object from any wScale above 0 (at 0 the 4D object's faces and edges lie on top of each other in pairs, which a transparent material shows as speckle), and let the extrusion take at least 3 s; rotate in 4D only after wScale reaches 1 (usability review 2026-10, session 5, F124, menger#132; example: CubeToTesseract).",
@@ -88,7 +88,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -166,7 +167,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -243,7 +245,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -320,7 +323,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -397,7 +401,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -474,7 +479,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -556,7 +562,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -669,7 +676,8 @@
           "name": "rotation",
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
-          "description": "Euler angles in radians around x, y, z."
+          "description": "Euler angles in radians around x, y, z.",
+          "unit": "radians"
         }
       ],
       "traits": [
@@ -739,7 +747,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -757,7 +765,8 @@
           "name": "rotation",
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
-          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`."
+          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`.",
+          "unit": "radians"
         }
       ]
     },
@@ -823,7 +832,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -839,7 +848,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -905,7 +915,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -921,7 +931,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -987,7 +998,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1003,7 +1014,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -1069,7 +1081,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1085,7 +1097,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -1151,7 +1164,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1167,7 +1180,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -1264,7 +1278,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1282,7 +1296,8 @@
           "name": "rotation",
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
-          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`."
+          "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`.",
+          "unit": "radians"
         }
       ],
       "traits": [
@@ -1358,7 +1373,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1374,7 +1389,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ],
       "traits": [
@@ -1450,7 +1466,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1466,7 +1482,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ],
       "traits": [
@@ -1542,7 +1559,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.Projection4DSpec>",
           "default": "None"
         },
         {
@@ -1558,7 +1575,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ],
       "traits": [
@@ -1667,7 +1685,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -1754,7 +1773,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     },
@@ -1781,7 +1801,8 @@
         {
           "name": "angleDegrees",
           "type": "float",
-          "default": "25.7"
+          "default": "25.7",
+          "unit": "degrees"
         },
         {
           "name": "segmentLength",
@@ -1868,7 +1889,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         }
       ]
     }
@@ -1935,7 +1957,46 @@
         {
           "name": "fov",
           "type": "scala.Option<java.lang.Object>",
-          "default": "None"
+          "default": "None",
+          "unit": "degrees"
+        }
+      ]
+    },
+    {
+      "name": "Projection4DSpec",
+      "fields": [
+        {
+          "name": "eyeW",
+          "type": "float",
+          "default": "3.0"
+        },
+        {
+          "name": "screenW",
+          "type": "float",
+          "default": "1.5"
+        },
+        {
+          "name": "rotXW",
+          "type": "float",
+          "default": "15.0",
+          "unit": "degrees"
+        },
+        {
+          "name": "rotYW",
+          "type": "float",
+          "default": "10.0",
+          "unit": "degrees"
+        },
+        {
+          "name": "rotZW",
+          "type": "float",
+          "default": "0.0",
+          "unit": "degrees"
+        },
+        {
+          "name": "wScale",
+          "type": "float",
+          "default": "1.0"
         }
       ]
     },
@@ -2045,7 +2106,8 @@
         {
           "name": "rotation",
           "type": "menger.dsl.Vec3",
-          "default": "Vec3(0.0,0.0,0.0)"
+          "default": "Vec3(0.0,0.0,0.0)",
+          "unit": "radians"
         },
         {
           "name": "scale",
@@ -2082,7 +2144,7 @@
           "default": "None"
         },
         {
-          "name": "alpha",
+          "name": "radiusReduction",
           "type": "float",
           "default": "0.7"
         }
@@ -2708,21 +2770,8 @@
       "menger.common",
       "menger.dsl",
       "menger.objects",
+      "menger.spec",
       "menger.video"
-    ],
-    "types": [
-      "menger.AssetPaths",
-      "menger.ColorConversions",
-      "menger.ConeGeometry",
-      "menger.CurveData",
-      "menger.ObjectRotation",
-      "menger.ObjectSpec",
-      "menger.PlaneGeometry",
-      "menger.ProceduralSpec",
-      "menger.Projection4DSpec",
-      "menger.RotationProjectionParameters",
-      "menger.TextureData",
-      "menger.TextureMaps"
     ]
   }
 }

@@ -148,12 +148,11 @@ def test_empty_input_never_raises():
 
 # --- Verification: story 2's real, already-compiling poc-run fixtures -----------------------
 #
-# Both fixtures carry `import menger.Projection4DSpec` (required for any object's
-# `projection: Option[menger.Projection4DSpec]` field, reference/dsl-manifest.json). This was
-# a real gap in AD-4's original allowed-roots list, found by this check's first real-fixture
-# run -- resolved by the maintainer adding `menger.Projection4DSpec` specifically (not bare
-# `menger`) to AD-4's exceptions, so the execution surface AD-2 forbids stays closed. See
-# ARCHITECTURE-SPINE.md AD-4 and this story's Spec Change Log.
+# Both fixtures carry `import menger.spec.Projection4DSpec` (required for any object's
+# `projection: Option[Projection4DSpec]` field, reference/dsl-manifest.json). It was once the
+# one exact root-package type AD-4 allowed besides the packages (`menger.Projection4DSpec`, not
+# bare `menger`); since manifest 2.0.0 (menger#84) it lives in `menger.spec`, an allowed
+# package, and the execution surface AD-2 forbids stays closed. See ARCHITECTURE-SPINE.md AD-4.
 
 
 def test_poc_run_turn1_generated_scala_passes_cleanly():

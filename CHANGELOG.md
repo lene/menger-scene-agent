@@ -7,7 +7,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-Pairs with menger 0.9.0 (DSL manifest 1.11.0); first release not yet tagged.
+Pairs with the menger release that follows 0.9.0 (DSL manifest 2.0.0); first release not yet
+tagged.
+
+### Changed
+
+- **Breaking: reads DSL manifest 2.0.0** (menger#84, #95). `compileSurface.types` is gone, so a
+  scene may import a menger package (`menger.dsl`, `menger.objects`, `menger.video`,
+  `menger.common`, and now `menger.spec`) but no single root-package type: `import
+  menger.Projection4DSpec` is `import menger.spec.Projection4DSpec`, and the vocabulary's
+  `IMPORT_EXACT` is removed. `EXPECTED_MANIFEST_SCHEMA_VERSION` is `2.0.0`; a 1.x manifest is
+  refused. The reference manifest and corpus are regenerated from menger: fields may carry a
+  `unit` (degrees or radians), `Projection4DSpec` is a scene-composition type, and
+  `Caustics.alpha` is `radiusReduction`.
+- The recorded eval case `tesseract-sponge-animation` has the import of `Projection4DSpec` in
+  its two stored responses migrated to `menger.spec.Projection4DSpec` (decided by the
+  maintainer 2026-10-30 over a live re-record; nothing else in the responses changed). The
+  nightly run against menger's real validator is the check that its answers still match.
 
 ### Security
 

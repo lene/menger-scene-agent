@@ -20,7 +20,7 @@ from __future__ import annotations
 import itertools
 import re
 
-from core.vocabulary import IMPORT_EXACT, IMPORT_ROOTS
+from core.vocabulary import IMPORT_ROOTS
 from gauntlet._scala_text import line_of, strip_keeping_splices
 from gauntlet.types import Finding
 
@@ -33,11 +33,10 @@ _STAGE = "allowlist"
 # or "scala" cannot be treated as an allowed root, only these specific subpaths.
 # Derived from menger's compile surface in the manifest (review 2026-10-14, msa#28: the allowed
 # surface existed three times -- here, menger's compile classpath, arc42 prose): what a scene
-# can compile against, plus the Scala library parts the agent's policy admits. The exact types
-# are root-package types the DSL uses, e.g. `menger.Projection4DSpec`, which every 4D scene
-# imports -- never the bare `menger` root.
+# can compile against, plus the Scala library parts the agent's policy admits. Packages only
+# since manifest 2.0.0 (menger#84): the root-package types the DSL uses (`Projection4DSpec`,
+# ...) moved into `menger.spec`, so no exact type is allowed and the bare `menger` root never is.
 _ALLOWED_ROOTS = IMPORT_ROOTS
-_ALLOWED_EXACT = IMPORT_EXACT
 
 # One import target per line: `import a.b.c`, `import a.b._`, `import a.b.{X, Y}`. The
 # DSL corpus's imports are always one-per-line (confirmed against poc-run/*.scala), so a
@@ -120,8 +119,6 @@ def _is_allowed(path: str) -> bool:
     # already-allowed `scala.math`, not a bypass of it.
     if path == "math" or path.startswith("math."):
         path = "scala." + path
-    if path in _ALLOWED_EXACT:
-        return True
     return any(path == root or path.startswith(root + ".") for root in _ALLOWED_ROOTS)
 
 
@@ -149,7 +146,7 @@ def check_allowlist(scene_text: str) -> list[Finding]:
                     stage=_STAGE,
                     message=(
                         f"Import '{raw_target}' does not root in an allowed package "
-                        f"({', '.join(_ALLOWED_ROOTS)}, or one of {', '.join(_ALLOWED_EXACT)})"
+                        f"({', '.join(_ALLOWED_ROOTS)})"
                     ),
                     identifier=raw_target,
                     line=line_of(scene_text, match.start()),
