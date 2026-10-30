@@ -58,5 +58,9 @@ tagged.
   holds the validator's answers too, so the replay runs the snapshot and budget checks, and a
   nightly job compares the answers with menger's real validator. `--record` writes them
   (menger#78).
+- `scripts/time_validator.py`: the cold-start wall time of the sandboxed validator over the
+  reference corpus (p50, p90, max over several passes), checked against the turn-latency
+  budget of arc42 §10 P10 (p50 ≤ 5 s, p90 ≤ 10 s per run). Advisory; `--enforce` makes an
+  overrun exit 1, for a CI gate once the nightly job's runner is measured (menger#91).
 - `/export image [t]` and `/export video [seconds]`; an export asked for in words ("save the
   animation as mp4") gets that hint instead of a model call (#56).
