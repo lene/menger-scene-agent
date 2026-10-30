@@ -203,6 +203,54 @@ assert_detection() {
 # names containing '"' through these helpers unescaped.
 suite_pass() {
     echo "SUITE $1 PASS n_failed=0 failed=\"\" reason=\"\""
+    unjudged_streak_set "$1" 0
+}
+
+# --- unjudged-run streak (menger#87) ---
+#
+# A suite that could not judge (inconclusive perf gates, a busy GPU) reports SKIP, never PASS,
+# because a PASS is cached per tree. But a gate that is skipped on every push enforces nothing,
+# and a green CI job hides it (menger#87: both perf suites could end in SKIP with no count).
+# So the runs that could not judge are counted per suite, per checkout, in
+# <git dir>/qa-unjudged/<suite>; a PASS resets the count, and the QA_MAX_UNJUDGED-th run in a
+# row (default 3; 0 turns the check off) is a FAIL. Only a run that *could not judge* counts:
+# a benign skip ("no matching changed paths") goes through plain suite_skip.
+UNJUDGED_DEFAULT_MAX=3
+
+# Prints the streak file's path; fails outside a git checkout (nothing is counted there).
+unjudged_streak_file() {
+    _dir=$(git rev-parse --git-path qa-unjudged 2>/dev/null) || return 1
+    mkdir -p "$_dir" 2>/dev/null || return 1
+    printf '%s/%s' "$_dir" "$1"
+}
+
+unjudged_streak_get() {
+    _file=$(unjudged_streak_file "$1") || { printf '0'; return 0; }
+    _n=$(cat "$_file" 2>/dev/null) || _n=0
+    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+    printf '%s' "$_n"
+}
+
+unjudged_streak_set() {
+    _file=$(unjudged_streak_file "$1") || return 0
+    printf '%s\n' "$2" > "$_file" 2>/dev/null || true
+}
+
+# $1 = suite name, $2 = human reason (no quote or semicolon characters). SKIP while the streak
+# is below the limit; FAIL (and return 1, so the caller stops) when this run reaches it.
+suite_skip_unjudged() {
+    _max="${QA_MAX_UNJUDGED:-$UNJUDGED_DEFAULT_MAX}"
+    _streak=$(( $(unjudged_streak_get "$1") + 1 ))
+    unjudged_streak_set "$1" "$_streak"
+    if [ "$_max" -gt 0 ] && [ "$_streak" -ge "$_max" ]; then
+        suite_fail "$1" 0 "UNJUDGED($_streak unjudged runs in a row, no PASS since: $2. Run it where it can judge, or raise QA_MAX_UNJUDGED knowingly)"
+        return 1
+    fi
+    if [ "$_max" -gt 0 ]; then
+        suite_skip "$1" "$2 (unjudged run $_streak of $_max; the last one fails)"
+    else
+        suite_skip "$1" "$2"
+    fi
 }
 
 # $1 = suite name, $2 = human reason (no quote or semicolon characters)
@@ -241,7 +289,10 @@ suite_fail() {
 # its stdout is a terminal), where a human sees it. A non-interactive push — an agent or a
 # script, which only reads the exit code — FAILs instead (review 2026-10-14,
 # menger-toplevel#68), unless QA_ALLOW_ENV_SKIP=1 says the skip is knowingly accepted.
-# Returns 1 (caller must stop and exit) when the GPU is unsuitable; 0 to proceed.
+# A skip counts toward the unjudged streak (suite_skip_unjudged): the QA_MAX_UNJUDGED-th busy-GPU
+# skip in a row is a FAIL.
+# Returns 0 to proceed; 2 when the suite was SKIPped (stop; a caller that wants a green exit for
+# a skip exits 0 on 2); 1 when it FAILed (stop with a failing exit).
 gpu_preflight_or_skip() {
     _suite="$1"
     _skip_in_ci="${2:-}"
@@ -253,7 +304,7 @@ gpu_preflight_or_skip() {
     elif [ -n "${CI:-}" ] || [ "${QA_INTERACTIVE:-}" = "1" ] \
         || [ "${QA_ALLOW_ENV_SKIP:-}" = "1" ]; then
         _detail=$(./standards/scripts/gpu-preflight.sh) && return 0
-        suite_skip "$_suite" "env: GPU busy — $_detail"
+        suite_skip_unjudged "$_suite" "env: GPU busy — $_detail" && return 2
     else
         _detail=$(./standards/scripts/gpu-preflight.sh) && return 0
         suite_fail "$_suite" 0 "ENV-UNSUITABLE(GPU busy, non-interactive push: $_detail; free the GPU, or set QA_ALLOW_ENV_SKIP=1 to skip knowingly)"
@@ -266,9 +317,10 @@ gpu_preflight_or_skip() {
 # $1 = suite name, $2 = log of an sbt run of Perf-tagged tests (io.github.lene.qa.RelativeBenchmark
 # gates; ANSI codes allowed), $3 = sbt's exit code. Emits the SUITE line. Returns 1 only for a
 # FAIL: a failed gate, a build error, or no gate having run at all (a vacuous pass). A gate
-# that couldn't be judged reliably is canceled by the test and makes the suite SKIP -- never a
+# that couldn't be judged reliably is canceled by the test and makes the suite SKIP -- not a
 # failure, but also never a PASS, because a PASS is cached per tree and would hide the
-# unjudged gates for good.
+# unjudged gates for good. The SKIP is counted (suite_skip_unjudged): the third unjudged run in
+# a row FAILs, so a gate that is always inconclusive cannot go unnoticed.
 perf_suite_verdict() {
     _suite="$1"; _log="$2"; _rc="$3"
     _clean=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$_log")
@@ -291,10 +343,10 @@ perf_suite_verdict() {
         return 1
     fi
     if [ "${_canceled:-0}" -gt 0 ]; then
-        suite_skip "$_suite" "$_canceled/$_total gates inconclusive: $(printf '%s\n' "$_clean" \
+        suite_skip_unjudged "$_suite" "$_canceled/$_total gates inconclusive: $(printf '%s\n' "$_clean" \
             | grep '!!! CANCELED !!!' | sed 's/^\[info\] *- *//; s/ !!! CANCELED !!!.*//' \
-            | paste -sd';' -)"
-        return 0
+            | paste -sd',' -)"
+        return $?
     fi
     suite_pass "$_suite"
     return 0
