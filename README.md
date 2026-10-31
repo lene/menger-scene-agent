@@ -18,7 +18,7 @@ In the workspace architecture docs this is arc42 decision AD-36
 (`../docs/arc42/09-architectural-decisions.md`); the spine's own decisions are cited there as
 SA-AD-n, while this repo's code and docstrings call them plain "AD-n".
 
-Its only coupling to `menger` (0.9.0 or later) is through processes and files — it never
+Its only coupling to `menger` (0.9.1 or later) is through processes and files — it never
 depends on `menger` as a library and never modifies renderer code:
 
 - `menger-app --scene <file.scala> --display <:N> --render-lock-path <path>` — the render window
@@ -190,7 +190,7 @@ so both must be built from a menger whose DSL matches the agent's manifest. A re
 names the menger release it was made with in its release notes.
 
 ```bash
-# 1. menger, at the release the agent's notes name (0.9.0 or later)
+# 1. menger, at the release the agent's notes name (0.9.1 or later)
 git clone https://github.com/lene/menger.git; cd menger; git checkout <menger-version>
 docker/scene-validator/build.sh          # builds menger-scene-validator and menger-render-window
 cd ..
@@ -207,7 +207,7 @@ uv run menger-scene-agent --check
 ```
 
 `--check` reports each part and what to do when one does not fit. It checks that both launcher
-scripts exist and are executable, and that both images exist, were built from menger 0.9.0 or
+scripts exist and are executable, and that both images exist, were built from menger 0.9.1 or
 later, and were built from the DSL in this agent's `reference/dsl-manifest.json`. It exits 0
 when everything fits. The images need the NVIDIA Container Toolkit and a licensed OptiX SDK at
 build time (see `../menger/docker/scene-validator/build.sh`).

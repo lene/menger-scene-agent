@@ -5,10 +5,10 @@ All notable changes to this project are documented in this file. The format is b
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A release is a `<version>` tag
 (`.github/workflows/release.yml`); its section here names the menger release it pairs with.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-31
 
-Pairs with the menger release that follows 0.9.0 (DSL manifest 2.0.0); first release not yet
-tagged.
+First release. Pairs with menger 0.9.1 (DSL manifest 2.0.0, result contract 1.3.0); menger 0.9.0
+was released prematurely and is refused by `--check` (the minimum is 0.9.1).
 
 ### Changed
 

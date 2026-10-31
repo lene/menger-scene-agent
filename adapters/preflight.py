@@ -21,8 +21,9 @@ from typing import Dict, List, Optional, Tuple
 
 from core.vocabulary import DSL_REVISION
 
-# The first menger release with the agent's process contract (README: "menger 0.9.0 or later").
-MIN_MENGER_VERSION = "0.9.0"
+# The first menger release with the agent's process contract and DSL manifest 2.0.0 (README:
+# "menger 0.9.1 or later"); 0.9.0 was released prematurely and has neither.
+MIN_MENGER_VERSION = "0.9.1"
 VALIDATOR_IMAGE = "menger-scene-validator:latest"  # run-sandboxed.sh's default
 RENDER_IMAGE_ENV = "MENGER_RENDER_IMAGE"
 RENDER_IMAGE = "menger-render-window:latest"  # run-render-window.sh's default

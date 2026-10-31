@@ -9,14 +9,15 @@ from adapters import preflight
 from core.vocabulary import DSL_REVISION
 
 
-def _labels(version="0.9.0", revision=DSL_REVISION):
+def _labels(version="0.9.1", revision=DSL_REVISION):
     return {preflight.VERSION_LABEL: version, preflight.DSL_REVISION_LABEL: revision, "id": "x"}
 
 
 @pytest.mark.parametrize("labels, ok, says", [
-    (_labels(), True, "menger 0.9.0"),
+    (_labels(), True, "menger 0.9.1"),
     (_labels(version="0.10.2"), True, "menger 0.10.2"),
-    (_labels(version="0.8.1"), False, "needs >= 0.9.0"),
+    (_labels(version="0.9.0"), False, "needs >= 0.9.1"),
+    (_labels(version="0.8.1"), False, "needs >= 0.9.1"),
     (_labels(version=""), False, "<unlabelled>"),
     (_labels(revision="0" * 64), False, "another DSL"),
     (None, False, "not found"),
