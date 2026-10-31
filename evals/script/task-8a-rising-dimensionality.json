@@ -1,0 +1,22 @@
+{
+  "id": "script-task-8a-rising-dimensionality",
+  "source": "usability-scene-agent-session-4-script.md Task 8a, prompt as typed in session 5 (gpt-6-sol)",
+  "manual": [
+    "8a: the extrusion and the 4D stages are recognisable (menger#132)"
+  ],
+  "turns": [
+    {
+      "prompt": "Cube to sponge level 4 and back, extruded along W into a tesseract; tesseract-sponge level 0 to 3 and back; extruded into a penteract; and so on.",
+      "answer": "stop after the tesseract-sponge",
+      "expect": {
+        "objects": [
+          "TesseractSponge"
+        ],
+        "contains": [
+          "wScale",
+          "NOT DONE:.*penteract"
+        ]
+      }
+    }
+  ]
+}

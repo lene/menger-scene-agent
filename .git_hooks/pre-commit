@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-commit: fast checks only (pre-push is the correctness gate). Branch guard, staged-diff
+# hygiene, ruff on the staged Python files.
+set -u
+./standards/hooks/check-branch.sh || exit 1
+./standards/hooks/check-staged-hygiene.sh || exit 1
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.py$' || true)
+[ -z "$STAGED_PY" ] && exit 0
+# unquoted on purpose: one argument per staged file (no spaces in this repo's paths)
+uv run --locked ruff check $STAGED_PY

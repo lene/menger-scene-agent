@@ -1,0 +1,25 @@
+{
+  "id": "script-task-8b-camera-flight",
+  "source": "usability-scene-agent-session-4-script.md Task 8b, prompt as typed in session 5 (gpt-5.6-terra)",
+  "manual": [
+    "the flight goes through smaller cutouts and stays inside the sponge; the window shows progress (menger#133)",
+    "'save the rendered animation as mp4' is answered in the REPL with the /export hint, no model call (msa#56); the eval calls run_turn directly and cannot see REPL routing"
+  ],
+  "turns": [
+    {
+      "prompt": "Camera flight through a 3D Menger sponge from large cutouts to smaller ones while its level rises and material cycles steel, glass, diamond, ruby, gold.",
+      "answer": "yes",
+      "expect": {
+        "objects": [
+          "Sponge"
+        ],
+        "contains": [
+          "def scene\\(t: Float\\)",
+          "Material\\.Glass",
+          "Material\\.Diamond",
+          "Material\\.Gold"
+        ]
+      }
+    }
+  ]
+}

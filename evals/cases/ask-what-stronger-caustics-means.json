@@ -1,0 +1,99 @@
+{
+  "id": "ask-what-stronger-caustics-means",
+  "source": "msa#13 (F53/F93): session-4 examples where a question was due, and directives that need none",
+  "turns": [
+    {
+      "prompt": "a glass sphere above a white floor, with caustics",
+      "expect": {
+        "objects": ["Sphere"],
+        "questions_at_most": 0
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [0, 1.5, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sphere",
+                    "dslType": "Sphere",
+                    "pos": [0, 0, 0],
+                    "size": 1,
+                    "level": null,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 1, 1, 0.02],
+                      "ior": 1.5,
+                      "roughness": 0,
+                      "metallic": 0,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Point",
+                    "position": [0, 10, 0],
+                    "direction": null,
+                    "color": [1, 1, 1, 1],
+                    "intensity": 150
+                  }
+                ],
+                "background": [0, 0, 0, 1],
+                "caustics": "Caustics(true,500000,20,Some(1.0),0.8)",
+                "render": "RenderSettings(true,On,false,2,0.1,None,1,Off)",
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -2,
+                    "color": [1, 1, 1, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ],
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A single glass sphere hovering above a white floor, lit from above so the sphere\n * focuses light through its curved surface and casts a caustic pattern onto the floor.\n * Caustics are photon-mapped; the glass sphere's curvature is what concentrates the light\n * into the bright caustic below it.\n */\nobject GlassSphereCaustics:\n  val scene = Scene(\n    camera = Camera(\n      position = (0f, 1.5f, 6f),\n      lookAt = (0f, 0f, 0f),\n      up = (0f, 1f, 0f)\n    ),\n    objects = List(\n      Sphere(\n        pos = (0f, 0f, 0f),\n        material = Some(Material.Glass),\n        size = 1.0f\n      )\n    ),\n    lights = List(\n      Point(position = (0f, 10f, 0f), intensity = 150.0f)\n    ),\n    planes = List(\n      Plane(Y at -2, color = Color.White)\n    ),\n    background = Some(Color.Black),\n    caustics = Some(Caustics.HighQuality),\n    render = Some(RenderSettings(transparentShadows = true))\n  )\n\n  SceneRegistry.register(\"glass-sphere-caustics\", scene)\n```", "unit-size glass sphere at the origin above a white floor plane, point light directly overhead, camera 6.2 units out at eye level looking at the origin, high-quality caustics and transparent shadows enabled."]
+    },
+    {
+      "prompt": "make the caustics stronger",
+      "expect": {
+        "tag": "needs_clarification"
+      },
+      "validator": [],
+      "responses": []
+    }
+  ],
+  "recorded_live": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "date": "2026-10-27",
+    "agent": "3cf1c4e-dirty"
+  }
+}

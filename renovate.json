@@ -1,0 +1,30 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "automerge": false,
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 10,
+  "packageRules": [
+    {
+      "description": "Group all sbt plugin updates",
+      "matchManagers": ["sbt"],
+      "matchDepTypes": ["plugin"],
+      "groupName": "sbt plugins"
+    },
+    {
+      "description": "Group all Scala library updates",
+      "matchManagers": ["sbt"],
+      "matchDepTypes": ["library"],
+      "groupName": "Scala libraries"
+    }
+  ],
+  "ignoreDeps": [
+    "cuda",
+    "optix",
+    "libavcodec",
+    "libavformat",
+    "libavutil",
+    "libswscale"
+  ]
+}

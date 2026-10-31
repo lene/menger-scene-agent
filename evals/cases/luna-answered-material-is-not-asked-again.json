@@ -1,0 +1,177 @@
+{
+  "id": "luna-answered-material-is-not-asked-again",
+  "source": "session-20261019T113255368155-5bb6281f history 5 (asked again after \"copper\") + 6 (the accepted copper scene)",
+  "turns": [
+    {
+      "prompt": "a menger sponge level 2",
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level 2 Menger sponge with a gold material and lighting to reveal its carved structure.\n */\nobject MengerSponge:\n  val scene: Scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"menger-sponge\", scene)\n```", "level-2 sponge, 2.5 units, opaque gold, directional lights from above toward +x and -z and from above toward -x and -z, camera 7.8 units out at an angle toward the origin from (4, 3, 6)"],
+      "expect": {
+        "objects": ["Sponge"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sponge-volume",
+                    "dslType": "Sponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
+    },
+    {
+      "prompt": "make it from wood\n\n(The system asked for clarification: wood is a material the DSL can only approximate; would you prefer a matte or plastic wood-coloured base with a wood-grain pattern?)\nUser's answer: no, make it aluminum\n\n(The system asked for clarification: Aluminum has no built-in material preset. Which nearest approximation would you prefer: Chrome, Copper, or a custom matte/plastic silver-gray material?)\nUser's answer: level 2.5\n\n(The system asked for clarification: Aluminum has no built-in material preset. Which approximation would you prefer: Chrome, Copper, or a custom matte/plastic silver-gray material?)\nUser's answer: copper",
+      "answered": true,
+      "responses": ["NEEDS_CLARIFICATION: \u201cCopper\u201d could mean the built-in Copper material or an approximation of the requested aluminum; please confirm which material you want.", "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level 2.5 Menger sponge with a copper material and lighting to reveal its carved structure.\n */\nobject MengerSponge:\n  val scene: Scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2.5f,\n        material = Some(Material.Copper),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(direction = (1f, -1f, -1f), intensity = 1.5f),\n      Directional(direction = (-1f, -0.5f, -1f), intensity = 0.5f)\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"menger-sponge\", scene)\n```", "now level 2.5 and copper; 2.5-unit volume-filling Menger sponge, copper, directional lights from above toward +x and -z and from above toward -x and -z, camera 7.8 units out at an angle not specified in the facts"],
+      "expect": {
+        "materials": ["Copper"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sponge-volume",
+                    "dslType": "Sponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2.5,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [0.72, 0.45, 0.2, 1],
+                      "ior": 1,
+                      "roughness": 0.2,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
+    }
+  ]
+}

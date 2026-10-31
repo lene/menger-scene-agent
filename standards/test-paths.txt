@@ -1,0 +1,2 @@
+# Test files whose modification needs a Test-Change: trailer (check-test-justification.sh).
+^tests/

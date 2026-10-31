@@ -1,0 +1,285 @@
+{
+  "id": "luna-answered-type-is-not-asked-again",
+  "source": "Prompts from session-20261019T113255368155-5bb6281f history 12 (asked again after \"level 3.8\") + 14 (its level-3.8 TesseractSponge scene and the readback; the budget check is the real validator's, not the stub's). Responses and validator answers re-recorded live 2026-10-27 against the real validator (see recorded_live): the original responses predate the budget and snapshot checks that now ask for a repair (menger#78).",
+  "turns": [
+    {
+      "prompt": "a menger sponge level 2",
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-2 Menger sponge: the classic volume-filling sponge with the first two\n * subdivisions (400 cubes), in gold, lit by a three-point key/fill/rim setup over a dark floor.\n */\nobject MengerSponge:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      Sponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeFilling,\n        level = 2f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"menger-sponge\", scene)\n```", "level-2 volume-filling sponge, 2.5 units, gold, three directional lights (one from above, one from above, one from below), dark grey floor at y=-3, camera 7.8 units out looking at the origin."],
+      "expect": {
+        "objects": ["Sponge"]
+      },
+      "validator": [
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "sponge-volume",
+                    "dslType": "Sponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 2,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
+    },
+    {
+      "prompt": "ok now turn the sponge into a tesseract-sponge\n\n(The system asked for clarification: \u201ctesseract-sponge\u201d could mean a Sponge of a different type or a TesseractSponge object; the scene\u2019s existing local RGB coloring and level 5.8 do not transfer directly to a TesseractSponge, whose maximum level is 5. Which interpretation and level should I use?)\nUser's answer: level 3.8",
+      "answered": true,
+      "responses": ["```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-3.8 tesseract-sponge: the 4D analogue of the Menger sponge, volume-removing\n * subdivision up to a fractional level that blends levels 3 and 4, in gold, lit by a\n * three-point key/fill/rim setup over a dark floor.\n */\nobject TesseractSpongeGold:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeRemoving,\n        level = 3.8f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"tesseract-sponge-gold\", scene)\n```", "```scala\npackage examples.dsl\n\nimport scala.language.implicitConversions\n\nimport menger.dsl._\n\n/**\n * A level-3 tesseract-sponge: the 4D analogue of the Menger sponge, volume-removing\n * subdivision, in gold, lit by a three-point key/fill/rim setup over a dark floor.\n *\n * The requested level 3.8 is a fractional level that blends levels 3 and 4, which needs\n * 260M triangles -- over the 16M scene budget. The highest single level that fits is 3\n * (about 5.3M triangles), so the sponge sits at level 3.\n */\nobject TesseractSpongeGold:\n  val scene = Scene(\n    camera = Camera(\n      position = (4f, 3f, 6f),\n      lookAt = (0f, 0f, 0f)\n    ),\n    objects = List(\n      TesseractSponge(\n        pos = (0f, 0f, 0f),\n        spongeType = VolumeRemoving,\n        level = 3f,\n        material = Some(Material.Gold),\n        size = 2.5f\n      )\n    ),\n    lights = List(\n      Directional(\n        direction = (1f, -1f, -1f),\n        intensity = 1.5f\n      ),\n      Directional(\n        direction = (-1f, -0.5f, -1f),\n        intensity = 0.5f\n      ),\n      Directional(\n        direction = (0f, 0.5f, 1f),\n        intensity = 0.8f\n      )\n    ),\n    planes = List(Plane(Y at -3, color = \"#404040\"))\n  )\n\n  SceneRegistry.register(\"tesseract-sponge-gold\", scene)\n```", "Now a level-3 volume-removing TesseractSponge of size 2.5 in gold replaces the Sponge, lit by three directional lights (two from above, one from below), with a camera 7.8 units out looking at the origin and a dark floor plane below."],
+      "expect": {
+        "objects": ["TesseractSponge"]
+      },
+      "validator": [
+        {
+          "exit": 1,
+          "result": {
+            "tag": "lint-findings",
+            "messages": ["scene-budget: scene over budget: 260112384 triangles in total, budget 16000000 (lower sponge levels, or use fewer high-level objects); the tesseract-sponge-volume fits at level 3 (5308416 triangles in total)"],
+            "findings": [
+              {
+                "invariant": "scene-budget",
+                "message": "scene over budget: 260112384 triangles in total, budget 16000000 (lower sponge levels, or use fewer high-level objects); the tesseract-sponge-volume fits at level 3 (5308416 triangles in total)"
+              }
+            ],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-volume",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 3.8,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        },
+        {
+          "exit": 0,
+          "result": {
+            "tag": "ok",
+            "messages": [],
+            "findings": [],
+            "scene": "/workspace/scene/.candidate.scala",
+            "schemaVersion": "1.2.0",
+            "snapshots": [
+              {
+                "t": 0,
+                "camera": {
+                  "position": [4, 3, 6],
+                  "lookAt": [0, 0, 0],
+                  "up": [0, 1, 0]
+                },
+                "objects": [
+                  {
+                    "objectType": "tesseract-sponge-volume",
+                    "dslType": "TesseractSponge",
+                    "pos": [0, 0, 0],
+                    "size": 2.5,
+                    "level": 3,
+                    "rotation": [0, 0, 0],
+                    "color": null,
+                    "material": {
+                      "color": [1, 0.84, 0, 1],
+                      "ior": 1,
+                      "roughness": 0.1,
+                      "metallic": 1,
+                      "specular": 1,
+                      "emission": 0,
+                      "filmThickness": 0,
+                      "dispersion": 0
+                    },
+                    "edgeRadius": null,
+                    "edgeMaterial": null,
+                    "projection": null,
+                    "proceduralType": 0,
+                    "proceduralScale": 1
+                  }
+                ],
+                "lights": [
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [1, -1, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 1.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [-1, -0.5, -1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.5
+                  },
+                  {
+                    "kind": "Directional",
+                    "position": null,
+                    "direction": [0, 0.5, 1],
+                    "color": [1, 1, 1, 1],
+                    "intensity": 0.8
+                  }
+                ],
+                "background": null,
+                "caustics": null,
+                "render": null,
+                "planes": [
+                  {
+                    "axis": "Y",
+                    "positive": true,
+                    "value": -3,
+                    "color": [0.2509804, 0.2509804, 0.2509804, 1],
+                    "checkerColor": null,
+                    "material": null
+                  }
+                ]
+              }
+            ],
+            "cameraPath": []
+          }
+        }
+      ]
+    }
+  ],
+  "recorded_live": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "date": "2026-10-27",
+    "agent": "d5b1ac8-dirty"
+  }
+}
