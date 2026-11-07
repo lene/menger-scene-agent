@@ -40,7 +40,9 @@ from gauntlet.types import Finding
 # `radiusReduction`.
 # 2.1.0 adds the n-dimensional `ProjectionSpec` (dimension 4..8, planes, eye, screen, stages;
 # menger#162) next to `Projection4DSpec`.
-EXPECTED_MANIFEST_SCHEMA_VERSION = "2.1.0"
+# 2.2.0 adds the `Hypercube` object (the n-cube of 4 to 8 dimensions; menger#163) and the
+# `Sun` light (menger#158).
+EXPECTED_MANIFEST_SCHEMA_VERSION = "2.2.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

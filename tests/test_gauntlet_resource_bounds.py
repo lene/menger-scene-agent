@@ -210,7 +210,7 @@ def test_full_corpus_has_no_resource_bound_findings():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 36  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162)
+    assert len(scenes) == 38  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162), HexeractTurning (menger#163), SunKeyLight (menger#158)
 
     for scene in scenes:
         findings = check_resource_bounds(scene["source"])
