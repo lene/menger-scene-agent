@@ -38,7 +38,9 @@ from gauntlet.types import Finding
 # `menger.spec`; menger#84), adds an optional field `unit` (degrees or radians; menger#95),
 # lists `Projection4DSpec` as a scene-composition type and renames `Caustics.alpha` to
 # `radiusReduction`.
-EXPECTED_MANIFEST_SCHEMA_VERSION = "2.0.0"
+# 2.1.0 adds the n-dimensional `ProjectionSpec` (dimension 4..8, planes, eye, screen, stages;
+# menger#162) next to `Projection4DSpec`.
+EXPECTED_MANIFEST_SCHEMA_VERSION = "2.1.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

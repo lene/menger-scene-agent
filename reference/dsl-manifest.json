@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "2.0.0",
-  "contentRevision": "50c30eac613325c008cc0d73f2e235881a25e4570e37c2cfaee3e88544a95afb",
+  "schemaVersion": "2.1.0",
+  "contentRevision": "fce6c96b4552a54dd2c2f6a83f89d390a5e07a46dc999af2386b28e169c8487c",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.5.0",
   "minDriverVersion": "580.65",
@@ -15,10 +15,12 @@
     "Caustics has no intensity parameter (only `photonsPerIteration`, `iterations`, `initialRadius`, `radiusReduction`): more photons or iterations reduce noise, they do not make the caustics brighter (usability review 2026-10, session 3, F69). Caustics are only visible where a CURVED refracting surface (e.g. a glass Sphere) focuses light onto a nearby diffuse surface: flat facets (polytopes, sponges) only shift light and thin Film bends it hardly at all, so they give faint or no caustics -- say so instead of promising patterns (usability review 2026-10, session 4, F98). Every transparent material with an IOR above 1 refracts, Film (1.33) and Water included, not only Glass and Diamond (session 5, F121).",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val durationSeconds = <seconds>f` in the same object; t is seconds in [0, durationSeconds]. The window plays it in real time, looping, and the validator checks the scene at 25 evenly spaced times from t = 0 to t = durationSeconds. The older name `val duration` is deprecated but still read. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46). The scene has no frame count. The scene agent's window plays it with every frame rendered (25 steps per second at most; a slow frame slows the playback instead of skipping scene time) and loops; menger's default real-time mode follows the wall clock and skips scene time when rendering is slow, which the window title says. A playing window with no input for 10 minutes pauses itself (Space resumes); frame counts are menger-app command-line options only. Editing the scene file reloads an animated scene live in the window, but the window cannot switch between a static and an animated scene -- it must be restarted then (usability review 2026-10, session 3, F57, F84). The window has playback keys: Space pauses and resumes, Left/Right step 0.01 s (with Shift 0.1 s), Home/End jump to the start/end -- so a looping animation CAN be stopped at any frame (usability review 2026-10, session 4, F92).",
-    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `wScale = 0`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). `Projection4DSpec(wScale = s)` scales the object's w coordinate before the 4D rotation (default 1, must be >= 0): 0 flattens a Tesseract to a cube, and animating it from 0 to 1 grows the tesseract out of the cube along w -- the nearest the DSL has to extruding a 3D object into 4D. There is no 5D object (menger#65, #59). For the hand-over from a 3D Cube or Sponge to be seamless: keep rotXW, rotYW and rotZW at 0 while wScale grows (a 4D rotation turns x into w, so wScale 0 is then not the cube), give the 4D object size s * eyeW / (eyeW - screenW) for a 3D object of size s, the same material and the same `edgeRadius`/`edgeMaterial` on both (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), show the 3D object only while wScale is exactly 0 and the 4D object from any wScale above 0 (at 0 the 4D object's faces and edges lie on top of each other in pairs, which a transparent material shows as speckle), and let the extrusion take at least 3 s; rotate in 4D only after wScale reaches 1 (usability review 2026-10, session 5, F124, menger#132; example: CubeToTesseract).",
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `wScale = 0`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). `Projection4DSpec(wScale = s)` scales the object's w coordinate before the 4D rotation (default 1, must be >= 0): 0 flattens a Tesseract to a cube, and animating it from 0 to 1 grows the tesseract out of the cube along w -- the nearest the DSL has to extruding a 3D object into 4D; a `ProjectionSpec` (next convention) lifts a 4D object into 5D to 8D (menger#65, #59, #162). For the hand-over from a 3D Cube or Sponge to be seamless: keep rotXW, rotYW and rotZW at 0 while wScale grows (a 4D rotation turns x into w, so wScale 0 is then not the cube), give the 4D object size s * eyeW / (eyeW - screenW) for a 3D object of size s, the same material and the same `edgeRadius`/`edgeMaterial` on both (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), show the 3D object only while wScale is exactly 0 and the 4D object from any wScale above 0 (at 0 the 4D object's faces and edges lie on top of each other in pairs, which a transparent material shows as speckle), and let the extrusion take at least 3 s; rotate in 4D only after wScale reaches 1 (usability review 2026-10, session 5, F124, menger#132; example: CubeToTesseract).",
+    "nD view: `projection = Some(ProjectionSpec(dimension, planes, eye, screen, stages))` lifts a 4D object (Tesseract, TesseractSponge or a regular polytope) into `dimension` 4..8 dimensions: its x y z w coordinates stay, the further ones are 0. The axes are x y z w v u t s (5D adds v, 6D u, 7D t, 8D s). `planes` is a list of `PlaneRotation(plane, angle)` with the plane named by two distinct axes that exist in `dimension`, e.g. `PlaneRotation(\"xv\", 30f)` (the angle is in DEGREES; for a positive angle the second axis turns towards the first, v towards x in `xv`, as w does in `Projection4DSpec.rotXW`), applied in the order written: the first plane turns first, and the result depends on the order. An object lies in x y z w, so a plane of axes beyond w alone (vu, ...) turns nothing until an earlier plane (xv, wv, ...) has moved the object into them. The projection to 3D has one perspective stage per dropped axis, the first dropping the highest axis; a stage scales a point by (eye - screen) / (eye - c), c the coordinate it drops, so the stages compound: with the default eye 3 and screen 1.5 a flat object is at 0.5^(dimension - 3) of its `size`, half again per extra dimension -- enlarge `size`, or lower `screen`, to compensate. `stages` may list one `ProjectionStage(eye, screen)` per stage (dimension - 3 of them); empty, every stage uses `eye` and `screen`. Keep each eye above the extent of the lifted object along the axis it drops: faces reaching an eye are not clipped and distort, edge tubes with such an endpoint are left out. A `ProjectionSpec` is rendered on the CPU through the chain: an animation rebuilds the object every frame, a sponge needs a whole `level`, the IFS types (Menger4D, PentachoronGasket, HexadecachoronGasket) take a `Projection4DSpec` only, and the render window's Shift+drag and Shift+scroll (eye) leave it alone (the log says so once). It has no `wScale`, so the cube-to-tesseract extrusion above cannot be combined with a lift into 5D or more. `ProjectionSpec(4, ...)` is the 4D view with the planes in order: `Projection4DSpec(rotXW = a, rotYW = b, rotZW = c)` equals planes zw c, yw b, xw a, in that order (menger#162; example: TesseractToPenteract).",
     "Procedural colouring (`proceduralType`) is evaluated at the hit point's world position (11 xyz_rgb_local: in the object's own box). For a 4D object that is the projected 3D position, after `projection` and `pos`, so the colours follow the projected shape and change when the 4D rotation changes (usability review 2026-09, session 2, F43); its box is taken from `size` before projection, so xyz_rgb_local only approximately spans 0..1 on a 4D object.",
     "Shadows of transparent objects: `RenderSettings(transparentShadows = ...)` is `Auto` by default, which makes a transparent object cast the colour seen through it when one is tinted or procedurally coloured -- e.g. rainbow shadows of a glass object with xyz_rgb_local (usability review 2026-10, session 3, F67; session 5, F111). `true` turns it on for every transparent object, `false` keeps shadows opaque. A scene without `render = Some(RenderSettings(...))` behaves as `Auto`. `caustics` turns transparent shadows on in any case.",
-    "Image textures and texture maps (`texture`, `videoTexture`, `normalMap`, `roughnessMap`) need surface UV coordinates. 4D objects, edge tubes (`edgeRadius`), curves and an L-system's branches have no UV coordinates, so these fields have no effect on them; use a material colour or a `proceduralType` there instead.",
+    "Image textures and texture maps (`texture`, `videoTexture`, `normalMap`, `roughnessMap`) need surface UV coordinates. 4D objects, edge tubes (`edgeRadius`), a `Cylinder`, curves and an L-system's branches have no UV coordinates, so these fields have no effect on them; use a material colour or a `proceduralType` there instead.",
+    "A `Cylinder` is shaded opaque, diffuse or metallic: a transparent material (Glass, Water, Diamond, Film, Parchment, or any colour alpha below 1) renders opaque, a material with an IOR above 1.05 (the refractive ones, and Plastic) receives no caustic, and thin film (`filmThickness`) has no effect on it. The validator reports either as an `opaque-only` finding; Matte and the metals are fine. Object-local procedural colouring (`proceduralType` 11, xyz_rgb_local) spans the box `pos` +- `size / 2`, not `p0`/`p1`: with `p0`/`p1`, set `pos` and `size` so that box covers the cylinder. A wide, flat Cylinder makes a round plinth or table top (menger#156).",
     "Glass on a TesseractSponge from level 2 up renders as chaotic, fragmented refraction: the projected sponge has thousands of overlapping refracting layers and a ray gets at most 5 bounces. Prefer an opaque or metal material there, or level 1 for glass, and say so if the user asks for glass (usability review 2026-09, session 2, F55). Thin transparent `Film` shows every inner layer of a 4D sponge at once, so its holes and their walls can't be told apart from the front face; an opaque material with a directional light shows the hole shapes (menger#56).",
     "Camera: the horizontal field of view is fixed at 45 degrees (not adjustable per scene). To frame or zoom to fit a scene, move `Camera.position` -- aim `lookAt` at the scene's centre and set the eye's distance from it to at least radius / sin(22.5deg), where radius is the scene's bounding-sphere radius, with a margin for comfortable framing."
   ],
@@ -568,6 +570,95 @@
       ]
     },
     {
+      "name": "Cylinder",
+      "fields": [
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None",
+          "description": "Only opaque, non-refractive materials (alpha 1, IOR 1.05 or less, e.g. Matte or a metal): see conventions."
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0",
+          "description": "Height along y (turned by `rotation`, centred on `pos`) when `p0`/`p1` are absent; the default radius is `size / 2`."
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets (structured list: the manifest's `proceduralPresets`): 0 none (default). Modulating -- the material's own colour, varied in brightness by the pattern: 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar. Replacing -- the pattern's colour instead of the material's: 8 xyz_rgb ((|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis), 9 heatmap (a blue-to-red noise gradient), 11 xyz_rgb_local (the position inside the object's own box, x, y, z each 0..1 -> R, G, B: every colour once over the object at scale 1, following its position, size and rotation, no mirroring -- use it for \"local\" or \"every colour once\" colouring, never move the object for it (usability review 2026-10, session 3, F63). Black (0, 0, 0) is the box's min-x, min-y, min-z corner (left, bottom, back for an unrotated object) and white the opposite corner, so a camera in the +x +y +z octant sees white nearest and no black (usability review 2026-10, session 5, F110)). A preset belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
+        },
+        {
+          "name": "p0",
+          "type": "scala.Option<menger.dsl.Vec3>",
+          "default": "None",
+          "description": "Centre of one end cap, in world coordinates. Give it together with `p1` (both or neither); they override `pos`, `size` and `rotation`."
+        },
+        {
+          "name": "p1",
+          "type": "scala.Option<menger.dsl.Vec3>",
+          "default": "None",
+          "description": "Centre of the other end cap, in world coordinates; together with `p0` (both or neither)."
+        },
+        {
+          "name": "radius",
+          "type": "scala.Option<java.lang.Object>",
+          "default": "None",
+          "description": "Radius in world units; `size / 2` when absent."
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "Euler angles in radians; turn the default axis (y) about `pos`. Ignored when `p0`/`p1` are given.",
+          "unit": "radians"
+        }
+      ]
+    },
+    {
       "name": "Sponge",
       "fields": [
         {
@@ -747,7 +838,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -832,7 +923,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -915,7 +1006,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -998,7 +1089,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1081,7 +1172,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1164,7 +1255,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1278,7 +1369,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1373,7 +1464,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1466,7 +1557,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1559,7 +1650,7 @@
         },
         {
           "name": "projection",
-          "type": "scala.Option<menger.spec.Projection4DSpec>",
+          "type": "scala.Option<menger.spec.ProjectionLike>",
           "default": "None"
         },
         {
@@ -1997,6 +2088,69 @@
           "name": "wScale",
           "type": "float",
           "default": "1.0"
+        }
+      ]
+    },
+    {
+      "name": "ProjectionSpec",
+      "fields": [
+        {
+          "name": "dimension",
+          "type": "int",
+          "default": null,
+          "min": 4,
+          "max": 8
+        },
+        {
+          "name": "planes",
+          "type": "scala.collection.immutable.List<menger.spec.PlaneRotation>",
+          "default": "List()"
+        },
+        {
+          "name": "eye",
+          "type": "float",
+          "default": "3.0"
+        },
+        {
+          "name": "screen",
+          "type": "float",
+          "default": "1.5"
+        },
+        {
+          "name": "stages",
+          "type": "scala.collection.immutable.List<menger.spec.ProjectionStage>",
+          "default": "List()"
+        }
+      ]
+    },
+    {
+      "name": "PlaneRotation",
+      "fields": [
+        {
+          "name": "plane",
+          "type": "menger.spec.PlaneName",
+          "default": null
+        },
+        {
+          "name": "angle",
+          "type": "float",
+          "default": null,
+          "unit": "degrees"
+        }
+      ]
+    },
+    {
+      "name": "ProjectionStage",
+      "fields": [
+        {
+          "name": "eye",
+          "type": "float",
+          "default": null
+        },
+        {
+          "name": "screen",
+          "type": "float",
+          "default": null
         }
       ]
     },

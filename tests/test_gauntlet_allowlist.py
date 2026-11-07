@@ -184,7 +184,7 @@ def test_full_corpus_passes_the_allowlist():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 34  # + CubeToTesseract (usability review 2026-10, F124)
+    assert len(scenes) == 36  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162)
 
     flagged = {s["name"]: check_allowlist(s["source"]) for s in scenes}
     assert {name: f for name, f in flagged.items() if f} == {}
