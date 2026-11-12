@@ -16,7 +16,7 @@
             "messages": [],
             "findings": [],
             "scene": "/workspace/scene/.candidate.scala",
-            "schemaVersion": "1.2.0",
+            "schemaVersion": "2.0.0",
             "snapshots": [
               {
                 "t": 0,
@@ -109,7 +109,7 @@
             "messages": [],
             "findings": [],
             "scene": "/workspace/scene/.candidate.scala",
-            "schemaVersion": "1.2.0",
+            "schemaVersion": "2.0.0",
             "snapshots": [
               {
                 "t": 0,
@@ -205,7 +205,7 @@
             "messages": [],
             "findings": [],
             "scene": "/workspace/scene/.candidate.scala",
-            "schemaVersion": "1.2.0",
+            "schemaVersion": "2.0.0",
             "snapshots": [
               {
                 "t": 0,
@@ -324,7 +324,7 @@
             "messages": [],
             "findings": [],
             "scene": "/workspace/scene/.candidate.scala",
-            "schemaVersion": "1.2.0",
+            "schemaVersion": "2.0.0",
             "snapshots": [
               {
                 "t": 0,

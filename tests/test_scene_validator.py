@@ -51,7 +51,7 @@ def test_exit_0_ok_returns_typed_result_tag_ok_scene_populated(monkeypatch):
         "messages": [],
         "findings": [],
         "scene": _SCENE_FILE,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -73,7 +73,7 @@ def test_exit_1_compile_errors_returns_typed_result_messages_populated(monkeypat
         "messages": ["Compilation of scene.scala failed: not found: value Sponge2"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
 
@@ -91,7 +91,7 @@ def test_a_structured_load_error_is_kept_on_the_result(monkeypatch):
         "messages": ["Compilation of 'scene.scala' failed:\nline 3: Found: Int"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "1.3.0",
+        "schemaVersion": "2.0.0",
         "loadError": load_error,
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
@@ -103,7 +103,7 @@ def test_a_structured_load_error_is_kept_on_the_result(monkeypatch):
 
 
 def test_a_load_error_that_is_not_an_object_is_a_typed_parse_error(monkeypatch):
-    payload = {"tag": "compile-errors", "messages": [], "findings": [], "schemaVersion": "1.3.0",
+    payload = {"tag": "compile-errors", "messages": [], "findings": [], "schemaVersion": "2.0.0",
                "loadError": "compile_failed"}
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
 
@@ -119,7 +119,7 @@ def test_exit_1_lint_findings_returns_typed_result_findings_populated(monkeypatc
         "messages": ["edge-length-invariant: edges must be equal length"],
         "findings": [{"invariant": "edge-length-invariant", "message": "edges must be equal length"}],
         "scene": _SCENE_FILE,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
 
@@ -141,7 +141,7 @@ def test_exit_2_refused_returns_typed_result_tag_refused(monkeypatch):
         "messages": ["restricted classpath is not usable: stale manifest"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(2, stdout=json.dumps(payload)))
 
@@ -219,7 +219,7 @@ def test_valid_json_but_not_an_object_returns_a_typed_parse_error(monkeypatch):
 
 
 def test_unexpected_tag_value_returns_a_typed_parse_error(monkeypatch):
-    payload = {"tag": "not-a-real-tag", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "not-a-real-tag", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
@@ -229,7 +229,7 @@ def test_unexpected_tag_value_returns_a_typed_parse_error(monkeypatch):
 
 
 def test_missing_tag_field_returns_a_typed_parse_error(monkeypatch):
-    payload = {"messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"messages": [], "findings": [], "schemaVersion": "2.0.0"}
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
@@ -243,7 +243,7 @@ def test_malformed_finding_shape_returns_a_typed_parse_error(monkeypatch):
         "tag": "lint-findings",
         "messages": ["bad"],
         "findings": [{"invariant": "only-invariant-no-message"}],
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
 
@@ -260,7 +260,7 @@ def test_finding_with_non_string_invariant_or_message_returns_a_typed_parse_erro
         "tag": "lint-findings",
         "messages": ["bad"],
         "findings": [{"invariant": 42, "message": "edges must be equal length"}],
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=json.dumps(payload)))
 
@@ -278,7 +278,7 @@ def test_null_messages_and_findings_default_to_empty_list(monkeypatch):
         "messages": None,
         "findings": None,
         "scene": None,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -294,7 +294,7 @@ def test_non_list_non_str_messages_returns_a_typed_parse_error(monkeypatch):
         "tag": "ok",
         "messages": [1, 2, 3],
         "findings": [],
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -310,7 +310,7 @@ def test_non_string_scene_returns_a_typed_parse_error(monkeypatch):
         "messages": [],
         "findings": [],
         "scene": 12345,
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "2.0.0",
     }
     _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
@@ -406,7 +406,7 @@ def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
     # The command also carries the agent's DSL revision (session 4, F99); pinned to None here
     # so this test is about the positional arguments only.
     monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", None)
-    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     validate_scene(_SCENE_FILE, _SCRIPT_PATH)
@@ -416,7 +416,7 @@ def test_builds_the_command_with_scene_file_and_script_path(monkeypatch):
 
 def test_builds_the_command_with_an_image_tag_when_given(monkeypatch):
     monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", None)
-    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     validate_scene(_SCENE_FILE, _SCRIPT_PATH, image="menger-scene-validator:test")
@@ -428,7 +428,7 @@ def test_the_command_carries_the_agent_dsl_revision(monkeypatch):
     # Usability review 2026-10, session 4 (F99): run-sandboxed.sh refuses an image built from a
     # different DSL; a stale image re-tagged by CI had passed for current.
     monkeypatch.setattr(scene_validator, "REFERENCE_DSL_REVISION", "ab" * 32)
-    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     calls = _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=json.dumps(payload)))
 
     validate_scene(_SCENE_FILE, _SCRIPT_PATH)
@@ -448,7 +448,7 @@ def test_the_dsl_revision_is_the_reference_manifests_content_revision():
 
 
 def test_subprocess_run_is_invoked_with_capture_output_text_and_timeout_kwargs(monkeypatch):
-    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     recorded_kwargs: List[Any] = []
 
     def fake_run(cmd, **kwargs):
@@ -469,7 +469,7 @@ def test_subprocess_run_is_invoked_with_capture_output_text_and_timeout_kwargs(m
 
 def test_subprocess_run_is_invoked_with_a_plain_argv_list_and_never_shell_true(monkeypatch):
     # Protects the sandboxing/no-shell-interpolation guarantee the module's docstring claims.
-    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
     recorded: List[Any] = []
 
     def fake_run(cmd, **kwargs):

@@ -45,7 +45,7 @@ from adapters.process_contract import (
 )
 from adapters.scene_validator import REFERENCE_DSL_REVISION
 from core.safe_text import safe_text
-from core.snapshot_facts import projections_at
+from core.snapshot_facts import projections_at, scale_text
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
 # RenderWindowError's message, so a pathological or adversarial response can't blow up the
@@ -315,8 +315,8 @@ def shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Tuple[List[Tuple[
     the offset, and "keep them like that" lost it."""
     values, interpolated = projections_at(snapshots, float(state.get("t") or 0.0))
     added = {k: float(state.get(k) or 0) for k in ("rotXW", "rotYW", "rotZW")}
-    return [(name, {k: v + added.get(k, 0.0) for k, v in p.items()}) for name, p in values], \
-        interpolated
+    return [(name, {k: v if k == "scale" else v + added.get(k, 0.0) for k, v in p.items()})
+            for name, p in values], interpolated
 
 
 def _shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Optional[str]:
@@ -326,7 +326,8 @@ def _shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Optional[str]:
 
     def values(name: str, p: dict) -> str:
         rotations = ", ".join(f"{k} {round(p[k], 2):g}" for k in ("rotXW", "rotYW", "rotZW"))
-        return f"{name}: {rotations}, eyeW {round(p['eyeW'], 3):g}, wScale {round(p['wScale'], 3):g}"
+        scale = f", scale {scale_text(p['scale'])}" if "scale" in p else ""
+        return f"{name}: {rotations}, eyeW {round(p['eyeW'], 3):g}{scale}"
 
     t = float(state.get("t") or 0.0)
     sampled = ", interpolated between the validator's samples" if interpolated else ""

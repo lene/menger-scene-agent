@@ -95,6 +95,27 @@ def test_fully_qualified_inline_reference_bypassing_wildcard_import_is_flagged()
     assert any(f.identifier == "java.io.File" for f in findings)
 
 
+def test_a_local_value_named_like_a_package_namespace_is_a_member_access_not_a_reference():
+    # menger#160's DimensionLadder: `private val sun = Sun(...)`, then `sun.direction.x`.
+    scene = (
+        "import menger.dsl._\n\n"
+        "object Foo:\n"
+        "  private val sun = Sun(direction = Vec3(0f, -1f, 0f))\n"
+        "  val (x, z) = (sun.direction.x, sun.direction.z)\n"
+    )
+
+    assert check_allowlist(scene) == []
+
+
+def test_the_package_is_still_reached_by_root_or_when_no_value_shadows_it():
+    # `_root_.` names the package whatever is bound; without a binding `sun.misc.Unsafe` is one.
+    shadowed = "object Foo:\n  val sun = 1\n  val u = _root_.sun.misc.Unsafe\n"
+    unbound = "object Foo:\n  val u = sun.misc.Unsafe\n"
+
+    assert any(f.identifier == "sun.misc.Unsafe" for f in check_allowlist(shadowed))
+    assert any(f.identifier == "sun.misc.Unsafe" for f in check_allowlist(unbound))
+
+
 def test_unqualified_dsl_identifier_is_never_flagged_no_symbol_table():
     # `Sphere(...)` is a bare, unqualified identifier -- not syntactically resolvable to a
     # root package without a symbol table, so it must never be flagged (module docstring).
@@ -184,7 +205,7 @@ def test_full_corpus_passes_the_allowlist():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 38  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162), HexeractTurning (menger#163), SunKeyLight (menger#158)
+    assert len(scenes) == 41  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162), HexeractTurning (menger#163), SunKeyLight (menger#158), PenteractFold (menger#164), PenteractSpongeBreath (menger#166), DimensionLadder (menger#160)
 
     flagged = {s["name"]: check_allowlist(s["source"]) for s in scenes}
     assert {name: f for name, f in flagged.items() if f} == {}

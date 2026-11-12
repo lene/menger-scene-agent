@@ -336,6 +336,17 @@ def test_generate_fails_fast_on_missing_manifest_schema_version_field():
     assert result.kind == "stale_manifest"
 
 
+def test_generate_refuses_the_previous_manifest_version_2_2_0():
+    adapter = FakeModelAdapter(result="unused")
+
+    result = generate("prompt", {"schemaVersion": "2.2.0"}, VALID_CORPUS, adapter)
+
+    assert isinstance(result, GenerationError)
+    assert result.kind == "stale_manifest"
+    assert "2.2.0" in result.message
+    assert adapter.requests == []
+
+
 def test_revise_fails_fast_on_stale_manifest_schema_version():
     adapter = FakeModelAdapter(result=SCENE_TEXT)
     stale_manifest = {"schemaVersion": "0.1.0"}
@@ -442,10 +453,15 @@ def test_system_prompt_teaches_the_not_done_marker_the_turn_parses():
     revise("tweak it", "object Prior:\n  val scene = Scene()\n", VALID_MANIFEST, VALID_CORPUS, adapter)
 
     system_prompt = adapter.last_request.system_prompt
-    # (Extrusion along w is expressible since menger#65's wScale, so the example is 5D.)
-    example = "// NOT DONE: a 5D penteract -- nearest: a Tesseract"
+    # (Extrusion along the newest axis is the object's `scale` and Hypercube covers 4D to 8D,
+    # so the example is a 9D hypercube.)
+    example = "// NOT DONE: a 9D hypercube -- nearest: an 8D Hypercube"
     assert example in system_prompt
-    assert _NOT_DONE.findall(example) == [" a 5D penteract -- nearest: a Tesseract"]
+    assert _NOT_DONE.findall(example) == [" a 9D hypercube -- nearest: an 8D Hypercube"]
+    assert "Tesseract(scale = Some(Scale[4](1f, 1f, 1f, e)))" in system_prompt
+    assert "Hypercube(5, scale = Some(Scale[5](1f, 1f, 1f, 1f, e)))" in system_prompt
+    assert "stretching a `scale` factor past 1 is not an extrusion" in system_prompt
+    assert "wScale" not in system_prompt
 
 
 def test_system_prompt_carries_the_session_3_rules():
@@ -457,7 +473,7 @@ def test_system_prompt_carries_the_session_3_rules():
 
     system_prompt = adapter.last_request.system_prompt
     for phrase in (
-        "penteract",
+        "9D hypercube",
         "never deliver less than the request names or plainly implies",
         "Caustics has no intensity",
         "never re-time",

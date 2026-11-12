@@ -276,7 +276,7 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
         "messages": ["render lock already held"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "1.1.0",
+        "schemaVersion": "2.0.0",
     }
     fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
@@ -289,7 +289,7 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
 
 
 def test_refused_with_no_previous_process_terminates_nothing(monkeypatch):
-    payload = {"tag": "refused", "messages": ["render lock already held"], "schemaVersion": "1.1.0"}
+    payload = {"tag": "refused", "messages": ["render lock already held"], "schemaVersion": "2.0.0"}
     fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -319,7 +319,7 @@ def test_malformed_json_on_fast_exit_returns_typed_malformed_output_error(monkey
 def test_unexpected_tag_on_fast_exit_returns_typed_malformed_output_error(monkeypatch):
     # A fast exit reporting "ok" (or any tag other than "refused") is itself unexpected --
     # story 8's launcher never exits fast except to report `refused`.
-    payload = {"tag": "ok", "messages": [], "schemaVersion": "1.0.0"}
+    payload = {"tag": "ok", "messages": [], "schemaVersion": "2.0.0"}
     fake = FakePopen(returncode=0, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -353,7 +353,7 @@ def test_valid_json_but_not_an_object_returns_typed_malformed_output_error(monke
 
 
 def test_missing_tag_field_returns_typed_malformed_output_error(monkeypatch):
-    payload = {"messages": ["something"], "schemaVersion": "1.0.0"}
+    payload = {"messages": ["something"], "schemaVersion": "2.0.0"}
     fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -760,8 +760,7 @@ def test_the_window_state_names_the_4d_values_the_window_shows(tmp_path):
     from adapters.render_window import describe_window_state
 
     def snapshot(t, rot_yw):
-        projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": rot_yw, "rotZW": 0,
-                      "wScale": 1}
+        projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": rot_yw, "rotZW": 0}
         return {"t": t, "objects": [
             {"dslType": "TesseractSponge", "projection": projection},
             {"dslType": "Sphere", "projection": None},
@@ -773,13 +772,31 @@ def test_the_window_state_names_the_4d_values_the_window_shows(tmp_path):
     # t = 3.5: rotYW 40 + 40 * 0.1 / 3.4 = 41.18 in the file, plus the window's 1.2.
     assert ("4D values the window shows (the file's at t = 3.5 s, interpolated between the "
             "validator's samples, plus the window's rotation): "
-            "TesseractSponge: rotXW -61.5, rotYW 42.38, rotZW 0, eyeW 3, wScale 1") in text
+            "TesseractSponge: rotXW -61.5, rotYW 42.38, rotZW 0, eyeW 3") in text
     assert "Sphere" not in text
     assert "4D values" not in describe_window_state(_WINDOW_STATE)
     on_sample = describe_window_state(dict(_WINDOW_STATE, t=3.4),
                                       [snapshot(0, 0), snapshot(3.4, 40)])
     assert "(the file's at t = 3.4 s, plus the window's rotation): " in on_sample
     assert "rotYW 41.2," in on_sample
+
+
+def test_the_window_shows_a_scaled_objects_scale_in_place_of_wscale():
+    from adapters.render_window import describe_window_state
+
+    def snapshot(t, w):
+        projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": 0, "rotZW": 0}
+        scale = [1, 1, 1, w] if w != 1 else None
+        return {"t": t, "objects": [
+            {"dslType": "Tesseract", "projection": projection, "scale": scale}]}
+
+    text = describe_window_state(_WINDOW_STATE, [snapshot(0, 0.5), snapshot(7, 1)])
+
+    # t = 3.5: halfway between 0.5 and 1 (an absent scale is all ones).
+    assert "Tesseract: rotXW -61.5, rotYW 1.2, rotZW 0, eyeW 3, scale x 1, y 1, z 1, w 0.75" in text
+    assert "wScale" not in text
+    unscaled = describe_window_state(_WINDOW_STATE, [snapshot(0, 1), snapshot(7, 1)])
+    assert "scale" not in unscaled and "Tesseract: rotXW" in unscaled
 
 
 def test_a_window_state_of_another_major_is_not_read(tmp_path):

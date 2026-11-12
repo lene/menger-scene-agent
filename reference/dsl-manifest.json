@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "2.2.0",
-  "contentRevision": "0dd4987ad3e99caa7597d773a684ec44dcb1a508c5129540fa7789c9137cae2e",
+  "schemaVersion": "3.0.0",
+  "contentRevision": "bf0ef4b49d0639b5c3094385826bf44f807755953ae05f0d4c83b39e2d731a2c",
   "scalaVersion": "3.8.3",
   "optixJniVersion": "0.5.0",
   "minDriverVersion": "580.65",
@@ -16,9 +16,12 @@
     "Caustics has no intensity parameter (only `photonsPerIteration`, `iterations`, `initialRadius`, `radiusReduction`): more photons or iterations reduce noise, they do not make the caustics brighter (usability review 2026-10, session 3, F69). Caustics are only visible where a CURVED refracting surface (e.g. a glass Sphere) focuses light onto a nearby diffuse surface: flat facets (polytopes, sponges) only shift light and thin Film bends it hardly at all, so they give faint or no caustics -- say so instead of promising patterns (usability review 2026-10, session 4, F98). Every transparent material with an IOR above 1 refracts, Film (1.33) and Water included, not only Glass and Diamond (session 5, F121).",
     "Emission makes a surface self-lit: flat, unshaded colour. There is no bloom, halo or glow around objects, and no emission that falls off with distance.",
     "Animation: `def scene(t: Float): Scene` plus `val durationSeconds = <seconds>f` in the same object; t is seconds in [0, durationSeconds]. The window plays it in real time, looping, and the validator checks the scene at 25 evenly spaced times from t = 0 to t = durationSeconds. The older name `val duration` is deprecated but still read. An animated scene has no `SceneRegistry.register` line: register takes a static Scene only, so drop it when turning `val scene` into `def scene(t: Float)` (usability review 2026-09, F46). The scene has no frame count. The scene agent's window plays it with every frame rendered (25 steps per second at most; a slow frame slows the playback instead of skipping scene time) and loops; menger's default real-time mode follows the wall clock and skips scene time when rendering is slow, which the window title says. A playing window with no input for 10 minutes pauses itself (Space resumes); frame counts are menger-app command-line options only. Editing the scene file reloads an animated scene live in the window, but the window cannot switch between a static and an animated scene -- it must be restarted then (usability review 2026-10, session 3, F57, F84). The window has playback keys: Space pauses and resumes, Left/Right step 0.01 s (with Shift 0.1 s), Home/End jump to the start/end -- so a looping animation CAN be stopped at any frame (usability review 2026-10, session 4, F92).",
-    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `wScale = 0`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). `Projection4DSpec(wScale = s)` scales the object's w coordinate before the 4D rotation (default 1, must be >= 0): 0 flattens a Tesseract to a cube, and animating it from 0 to 1 grows the tesseract out of the cube along w -- the nearest the DSL has to extruding a 3D object into 4D; a `ProjectionSpec` (next convention) lifts a 4D object into 5D to 8D (menger#65, #59, #162). For the hand-over from a 3D Cube or Sponge to be seamless: keep rotXW, rotYW and rotZW at 0 while wScale grows (a 4D rotation turns x into w, so wScale 0 is then not the cube), give the 4D object size s * eyeW / (eyeW - screenW) for a 3D object of size s, the same material and the same `edgeRadius`/`edgeMaterial` on both (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), show the 3D object only while wScale is exactly 0 and the 4D object from any wScale above 0 (at 0 the 4D object's faces and edges lie on top of each other in pairs, which a transparent material shows as speckle), and let the extrusion take at least 3 s; rotate in 4D only after wScale reaches 1 (usability review 2026-10, session 5, F124, menger#132; example: CubeToTesseract).",
-    "nD view: `projection = Some(ProjectionSpec(dimension, planes, eye, screen, stages))` lifts a 4D object (Tesseract, TesseractSponge or a regular polytope) into `dimension` 4..8 dimensions: its x y z w coordinates stay, the further ones are 0. The axes are x y z w v u t s (5D adds v, 6D u, 7D t, 8D s). `planes` is a list of `PlaneRotation(plane, angle)` with the plane named by two distinct axes that exist in `dimension`, e.g. `PlaneRotation(\"xv\", 30f)` (the angle is in DEGREES; for a positive angle the second axis turns towards the first, v towards x in `xv`, as w does in `Projection4DSpec.rotXW`), applied in the order written: the first plane turns first, and the result depends on the order. An object lies in x y z w, so a plane of axes beyond w alone (vu, ...) turns nothing until an earlier plane (xv, wv, ...) has moved the object into them. The projection to 3D has one perspective stage per dropped axis, the first dropping the highest axis; a stage scales a point by (eye - screen) / (eye - c), c the coordinate it drops, so the stages compound: with the default eye 3 and screen 1.5 a flat object is at 0.5^(dimension - 3) of its `size`, half again per extra dimension -- enlarge `size`, or lower `screen`, to compensate. `stages` may list one `ProjectionStage(eye, screen)` per stage (dimension - 3 of them); empty, every stage uses `eye` and `screen`. Keep each eye above the extent of the lifted object along the axis it drops: faces of a 4D object reaching an eye are not clipped and distort (a Hypercube's are left out), edge tubes with such an endpoint are left out. A `ProjectionSpec` is rendered on the CPU through the chain: an animation rebuilds the object every frame, a sponge needs a whole `level`, the IFS types (Menger4D, PentachoronGasket, HexadecachoronGasket) take a `Projection4DSpec` only, and the render window's Shift+drag and Shift+scroll (eye) leave it alone (the log says so once). It has no `wScale`, so the cube-to-tesseract extrusion above cannot be combined with a lift into 5D or more. `ProjectionSpec(4, ...)` is the 4D view with the planes in order: `Projection4DSpec(rotXW = a, rotYW = b, rotZW = c)` equals planes zw c, yw b, xw a, in that order (menger#162; example: TesseractToPenteract).",
+    "4D objects are rotated in 4D (`projection`), projected to 3D, then placed at `pos`. The regular 4D polytopes are Pentachoron (5-cell), Tesseract (8-cell), Hexadecachoron (16-cell), Icositetrachoron (24-cell), Hecatonicosachoron (120-cell) and Hexacosichoron (600-cell). The 4D IFS fractals are Menger4D (the TesseractSponge's shape), PentachoronGasket and HexadecachoronGasket (Sierpinski gaskets of the 5-cell and the 16-cell); they are traced on the GPU without a stored mesh, so a higher level costs render time, not memory. Each 4D object has its own `projection`, so one object can be rotated in 4D next to an unrotated one; in the render window, Shift+drag adds the same 4D rotation to every 4D object. A 4D object's `size` is applied before the 4D perspective projection, so its on-screen size is not proportional to `size` and differs between polytope types (a Tesseract and an Icositetrachoron of the same `size` project about 1.6x apart); to enlarge one without distorting it, scale `size`, `eyeW` and `screenW` by the same factor (usability review 2026-10, session 3, F72). The projection scales each point by (eyeW - screenW) / (eyeW - w); a flat object (every w = 0, e.g. `scale = Some(Scale[4](1f, 1f, 1f, 0f))`) is therefore shown at (eyeW - screenW) / eyeW of its `size` -- 0.5 for eyeW 3, screenW 1.5. To match a 3D cube of size s, give the 4D object size s * eyeW / (eyeW - screenW) (usability review 2026-10, session 4, F101). A `ProjectionSpec` (the nD view convention below) lifts a 4D object into 5D to 8D (menger#59, #162).",
+    "Per-axis scale: the 4D objects (Tesseract, the regular polytopes, TesseractSponge) take `scale = Some(Scale[4](x, y, z, w))` and Hypercube takes `Scale[N]` for its own dimension N: one factor >= 0 per axis, finite, applied to the object's coordinates after `size` and before the rotations and the projection (default all 1; a wrong number of factors or a negative one is rejected when the scene loads). 0 collapses an axis, so the last factor of an object is its extrusion along the newest axis: animating it 0 -> 1 grows a Tesseract out of a cube, or a Hypercube(5) out of a tesseract. `scale` is geometry, not view: a change rebuilds the object, where a change of `projection` re-projects it. The GPU IFS types (Menger4D, PentachoronGasket, HexadecachoronGasket) and the 3D objects have no `scale`. On the command line: `scale=1,1,1,0.5` (menger#65, #164).",
+    "Hand-over rule: a Hypercube(n) whose last `scale` factor is 0 is the Hypercube(n - 1), seen in the same n-dimensional view: the same vertices, and its faces that use the collapsed axis shrink to lines. So an animation can show the lower object, then the higher one growing out of it, with no cut. Mind four points. (1) In its own (n - 1)-view the lower object is bigger than the flat higher one, which is shown at (eye - screen) / eye of its size (0.5 by default), so swap exactly at scale 0 and give the higher object size s * eye / (eye - screen) of its first projection stage for a lower object of size s; the 3D Cube -> 4D case is the same rule (Hypercube(4) or Tesseract with a w scale, size s * eyeW / (eyeW - screenW)). (2) Every rotation plane that involves the collapsing axis must be at a multiple of 180 degrees when it collapses, or the flat object is a turned slice, not the lower object: keep those planes at 0 until the scale is above 0, or turn a whole 360 degrees. (3) Near 0 the two copies of each face nearly coincide: expect z-fighting for a few frames, and show the lower object at exactly 0 (a transparent material shows the coincident copies as speckle). (4) Give both objects the same material and the same `edgeRadius`/`edgeMaterial` (a `material`, not only a `color`: a 4D object with edge tubes and no material is drawn as its edges alone), and let the extrusion take at least 3 s; edge tubes of zero length are not drawn (usability review 2026-10, session 5, F124, menger#132, #164; examples: CubeToTesseract, PenteractFold).",
+    "nD view: `projection = Some(ProjectionSpec(dimension, planes, eye, screen, stages))` lifts a 4D object (Tesseract, TesseractSponge or a regular polytope) into `dimension` 4..8 dimensions: its x y z w coordinates stay, the further ones are 0. The axes are x y z w v u t s (5D adds v, 6D u, 7D t, 8D s). `planes` is a list of `PlaneRotation(plane, angle)` with the plane named by two distinct axes that exist in `dimension`, e.g. `PlaneRotation(\"xv\", 30f)` (the angle is in DEGREES; for a positive angle the second axis turns towards the first, v towards x in `xv`, as w does in `Projection4DSpec.rotXW`), applied in the order written: the first plane turns first, and the result depends on the order. An object lies in x y z w, so a plane of axes beyond w alone (vu, ...) turns nothing until an earlier plane (xv, wv, ...) has moved the object into them. The projection to 3D has one perspective stage per dropped axis, the first dropping the highest axis; a stage scales a point by (eye - screen) / (eye - c), c the coordinate it drops, so the stages compound: with the default eye 3 and screen 1.5 a flat object is at 0.5^(dimension - 3) of its `size`, half again per extra dimension -- enlarge `size`, or lower `screen`, to compensate. `stages` may list one `ProjectionStage(eye, screen)` per stage (dimension - 3 of them); empty, every stage uses `eye` and `screen`. Keep each eye above the extent of the lifted object along the axis it drops: faces of a 4D object reaching an eye are not clipped and distort (a Hypercube's are left out), edge tubes with such an endpoint are left out. A `ProjectionSpec` is rendered on the CPU through the chain: an animation rebuilds the object every frame, a sponge needs a whole `level`, the IFS types (Menger4D, PentachoronGasket, HexadecachoronGasket) take a `Projection4DSpec` only, and the render window's Shift+drag and Shift+scroll (eye) leave it alone (the log says so once). The object's `scale` applies before the lift, so a scaled 4D object can be lifted into 5D or more. `ProjectionSpec(4, ...)` is the 4D view with the planes in order: `Projection4DSpec(rotXW = a, rotYW = b, rotZW = c)` equals planes zw c, yw b, xw a, in that order (menger#162; example: TesseractToPenteract).",
     "Hypercube: `Hypercube(dimension = N)` is the cube of N = 4..8 dimensions (4 the tesseract, 5 the penteract, 6 the hexeract, ...) with 2^N vertices, N * 2^(N-1) edges and C(N,2) * 2^(N-2) square faces; `size` is its edge length, its centre is `pos`. It takes a `ProjectionSpec` of `dimension` N or more, as `projection = Some(...)`; absent, `ProjectionSpec(N)` with its defaults. A cube of fewer dimensions than the view is lifted into it with zero coordinates, so planes using the extra axes act on it. It is rendered on the CPU and rebuilt for every frame of an animation; a face or edge tube with a vertex at or behind a stage's eye is left out, the rest is drawn. With `edgeRadius`/`edgeMaterial` it has one tube per edge: 1024 on an 8-cube, which the renderer's instance limit is raised for. Hypercube is DSL-only: the command line has only the 4D `tesseract` (menger#163; example: HexeractTurning).",
+    "HypercubeSponge: `HypercubeSponge(dimension = N, spongeType, level, maxCentreCoordinates = k)` is the Menger sponge of N = 4..8 dimensions, built from the N-cube by splitting every axis in thirds, `level` times over. `VolumeRemoving` keeps the sub-cubes with at most k coordinates in the middle third: k = 1 (default) is rule A, the generalisation of the TesseractSponge, k = N - 2 is rule B, which removes only the middle cell and its axis neighbours, and k may be 1..N - 1. `SurfaceSubdividing` is rule S: every square face splits into nine and its middle one is replaced by walls one square deep around a hole, along each of the N - 2 normals of the face; with a `Film` material it looks calmer than the volume sponge. Level 0 is the n-cube with the same view and size, so an animation can hand over to `Hypercube(N)` there (the sponge itself has no edge tubes). The upper limit of `level` per dimension at k = 1, at today's 16000000-triangle budget, is VolumeRemoving (N=4: 3, N=5: 2, N=6: 2, N=7: 1, N=8: 1); SurfaceSubdividing (N=4: 4, N=5: 3, N=6: 3, N=7: 2, N=8: 2): a level above it is rejected when the object is made. A whole level costs 2 triangles per face (surface, N = 5, level 2: 28,160 faces). A level within the limit still has to fit the scene's budget, which is checked when the scene loads: the limit comes from a cheap upper bound of the faces, so the check counts the faces exactly where the bound is not enough, and refuses a scene over the budget with the level that fits (a larger k keeps far more faces: a level that fits at k = 1 may not at k = 3). It takes a `ProjectionSpec` of dimension N or more as `projection = Some(...)` (absent: `ProjectionSpec(N)`) and a `Scale[N]` as `scale`. It is rendered on the CPU: the unprojected sponge is built once and kept, so an animation that only turns, scales or re-views it projects it again each frame, and one that changes the level builds each whole level once. A fractional level fades the new holes in over the caps of the lower level (opaque materials) or mixes the two whole levels (refractive ones), as the 4D sponges do, and is allowed with a `ProjectionSpec`. Glass refracts through the many dense internal walls of levels 2 and up and shows a mosaic of overlapping faces: prefer an opaque material for them. DSL-only (the command line has the 4D sponges); no edge tubes (menger#166; example: PenteractSpongeBreath).",
     "Procedural colouring (`proceduralType`) is evaluated at the hit point's world position (11 xyz_rgb_local: in the object's own box). For a 4D object that is the projected 3D position, after `projection` and `pos`, so the colours follow the projected shape and change when the 4D rotation changes (usability review 2026-09, session 2, F43); its box is taken from `size` before projection, so xyz_rgb_local only approximately spans 0..1 on a 4D object.",
     "Shadows of transparent objects: `RenderSettings(transparentShadows = ...)` is `Auto` by default, which makes a transparent object cast the colour seen through it when one is tinted or procedurally coloured -- e.g. rainbow shadows of a glass object with xyz_rgb_local (usability review 2026-10, session 3, F67; session 5, F111). `true` turns it on for every transparent object, `false` keeps shadows opaque. A scene without `render = Some(RenderSettings(...))` behaves as `Auto`. `caustics` turns transparent shadows on in any case.",
     "Image textures and texture maps (`texture`, `videoTexture`, `normalMap`, `roughnessMap`) need surface UV coordinates. 4D objects, edge tubes (`edgeRadius`), a `Cylinder`, curves and an L-system's branches have no UV coordinates, so these fields have no effect on them; use a material colour or a `proceduralType` there instead.",
@@ -860,6 +863,12 @@
           "default": "Vec3(0.0,0.0,0.0)",
           "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`.",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -954,7 +963,142 @@
           "default": "Vec3(0.0,0.0,0.0)",
           "description": "3D Euler angles in radians, applied after projection; rotations in N dimensions go in `projection`.",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[?]>",
+          "default": "None",
+          "description": "One factor >= 0 per axis, `Scale[N]` for the cube's dimension N (a wrong count is rejected), applied after `size`; 0 collapses an axis, the last factor is the extrusion along the newest axis: Hypercube(n) with the last factor 0 is the Hypercube(n - 1). See the hand-over rule in conventions."
         }
+      ]
+    },
+    {
+      "name": "HypercubeSponge",
+      "fields": [
+        {
+          "name": "dimension",
+          "type": "int",
+          "default": null,
+          "description": "Number of dimensions N, 4 to 8; see conventions for the highest level of each.",
+          "min": 4,
+          "max": 8
+        },
+        {
+          "name": "spongeType",
+          "type": "menger.dsl.TesseractSpongeType",
+          "default": null,
+          "description": "VolumeRemoving keeps the sub-cubes with at most `maxCentreCoordinates` middle coordinates (rule A for 1); SurfaceSubdividing is rule S, walls one square deep around the holes."
+        },
+        {
+          "name": "level",
+          "type": "float",
+          "default": null,
+          "description": "0 is the n-cube; the maximum depends on the dimension and the variant (see conventions); a fractional level fades the new holes in.",
+          "min": 0,
+          "max": 3,
+          "limitsBy": {
+            "field": "spongeType",
+            "values": {
+              "VolumeRemoving": {
+                "min": 0,
+                "max": 3,
+                "warnAt": 3
+              },
+              "SurfaceSubdividing": {
+                "min": 0,
+                "max": 4,
+                "warnAt": 4
+              }
+            }
+          }
+        },
+        {
+          "name": "maxCentreCoordinates",
+          "type": "int",
+          "default": "1",
+          "description": "k, 1..N-1: the most middle-third coordinates a kept sub-cube may have; 1 = rule A (default), N-2 = rule B. Higher k keeps more and costs far more faces, so a level that fits at k = 1 may not at k = 3.",
+          "min": 1,
+          "max": 7
+        },
+        {
+          "name": "pos",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)"
+        },
+        {
+          "name": "material",
+          "type": "scala.Option<menger.dsl.Material>",
+          "default": "None"
+        },
+        {
+          "name": "color",
+          "type": "scala.Option<menger.dsl.Color>",
+          "default": "None",
+          "description": "Tints the material's RGB; alpha (transparency) is preserved."
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "ior",
+          "type": "float",
+          "default": "1.0"
+        },
+        {
+          "name": "texture",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "videoTexture",
+          "type": "scala.Option<menger.video.VideoTexture>",
+          "default": "None"
+        },
+        {
+          "name": "normalMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "roughnessMap",
+          "type": "scala.Option<java.lang.String>",
+          "default": "None"
+        },
+        {
+          "name": "proceduralType",
+          "type": "int",
+          "default": "0",
+          "description": "Built-in procedural texture, one of exactly these presets (structured list: the manifest's `proceduralPresets`): 0 none (default). Modulating -- the material's own colour, varied in brightness by the pattern: 1 value_noise, 2 fbm, 3 worley, 4 gradient, 5 wood, 6 marble, 7 layered_noise, 10 triplanar. Replacing -- the pattern's colour instead of the material's: 8 xyz_rgb ((|x|, |y|, |z| mod 1) of the world position as RGB, mirrored at 0 on each axis), 9 heatmap (a blue-to-red noise gradient), 11 xyz_rgb_local (the position inside the object's own box, x, y, z each 0..1 -> R, G, B: every colour once over the object at scale 1, following its position, size and rotation, no mirroring -- use it for \"local\" or \"every colour once\" colouring, never move the object for it (usability review 2026-10, session 3, F63). Black (0, 0, 0) is the box's min-x, min-y, min-z corner (left, bottom, back for an unrotated object) and white the opposite corner, so a camera in the +x +y +z octant sees white nearest and no black (usability review 2026-10, session 5, F110)). A preset belongs to the look of the material it imitates: swapping the material (e.g. wood to aluminium) drops a pattern like wood."
+        },
+        {
+          "name": "proceduralScale",
+          "type": "float",
+          "default": "1.0",
+          "description": "Multiplies the world position before the pattern is evaluated (higher = smaller, more frequent pattern). One pattern period across an object needs about 1 / size."
+        },
+        {
+          "name": "projection",
+          "type": "scala.Option<menger.spec.ProjectionSpec>",
+          "default": "None"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[?]>",
+          "default": "None",
+          "description": "One factor >= 0 per axis, `Scale[N]` for the sponge's dimension N (a wrong count is rejected), applied after `size`."
+        },
+        {
+          "name": "rotation",
+          "type": "menger.dsl.Vec3",
+          "default": "Vec3(0.0,0.0,0.0)",
+          "description": "3D Euler angles in radians, applied after projection; rotations in N dimensions go in `projection`.",
+          "unit": "radians"
+        }
+      ],
+      "traits": [
+        "holed"
       ]
     },
     {
@@ -1037,6 +1181,12 @@
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -1120,6 +1270,12 @@
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -1203,6 +1359,12 @@
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -1286,6 +1448,12 @@
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -1369,6 +1537,12 @@
           "type": "menger.dsl.Vec3",
           "default": "Vec3(0.0,0.0,0.0)",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ]
     },
@@ -1485,6 +1659,12 @@
           "default": "Vec3(0.0,0.0,0.0)",
           "description": "3D Euler angles in radians, applied after projection; 4D rotations go in `projection`.",
           "unit": "radians"
+        },
+        {
+          "name": "scale",
+          "type": "scala.Option<menger.common.Vector.Scale[N]>",
+          "default": "None",
+          "description": "Four factors `Scale[4](x, y, z, w)`, each >= 0, applied after `size` and before the 4D rotation; 0 collapses an axis, the last factor is the extrusion along w: 0 flattens the object to 3D, animating it 0 -> 1 grows it out of that. See the hand-over rule in conventions."
         }
       ],
       "traits": [
@@ -2179,11 +2359,6 @@
           "type": "float",
           "default": "0.0",
           "unit": "degrees"
-        },
-        {
-          "name": "wScale",
-          "type": "float",
-          "default": "1.0"
         }
       ]
     },

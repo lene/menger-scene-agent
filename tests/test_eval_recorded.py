@@ -183,7 +183,7 @@ def test_every_recorded_case_has_its_validator_results():
 def test_the_recorded_validator_results_answer_the_replay():
     case = copy.deepcopy(SPONGE)
     case["turns"][0]["validator"] = [{"exit": 1, "result": {
-        "tag": "lint-findings", "messages": [], "schemaVersion": "1.2.0",
+        "tag": "lint-findings", "messages": [], "schemaVersion": "2.0.0",
         "findings": [{"invariant": "scene-budget", "message": "over budget"}]}}]
     problems = run_case(case, MANIFEST, CORPUS).problems
     assert any("tag lint_findings" in p for p in problems), problems

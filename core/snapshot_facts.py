@@ -52,6 +52,30 @@ def colour_replacing_procedurals(manifest: dict) -> set[int]:
     return {p["id"] for p in manifest.get("proceduralPresets", []) if p.get("effect") == "replaces"}
 
 
+DEFAULT_AXES = tuple("xyzwvuts")
+_AXES_SENTENCE = re.compile(r"The axes are ((?:[a-z] )+[a-z])\b")
+
+
+def axis_letters(manifest: dict) -> tuple[str, ...]:
+    """The axis letters in order (x y z w v u t s), from the manifest's nD view convention;
+    the default order if that sentence is not there."""
+    for text in manifest.get("conventions", []):
+        found = _AXES_SENTENCE.search(text)
+        if found:
+            return tuple(found.group(1).split())
+    return DEFAULT_AXES
+
+
+def is_scaled(scale: Optional[Sequence[float]]) -> bool:
+    """A missing `scale` is all ones (the identity)."""
+    return any(abs(float(f) - 1.0) > 1e-9 for f in scale or ())
+
+
+def scale_text(scale: Sequence[float], axes: Sequence[str] = DEFAULT_AXES) -> str:
+    """"x 1, y 1, z 1, w 0.5": a factor per axis."""
+    return ", ".join(f"{axis} {_num(float(f))}" for axis, f in zip(axes, scale))
+
+
 def material_name(material: Optional[dict], manifest: dict) -> str:
     """The preset whose non-colour values the material has (a tinted Glass is still Glass),
     else "custom"; plus its colour, alpha and emission."""
@@ -163,9 +187,11 @@ def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
     }
     if proc:
         fields["procedural scale"] = o.get("proceduralScale")
+    if is_scaled(o.get("scale")):
+        fields["scale"] = scale_text(o["scale"], axis_letters(manifest))
     projection = o.get("projection")
     if projection:
-        for key in ("eyeW", "screenW", "rotXW", "rotYW", "rotZW", "wScale"):
+        for key in ("eyeW", "screenW", "rotXW", "rotYW", "rotZW"):
             fields[f"4D {key}"] = projection.get(key)
     return {k: v for k, v in fields.items() if v is not None}
 
@@ -256,7 +282,7 @@ def _change_kind(key: tuple[str, str]) -> Optional[str]:
         return "pos"
     if name in ("material", "colour"):
         return "material"
-    if name.startswith("4D "):
+    if name.startswith("4D ") or name == "scale":
         return "projection"
     return None
 
@@ -389,7 +415,7 @@ def same_material_edge_findings(after: list[dict], prompt: str) -> list[str]:
     ]
 
 
-PROJECTION_KEYS = ("rotXW", "rotYW", "rotZW", "eyeW", "wScale")
+PROJECTION_KEYS = ("rotXW", "rotYW", "rotZW", "eyeW")
 _ROTATION_KEYS = PROJECTION_KEYS[:3]
 
 
@@ -398,7 +424,8 @@ def _snapshot_t(snapshot: dict) -> float:
 
 
 def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str, dict]], bool]:
-    """Per projected object, its DSL name and its 4D values at `t`, and whether they are
+    """Per projected object, its DSL name and its 4D values at `t` (plus its per-axis `scale`
+    under "scale", only when it is not all ones), and whether they are
     interpolated: the validator samples an animation 25 times, so the values come from the two
     snapshots around t (session 6 read the sample at t = 2 for a window paused at 2.16, 9.6
     degrees off; msa#49). Outside the sampled range, the end snapshot. `[]` without snapshots."""
@@ -419,9 +446,18 @@ def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str,
         start = float(pa.get(key) or 0)
         return start + (float(pb.get(key) or 0) - start) * share
 
+    def scale_at(oa: dict, ob: dict) -> dict:
+        a, b = oa.get("scale"), ob.get("scale")
+        if not (is_scaled(a) or is_scaled(b)):
+            return {}
+        axes = len(a or b or [])
+        start, end = ([float(f) for f in s] if s else [1.0] * axes for s in (a, b))
+        return {"scale": [x + (y - x) * share for x, y in zip(start, end)]}
+
     return [
         (str(oa.get("dslType") or oa.get("objectType")),
-         {k: at_t(oa["projection"], ob["projection"], k) for k in PROJECTION_KEYS})
+         {**{k: at_t(oa["projection"], ob["projection"], k) for k in PROJECTION_KEYS},
+          **scale_at(oa, ob)})
         for oa, ob in zip(first, second)
     ], share != 0.0
 
@@ -460,7 +496,7 @@ def kept_view_findings(t: float, shown: list[tuple[str, dict]], after: list[dict
         "unset rotation explicitly: its default is not 0"
         for (name, values), (_, got) in zip(shown, actual)
         for key, want in values.items()
-        if abs(shift(key, want, got[key])) > _SHOWN_TOLERANCE
+        if key in PROJECTION_KEYS and abs(shift(key, want, got[key])) > _SHOWN_TOLERANCE
     ]
 
 

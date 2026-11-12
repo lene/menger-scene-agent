@@ -281,7 +281,7 @@ def test_full_corpus_has_no_lint_findings():
 
     corpus = json.load(open("reference/dsl-corpus.json"))
     scenes = corpus["scenes"]
-    assert len(scenes) == 38  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162), HexeractTurning (menger#163), SunKeyLight (menger#158)
+    assert len(scenes) == 41  # + CubeToTesseract (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162), HexeractTurning (menger#163), SunKeyLight (menger#158), PenteractFold (menger#164), PenteractSpongeBreath (menger#166), DimensionLadder (menger#160)
 
     for scene in scenes:
         findings = check_lint(scene["source"])

@@ -75,6 +75,10 @@ _QUALIFIED_REF_RE = re.compile(
     + r")(?:\s*\.\s*[A-Za-z_]\w*)+)"
 )
 _WHITESPACE_RE = re.compile(r"\s+")
+# A local value named like a package namespace (`val sun = Sun(...)`, then `sun.direction.x`)
+# shadows the package, so `sun.direction.x` is a member access, not a reference into `sun.*`
+# (menger#160's DimensionLadder). Not for `_root_.`: that names the package whatever is bound.
+_LOCAL_BINDING_RE = re.compile(r"\b(?:val|var|def)\s+(" + "|".join(_PACKAGE_NAMESPACES) + r")\b")
 
 # Names every Scala file sees without an import (`java.lang._`, `scala._`, `Predef`) that reach
 # the process, the environment, threads or reflection. Unqualified, they are invisible to the
@@ -160,10 +164,13 @@ def check_allowlist(scene_text: str) -> list[Finding]:
         return not any(span_start <= start < span_end for span_start, span_end in import_spans)
 
     seen_outside_imports: set[str] = set()
+    shadowed = {m.group(1) for m in _LOCAL_BINDING_RE.finditer(text)}
     for match in _QUALIFIED_REF_RE.finditer(text):
-        candidate = _WHITESPACE_RE.sub("", match.group(1)).removeprefix("_root_.")
+        written = _WHITESPACE_RE.sub("", match.group(1))
+        candidate = written.removeprefix("_root_.")
+        is_shadowed = candidate == written and candidate.split(".")[0] in shadowed
         if (not outside_imports(match.start()) or candidate in seen_outside_imports
-                or _is_allowed(candidate)):
+                or is_shadowed or _is_allowed(candidate)):
             continue
         seen_outside_imports.add(candidate)
         findings.append(

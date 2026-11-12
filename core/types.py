@@ -42,7 +42,11 @@ from gauntlet.types import Finding
 # menger#162) next to `Projection4DSpec`.
 # 2.2.0 adds the `Hypercube` object (the n-cube of 4 to 8 dimensions; menger#163) and the
 # `Sun` light (menger#158).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "2.2.0"
+# 3.0.0: `Projection4DSpec.wScale` removed, per-axis `scale` on the 4D objects and `Hypercube`,
+# the `HypercubeSponge` object (menger#164, #166). The result contract (validator result 2.0.0:
+# snapshots lose `projection.wScale`, gain an object `scale` and `maxCentreCoordinates`) is read
+# from `reference/process-result.json`, not from here.
+EXPECTED_MANIFEST_SCHEMA_VERSION = "3.0.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[

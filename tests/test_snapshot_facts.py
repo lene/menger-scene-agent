@@ -11,6 +11,7 @@ from core.snapshot_facts import (
     check_turn,
     material_name,
     snapshot_changes,
+    summarise,
     unrequested_changes,
 )
 
@@ -278,11 +279,51 @@ def test_objects_are_named_as_the_dsl_names_them_and_a_subtype_change_still_show
     assert changes == ["Sponge subtype: sponge-volume -> sponge-surface"]
 
 
+_TESSERACT = {"objectType": "tesseract", "dslType": "Tesseract", "pos": [0, 0, 0], "size": 1}
+
+
+def test_a_scaled_object_has_a_per_axis_scale_fact_with_the_manifests_axis_letters():
+    # menger manifest 3.0.0 / result 2.0.0: the object's `scale` replaces `projection.wScale`.
+    scaled = dict(_TESSERACT, scale=[1, 1, 1, 0.5])
+    hexeract = dict(_TESSERACT, dslType="Hypercube", scale=[1, 1, 1, 1, 0.25, 1])
+
+    assert summarise(_snap([scaled], []), _MANIFEST)[("Tesseract", "scale")] == "x 1, y 1, z 1, w 0.5"
+    assert (summarise(_snap([hexeract], []), _MANIFEST)[("Hypercube", "scale")]
+            == "x 1, y 1, z 1, w 1, v 0.25, u 1")
+    assert snapshot_changes(_snap([_TESSERACT], []), _snap([scaled], []), _MANIFEST) == [
+        "Tesseract scale: none -> x 1, y 1, z 1, w 0.5"]
+
+
+def test_an_unscaled_object_has_no_scale_fact():
+    all_ones = dict(_TESSERACT, scale=[1, 1, 1, 1])
+
+    assert ("Tesseract", "scale") not in summarise(_snap([_TESSERACT], []), _MANIFEST)
+    assert ("Tesseract", "scale") not in summarise(_snap([all_ones], []), _MANIFEST)
+    assert snapshot_changes(_snap([_TESSERACT], []), _snap([all_ones], []), _MANIFEST) == []
+
+
+def test_the_axis_letters_come_from_the_manifest_with_a_fallback():
+    from core.snapshot_facts import axis_letters
+
+    assert axis_letters(_MANIFEST) == tuple("xyzwvuts")
+    assert axis_letters({"conventions": ["The axes are a b c d e."]}) == tuple("abcde")
+    assert axis_letters({}) == tuple("xyzwvuts")
+
+
+def test_an_unrequested_scale_change_is_reported_unless_the_prompt_asks_for_a_projection():
+    before = _snap([dict(_TESSERACT, scale=[1, 1, 1, 0.25])], [])
+    after = _snap([dict(_TESSERACT, scale=[1, 1, 1, 0.5])], [])
+
+    assert unrequested_changes(before, after, "make it blue", _MANIFEST) == [
+        "also changed Tesseract scale: x 1, y 1, z 1, w 0.25 -> x 1, y 1, z 1, w 0.5"]
+    assert unrequested_changes(before, after, "rotate it a little", _MANIFEST) == []
+
+
 def test_same_material_between_4d_objects_names_missing_edge_tubes():
     # Session 5 (F120, msa#53): the 24-cell got the sponge's Film but not its edge tubes.
     from core.snapshot_facts import same_material_edge_findings
 
-    projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": 10, "rotZW": 0, "wScale": 1}
+    projection = {"eyeW": 3, "screenW": 1.5, "rotXW": 0, "rotYW": 10, "rotZW": 0}
     after = [{"t": 0, "objects": [
         {"objectType": "tesseract-sponge-volume", "dslType": "TesseractSponge",
          "edgeRadius": 0.005, "edgeMaterial": None, "projection": projection},
@@ -303,7 +344,7 @@ def test_same_material_between_4d_objects_names_missing_edge_tubes():
 
 
 def _rotation(t: float, rot_xw: float, rot_yw: float = 10.0) -> dict:
-    projection = {"rotXW": rot_xw, "rotYW": rot_yw, "rotZW": 0, "eyeW": 3, "wScale": 1}
+    projection = {"rotXW": rot_xw, "rotYW": rot_yw, "rotZW": 0, "eyeW": 3}
     return {"t": t, "objects": [{"dslType": "TesseractSponge", "projection": projection}]}
 
 
@@ -313,8 +354,7 @@ def test_keeping_the_view_finds_a_value_the_scene_no_longer_gives_at_the_windows
     # rotXW correctly but left rotYW unset, whose default is 10.
     from core.snapshot_facts import kept_view_findings
 
-    shown = [("TesseractSponge", {"rotXW": 145.44, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0,
-                                  "wScale": 1.0})]
+    shown = [("TesseractSponge", {"rotXW": 145.44, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0})]
     kept = [_rotation(5.0, 144.0), _rotation(5.4167, 159.0)]
 
     findings = kept_view_findings(5.04, shown, kept)
@@ -324,8 +364,7 @@ def test_keeping_the_view_finds_a_value_the_scene_no_longer_gives_at_the_windows
     assert "add 15 to TesseractSponge's rotYW" in findings[0]
     # Session 155a99f8: the other way round, rotXW left unshifted by the window's -36.
     unshifted = [_rotation(4.5833, 165.0, 25.0), _rotation(5.0, 180.0, 25.0)]
-    shown_e = [("TesseractSponge", {"rotXW": 132.48, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0,
-                                    "wScale": 1.0})]
+    shown_e = [("TesseractSponge", {"rotXW": 132.48, "rotYW": 25.0, "rotZW": 0.0, "eyeW": 3.0})]
     assert "add -36 to TesseractSponge's rotXW" in kept_view_findings(4.68, shown_e, unshifted)[0]
     right = [_rotation(5.0, 144.0, 25.0), _rotation(5.4167, 159.0, 25.0)]
     assert kept_view_findings(5.04, shown, right) == []
