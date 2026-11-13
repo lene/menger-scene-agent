@@ -1,0 +1,8 @@
+# Where the third-party and generated assets of this repository came from.
+# Format and checker: shared/standards/README.md, section "Provenance".
+entries:
+  - path: poc-run/turn*-render.png
+    source: this repository; rendered by menger-app from poc-run/turn1-generated.scala and poc-run/turn2-refined.scala (harness PoC spike, commit 7cbe961, see spike-report.md)
+    licence: Apache-2.0
+    author: menger-scene-agent contributors
+    kind: generated
