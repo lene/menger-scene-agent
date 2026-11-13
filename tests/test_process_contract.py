@@ -38,6 +38,17 @@ def test_a_result_without_a_schema_version_points_at_the_image():
     assert "rebuild it" in outcome.message
 
 
+def test_a_1_x_result_is_refused_by_the_agent_reading_2_x():
+    # menger's result 2.0.0 dropped `projection.wScale` from the snapshots: a 1.x result has the
+    # old shape, so it is refused, through the validator's parser too.
+    assert RESULT_SCHEMA_VERSION.split(".")[0] == "2"
+    assert "reads 2.x" in (result_problem("ok", "1.5.0", 0) or "")
+    outcome = _parse_stdout(_result("ok", schemaVersion="1.5.0"), "", EXIT_CODES["ok"])
+    assert isinstance(outcome, ValidationError)
+    assert outcome.kind == "malformed_output"
+    assert "1.5.0" in outcome.message
+
+
 def test_a_newer_major_is_refused_and_a_newer_minor_accepted():
     major = int(RESULT_SCHEMA_VERSION.split(".")[0])
     assert result_problem("ok", f"{major + 1}.0.0", 0) is not None

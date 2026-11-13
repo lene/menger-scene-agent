@@ -442,6 +442,9 @@ _ASKED_FOR = {
                *_WINDOW_PHRASES),
     "projection": ("rotate", "rotation", "turn", "spin", "tilt", "4d", "projection",
                    *_WINDOW_PHRASES),
+    # The per-axis `scale` of a 4D/nD object (menger#164): an extrusion along the newest axis.
+    "scale": ("scale", "extrude", "extrusion", "grow", "flatten", "stretch", "fold", "unfold",
+              "collapse"),
 }
 
 

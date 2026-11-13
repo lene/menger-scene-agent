@@ -60,20 +60,36 @@ def axis_letters(manifest: dict) -> tuple[str, ...]:
     """The axis letters in order (x y z w v u t s), from the manifest's nD view convention;
     the default order if that sentence is not there."""
     for text in manifest.get("conventions", []):
-        found = _AXES_SENTENCE.search(text)
+        found = _AXES_SENTENCE.search(text) if isinstance(text, str) else None
         if found:
             return tuple(found.group(1).split())
     return DEFAULT_AXES
 
 
+# A missing `scale` is all ones (the identity): every comparison below pads it with ones.
+_SCALE_IDENTITY_TOLERANCE = 1e-9
+# What a shown scale may differ from the scene's, per axis (a factor, not degrees).
+_SHOWN_SCALE_TOLERANCE = 0.01
+
+
 def is_scaled(scale: Optional[Sequence[float]]) -> bool:
-    """A missing `scale` is all ones (the identity)."""
-    return any(abs(float(f) - 1.0) > 1e-9 for f in scale or ())
+    return any(abs(float(f) - 1.0) > _SCALE_IDENTITY_TOLERANCE for f in scale or ())
+
+
+def _padded(scale: Optional[Sequence[float]], length: int) -> list[float]:
+    """`scale` as floats, with ones for a missing scale or missing trailing axes."""
+    given = [float(f) for f in scale or ()]
+    return given + [1.0] * (length - len(given))
 
 
 def scale_text(scale: Sequence[float], axes: Sequence[str] = DEFAULT_AXES) -> str:
-    """"x 1, y 1, z 1, w 0.5": a factor per axis."""
-    return ", ".join(f"{axis} {_num(float(f))}" for axis, f in zip(axes, scale))
+    """"x 1, y 1, z 1, w 0.5": a factor per axis. The axis letters are padded with the default
+    order, then numbers, so no factor is dropped."""
+    letters = [*axes, *DEFAULT_AXES[len(axes):]]
+    return ", ".join(
+        f"{letters[i] if i < len(letters) else i + 1} {_num(float(f))}"
+        for i, f in enumerate(scale)
+    )
 
 
 def material_name(material: Optional[dict], manifest: dict) -> str:
@@ -166,7 +182,23 @@ def _labels(objects: list[dict]) -> list[str]:
     return labels
 
 
-def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
+def _scale_lengths(*scenes: Sequence[dict]) -> dict[str, int]:
+    """Per object label, the number of `scale` factors where the object is scaled in any
+    snapshot of any scene: those objects get a scale value everywhere (ones where it is
+    missing), so a scale added or dropped between turns is a change, not an absence."""
+    lengths: dict[str, int] = {}
+    for snapshots in scenes:
+        for snap in snapshots:
+            objects = snap.get("objects") or []
+            for label, o in zip(_labels(objects), objects):
+                if is_scaled(o.get("scale")):
+                    lengths[label] = max(lengths.get(label, 0), len(o["scale"]))
+    return lengths
+
+
+def _object_fields(
+    o: dict, manifest: dict, axes: Sequence[str], scale_length: int
+) -> dict[str, object]:
     names = procedural_names(manifest)
     proc = int(o.get("proceduralType", 0))
     fields: dict[str, object] = {
@@ -187,8 +219,8 @@ def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
     }
     if proc:
         fields["procedural scale"] = o.get("proceduralScale")
-    if is_scaled(o.get("scale")):
-        fields["scale"] = scale_text(o["scale"], axis_letters(manifest))
+    if scale_length:
+        fields["scale"] = scale_text(_padded(o.get("scale"), scale_length), axes)
     projection = o.get("projection")
     if projection:
         for key in ("eyeW", "screenW", "rotXW", "rotYW", "rotZW"):
@@ -196,12 +228,19 @@ def _object_fields(o: dict, manifest: dict) -> dict[str, object]:
     return {k: v for k, v in fields.items() if v is not None}
 
 
-def summarise(snapshots: list[dict], manifest: dict) -> dict[tuple[str, str], str]:
+def summarise(
+    snapshots: list[dict], manifest: dict, scale_lengths: Optional[dict[str, int]] = None
+) -> dict[tuple[str, str], str]:
     """Every value of a scene, keyed (subject, field) -- subject "scene", "camera", an object
     label ("Sponge", "Icositetrachoron #2"), a plane ("plane #2") or a light ("Directional light") -- summarised over
-    its checked times. Objects are matched by type and order between scenes."""
+    its checked times. Objects are matched by type and order between scenes. `scale_lengths`
+    (`_scale_lengths` over both scenes of a comparison) makes a scale of one scene show as all
+    ones in the other."""
     if not snapshots:
         return {}
+    axes = axis_letters(manifest)
+    if scale_lengths is None:
+        scale_lengths = _scale_lengths(snapshots)
     result: dict[tuple[str, str], list[object]] = {}
 
     def put(subject: str, name: str, value: object) -> None:
@@ -218,7 +257,9 @@ def summarise(snapshots: list[dict], manifest: dict) -> dict[tuple[str, str], st
             put("scene", "render settings", render_settings)
         objects = snap.get("objects") or []
         for label, o in zip(_labels(objects), objects):
-            for name, value in _object_fields(o, manifest).items():
+            for name, value in _object_fields(
+                o, manifest, axes, scale_lengths.get(label, 0)
+            ).items():
                 put(label, name, value)
         # Planes (result schema 1.2.0, menger#92): a plane change used to be missing from the
         # change list, and the readback guessed.
@@ -248,10 +289,17 @@ def _key_text(key: tuple[str, str]) -> str:
     return name if subject == "scene" else f"{subject} {name}"
 
 
+def _summaries(
+    before: list[dict], after: list[dict], manifest: dict
+) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], str]]:
+    lengths = _scale_lengths(before, after)
+    return summarise(before, manifest, lengths), summarise(after, manifest, lengths)
+
+
 def snapshot_changes(before: list[dict], after: list[dict], manifest: dict) -> list[str]:
     """What changed between two turns' evaluated scenes, with values: "<what>: old -> new",
     "added <object> (...)", "removed <object>". Empty means no evaluated value changed."""
-    old, new = summarise(before, manifest), summarise(after, manifest)
+    old, new = _summaries(before, after, manifest)
     old_subjects = {s for s, _ in old}
     new_subjects = {s for s, _ in new}
     added, gone = new_subjects - old_subjects, old_subjects - new_subjects
@@ -282,8 +330,10 @@ def _change_kind(key: tuple[str, str]) -> Optional[str]:
         return "pos"
     if name in ("material", "colour"):
         return "material"
-    if name.startswith("4D ") or name == "scale":
+    if name.startswith("4D "):
         return "projection"
+    if name == "scale":
+        return "scale"
     return None
 
 
@@ -295,7 +345,7 @@ def unrequested_changes(
     moved into a local val) is no change, so it is not reported."""
     from core.scene_facts import _asked_for  # same package; the keyword lists live there
 
-    old, new = summarise(before, manifest), summarise(after, manifest)
+    old, new = _summaries(before, after, manifest)
     warnings = []
     for key in sorted(set(old) & set(new)):
         kind = _change_kind(key)
@@ -423,9 +473,28 @@ def _snapshot_t(snapshot: dict) -> float:
     return float(snapshot.get("t") or 0.0)
 
 
+def _carries_view(o: dict) -> bool:
+    """A 4D/nD view (`projection`), or a scale that a window shows and a kept scene must keep."""
+    return isinstance(o.get("projection"), dict) or is_scaled(o.get("scale"))
+
+
+def _scale_between(a: Optional[Sequence[float]], b: Optional[Sequence[float]], share: float) -> dict:
+    """The interpolated `scale` of an object between two snapshots, as `{"scale": [...]}`, or
+    `{}` when it is all ones in both. A different number of factors is a different object: the
+    newer scale, not interpolated."""
+    if not (is_scaled(a) or is_scaled(b)):
+        return {}
+    if a and b and len(a) != len(b):
+        return {"scale": [float(f) for f in b]}
+    length = len(a or b or ())
+    start, end = _padded(a, length), _padded(b, length)
+    return {"scale": [x + (y - x) * share for x, y in zip(start, end)]}
+
+
 def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str, dict]], bool]:
-    """Per projected object, its DSL name and its 4D values at `t` (plus its per-axis `scale`
-    under "scale", only when it is not all ones), and whether they are
+    """Per object that has a view or a scale, its DSL name and its 4D values at `t`
+    (`PROJECTION_KEYS`, only for an object with a projection) plus its per-axis `scale` under
+    "scale" (only when it is not all ones), and whether they are
     interpolated: the validator samples an animation 25 times, so the values come from the two
     snapshots around t (session 6 read the sample at t = 2 for a window paused at 2.16, 9.6
     degrees off; msa#49). Outside the sampled range, the end snapshot. `[]` without snapshots."""
@@ -436,9 +505,7 @@ def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str,
     b = ([s for s in ordered if _snapshot_t(s) >= t] or ordered[-1:])[0]
     span = _snapshot_t(b) - _snapshot_t(a)
     share = (t - _snapshot_t(a)) / span if span > 0 else 0.0
-    first, second = (
-        [o for o in s.get("objects", []) if isinstance(o.get("projection"), dict)] for s in (a, b)
-    )
+    first, second = (s.get("objects") or [] for s in (a, b))
     if len(second) != len(first):
         second, share = first, 0.0
 
@@ -446,19 +513,18 @@ def projections_at(snapshots: Sequence[dict], t: float) -> tuple[list[tuple[str,
         start = float(pa.get(key) or 0)
         return start + (float(pb.get(key) or 0) - start) * share
 
-    def scale_at(oa: dict, ob: dict) -> dict:
-        a, b = oa.get("scale"), ob.get("scale")
-        if not (is_scaled(a) or is_scaled(b)):
-            return {}
-        axes = len(a or b or [])
-        start, end = ([float(f) for f in s] if s else [1.0] * axes for s in (a, b))
-        return {"scale": [x + (y - x) * share for x, y in zip(start, end)]}
+    def values(oa: dict, ob: dict) -> dict:
+        pa, pb = oa.get("projection"), ob.get("projection")
+        view = (
+            {k: at_t(pa or {}, pb or {}, k) for k in PROJECTION_KEYS}
+            if isinstance(pa, dict) or isinstance(pb, dict) else {}
+        )
+        return {**view, **_scale_between(oa.get("scale"), ob.get("scale"), share)}
 
     return [
-        (str(oa.get("dslType") or oa.get("objectType")),
-         {**{k: at_t(oa["projection"], ob["projection"], k) for k in PROJECTION_KEYS},
-          **scale_at(oa, ob)})
+        (str(oa.get("dslType") or oa.get("objectType")), values(oa, ob))
         for oa, ob in zip(first, second)
+        if _carries_view(oa) or _carries_view(ob)
     ], share != 0.0
 
 
@@ -476,28 +542,56 @@ def asks_to_keep_view(prompt: str) -> bool:
     return bool(_KEEP_VIEW_WORDS.search(prompt)) and not _NEW_ROTATION_WORDS.search(prompt)
 
 
-def kept_view_findings(t: float, shown: list[tuple[str, dict]], after: list[dict]) -> list[str]:
+def _kept_scale_finding(
+    name: str, t: float, want: Optional[Sequence[float]], got: Optional[Sequence[float]],
+    axes: Sequence[str],
+) -> list[str]:
+    length = max(len(want or ()), len(got or ()))
+    shown, actual = _padded(want, length), _padded(got, length)
+    if all(abs(x - y) <= _SHOWN_SCALE_TOLERANCE for x, y in zip(shown, actual)):
+        return []
+    return [
+        f"{name}: the window showed scale {scale_text(shown, axes)} at t = {_num(t)} s, but the "
+        f"scene now gives {scale_text(actual, axes)} there; set `scale` to what the window showed "
+        "(to the animated expression if it is animated, keeping its rate): an unset scale is "
+        "all ones"
+    ]
+
+
+def kept_view_findings(
+    t: float, shown: list[tuple[str, dict]], after: list[dict],
+    axes: Sequence[str] = DEFAULT_AXES,
+) -> list[str]:
     """After "keep them like that", the scene must give at the window's t what the window
     showed there. Session 6 follow-up (msa#49): the shown values became the animation's start
     (a 40 degree jump at the paused t), and then an unset rotYW, whose default is 10, dropped
-    the window's +15."""
-    actual, _ = projections_at(after, t)
-    if not shown or len(actual) != len(shown):
+    the window's +15. A shown `scale` is kept per axis, a missing one counting as all ones."""
+    if not shown:
         return []
+    remaining = list(projections_at(after, t)[0])
 
     def shift(key: str, want: float, got: float) -> float:
         diff = want - got
         return (diff + 180.0) % 360.0 - 180.0 if key in _ROTATION_KEYS else diff
 
-    return [
-        f"{name}: the window showed {key} {_num(want)} at t = {_num(t)} s, but the scene now gives "
-        f"{_num(got[key])} there; add {_num(round(shift(key, want, got[key]), 2))} to {name}'s "
-        f"{key} (to the animated expression if it is animated, keeping its rate), and write an "
-        "unset rotation explicitly: its default is not 0"
-        for (name, values), (_, got) in zip(shown, actual)
-        for key, want in values.items()
-        if key in PROJECTION_KEYS and abs(shift(key, want, got[key])) > _SHOWN_TOLERANCE
-    ]
+    findings = []
+    for name, values in shown:
+        # Matched by name in order; an object the scene no longer gives a view or a scale
+        # has no values at all (a dropped scale is all ones).
+        at = next((i for i, (other, _) in enumerate(remaining) if other == name), None)
+        got = remaining.pop(at)[1] if at is not None else {}
+        findings += [
+            f"{name}: the window showed {key} {_num(want)} at t = {_num(t)} s, but the scene now "
+            f"gives {_num(got[key])} there; add {_num(round(shift(key, want, got[key]), 2))} to "
+            f"{name}'s {key} (to the animated expression if it is animated, keeping its rate), "
+            "and write an unset rotation explicitly: its default is not 0"
+            for key, want in values.items()
+            if key in PROJECTION_KEYS and key in got
+            and abs(shift(key, want, got[key])) > _SHOWN_TOLERANCE
+        ]
+        if "scale" in values or "scale" in got:
+            findings += _kept_scale_finding(name, t, values.get("scale"), got.get("scale"), axes)
+    return findings
 
 
 _FLIGHT_WORDS = re.compile(r"\b(fly|flies|flight|flying|through|travel|tunnel|follow)\b", re.I)

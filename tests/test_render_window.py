@@ -16,6 +16,7 @@ from typing import Any, List, Optional
 
 import pytest
 
+from adapters.process_contract import RESULT_SCHEMA_VERSION
 from adapters.render_window import (
     LAUNCH_EVENTS,
     RELOAD_EVENTS,
@@ -276,7 +277,7 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
         "messages": ["render lock already held"],
         "findings": [],
         "scene": None,
-        "schemaVersion": "2.0.0",
+        "schemaVersion": RESULT_SCHEMA_VERSION,
     }
     fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
@@ -289,7 +290,7 @@ def test_lock_held_by_another_process_returns_typed_refused_rejection(monkeypatc
 
 
 def test_refused_with_no_previous_process_terminates_nothing(monkeypatch):
-    payload = {"tag": "refused", "messages": ["render lock already held"], "schemaVersion": "2.0.0"}
+    payload = {"tag": "refused", "messages": ["render lock already held"], "schemaVersion": RESULT_SCHEMA_VERSION}
     fake = FakePopen(returncode=2, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -319,7 +320,7 @@ def test_malformed_json_on_fast_exit_returns_typed_malformed_output_error(monkey
 def test_unexpected_tag_on_fast_exit_returns_typed_malformed_output_error(monkeypatch):
     # A fast exit reporting "ok" (or any tag other than "refused") is itself unexpected --
     # story 8's launcher never exits fast except to report `refused`.
-    payload = {"tag": "ok", "messages": [], "schemaVersion": "2.0.0"}
+    payload = {"tag": "ok", "messages": [], "schemaVersion": RESULT_SCHEMA_VERSION}
     fake = FakePopen(returncode=0, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -353,7 +354,7 @@ def test_valid_json_but_not_an_object_returns_typed_malformed_output_error(monke
 
 
 def test_missing_tag_field_returns_typed_malformed_output_error(monkeypatch):
-    payload = {"messages": ["something"], "schemaVersion": "2.0.0"}
+    payload = {"messages": ["something"], "schemaVersion": RESULT_SCHEMA_VERSION}
     fake = FakePopen(returncode=1, stdout=json.dumps(payload), still_running=False)
     _patch_popen(monkeypatch, fake)
 
@@ -797,6 +798,24 @@ def test_the_window_shows_a_scaled_objects_scale_in_place_of_wscale():
     assert "wScale" not in text
     unscaled = describe_window_state(_WINDOW_STATE, [snapshot(0, 1), snapshot(7, 1)])
     assert "scale" not in unscaled and "Tesseract: rotXW" in unscaled
+
+
+def test_the_window_shows_a_scaled_object_without_a_projection_with_the_manifests_axes():
+    from adapters.render_window import describe_window_state
+
+    def snapshot(t, e):
+        return {"t": t, "objects": [
+            {"dslType": "Hypercube", "projection": None, "scale": [1, 1, 1, 1, e]},
+            {"dslType": "Sphere", "projection": None}]}
+
+    manifest = {"conventions": ["The axes are a b c d e f."]}
+    snapshots = [snapshot(0, 0.0), snapshot(7, 1.0)]
+
+    text = describe_window_state(_WINDOW_STATE, snapshots, manifest)
+
+    assert "Hypercube: scale a 1, b 1, c 1, d 1, e 0.5" in text
+    assert "Sphere" not in text
+    assert "scale x 1, y 1, z 1, w 1, v 0.5" in describe_window_state(_WINDOW_STATE, snapshots)
 
 
 def test_a_window_state_of_another_major_is_not_read(tmp_path):

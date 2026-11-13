@@ -1660,6 +1660,55 @@ def test_value_changes_come_from_the_validator_snapshots(tmp_path, monkeypatch):
     assert store.current_snapshots() == _fixture("task2-002")["snapshots"]
 
 
+def _validator_with_inline_snapshots(monkeypatch, *snapshot_lists: list) -> None:
+    calls = []
+
+    def fake(*a, **kw):
+        calls.append(1)
+        snapshots = snapshot_lists[min(len(calls) - 1, len(snapshot_lists) - 1)]
+        return ValidationResult(tag="ok", messages=[], findings=[], snapshots=snapshots,
+                                camera_path=[])
+
+    monkeypatch.setattr(turn_module, "validate_scene", fake)
+    monkeypatch.setattr(turn_module, "semantic_readback", lambda *a, **kw: "a scene")
+
+
+def _hypercube_at(t: float, scale) -> dict:
+    return {"t": t, "camera": {"position": [0, 0, 5], "lookAt": [0, 0, 0]}, "lights": [],
+            "planes": [], "objects": [{"objectType": "n-cube", "dslType": "Hypercube",
+                                       "pos": [0, 0, 0], "size": 1, "projection": None,
+                                       "scale": scale}]}
+
+
+def test_keeping_the_view_repairs_a_scene_that_dropped_the_scale_the_window_shows(
+    tmp_path, monkeypatch
+):
+    # menger result 2.0.0: the window shows the object's `scale` (a Hypercube has no
+    # Projection4DSpec). "Keep them like that" must give it back at the window's t.
+    store = _make_store(tmp_path)
+    prior = "object A:\n  val scene = Scene()\n"
+    store.write_snapshots(store.accept(prior, "first"), [_hypercube_at(0, [1, 1, 1, 1, 0.5])])
+    dropped = [_hypercube_at(0, None), _hypercube_at(4, None)]
+    kept = [_hypercube_at(0, [1, 1, 1, 1, 0.5]), _hypercube_at(4, [1, 1, 1, 1, 0.5])]
+    _validator_with_inline_snapshots(monkeypatch, dropped, kept)
+    adapter = _SequenceAdapter([
+        "object A:\n  val scene = Scene() // kept, scale dropped\n",
+        "object A:\n  val scene = Scene() // kept, scale back\n",
+    ])
+    shown = [("Hypercube", {"scale": [1.0, 1.0, 1.0, 1.0, 0.5]})]
+
+    result = run_turn(
+        "ok, keep them like that", prior, _REAL_MANIFEST, VALID_CORPUS, adapter, store,
+        _SCRIPT_PATH, repair_rounds=2, window_shown=(2.0, shown),
+    )
+
+    assert result.tag == "accepted"
+    assert len(adapter.requests) == 2
+    assert "the window showed scale x 1, y 1, z 1, w 1, v 0.5 at t = 2 s" in (
+        adapter.requests[1].user_prompt)
+    assert "the scene now gives x 1, y 1, z 1, w 1, v 1 there" in adapter.requests[1].user_prompt
+
+
 def test_a_scene_check_finding_gets_a_repair_round(tmp_path, monkeypatch):
     # Session 4, 4.9: green under a kept xyz_rgb_local; the repair drops the procedural. A colour
     # request: a glow over the pattern is kept and marked NOT DONE (session 6, msa#51).

@@ -45,7 +45,8 @@ from gauntlet.types import Finding
 # 3.0.0: `Projection4DSpec.wScale` removed, per-axis `scale` on the 4D objects and `Hypercube`,
 # the `HypercubeSponge` object (menger#164, #166). The result contract (validator result 2.0.0:
 # snapshots lose `projection.wScale`, gain an object `scale` and `maxCentreCoordinates`) is read
-# from `reference/process-result.json`, not from here.
+# from `reference/process-result.json`, not from here. The agent ignores `maxCentreCoordinates`
+# and teaches no `HypercubeSponge` vocabulary until G11 (msa#67).
 EXPECTED_MANIFEST_SCHEMA_VERSION = "3.0.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 

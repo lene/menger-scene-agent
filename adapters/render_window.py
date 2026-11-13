@@ -45,7 +45,7 @@ from adapters.process_contract import (
 )
 from adapters.scene_validator import REFERENCE_DSL_REVISION
 from core.safe_text import safe_text
-from core.snapshot_facts import projections_at, scale_text
+from core.snapshot_facts import DEFAULT_AXES, axis_letters, projections_at, scale_text
 
 # Bounds how much of a malformed/unexpected stdout payload is echoed back in a
 # RenderWindowError's message, so a pathological or adversarial response can't blow up the
@@ -286,10 +286,13 @@ def _vec(value: object) -> str:
     return "(" + ", ".join(f"{round(float(v), 3):g}" for v in value) + ")"  # type: ignore[attr-defined]
 
 
-def describe_window_state(state: dict, snapshots: Sequence[dict] = ()) -> str:
+def describe_window_state(
+    state: dict, snapshots: Sequence[dict] = (), manifest: Optional[dict] = None
+) -> str:
     """The window state as one sentence for the model: camera, 4D rotation (degrees, added on
     top of the scene file's own projection), playback, and -- given the turn's validator
-    snapshots -- the 4D values the window shows."""
+    snapshots -- the 4D values and per-axis scales the window shows (axis letters from the
+    `manifest`)."""
     parts = [
         f"camera at {_vec(state['cameraEye'])} looking at {_vec(state['cameraLookAt'])}",
         "4D rotation added in the window: "
@@ -302,7 +305,7 @@ def describe_window_state(state: dict, snapshots: Sequence[dict] = ()) -> str:
             f"animation at t = {round(float(state['t']), 2):g} s, "
             + ("playing" if state.get("playing") else "paused")
         )
-    shown = _shown_4d_values(state, snapshots)
+    shown = _shown_4d_values(state, snapshots, axis_letters(manifest or {}))
     if shown is not None:
         parts.append(shown)
     return "; ".join(parts)
@@ -319,15 +322,20 @@ def shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Tuple[List[Tuple[
             for name, p in values], interpolated
 
 
-def _shown_4d_values(state: dict, snapshots: Sequence[dict]) -> Optional[str]:
+def _shown_4d_values(
+    state: dict, snapshots: Sequence[dict], axes: Sequence[str] = DEFAULT_AXES
+) -> Optional[str]:
     shown, interpolated = shown_4d_values(state, snapshots)
     if not shown:
         return None
 
     def values(name: str, p: dict) -> str:
-        rotations = ", ".join(f"{k} {round(p[k], 2):g}" for k in ("rotXW", "rotYW", "rotZW"))
-        scale = f", scale {scale_text(p['scale'])}" if "scale" in p else ""
-        return f"{name}: {rotations}, eyeW {round(p['eyeW'], 3):g}{scale}"
+        shown_values = [f"{k} {round(p[k], 2):g}" for k in ("rotXW", "rotYW", "rotZW") if k in p]
+        if "eyeW" in p:
+            shown_values.append(f"eyeW {round(p['eyeW'], 3):g}")
+        if "scale" in p:
+            shown_values.append(f"scale {scale_text(p['scale'], axes)}")
+        return f"{name}: " + ", ".join(shown_values)
 
     t = float(state.get("t") or 0.0)
     sampled = ", interpolated between the validator's samples" if interpolated else ""

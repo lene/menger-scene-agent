@@ -290,8 +290,9 @@ def test_a_scaled_object_has_a_per_axis_scale_fact_with_the_manifests_axis_lette
     assert summarise(_snap([scaled], []), _MANIFEST)[("Tesseract", "scale")] == "x 1, y 1, z 1, w 0.5"
     assert (summarise(_snap([hexeract], []), _MANIFEST)[("Hypercube", "scale")]
             == "x 1, y 1, z 1, w 1, v 0.25, u 1")
+    # A scene without a scale is all ones, so the change reads "1 -> 0.5", never "none".
     assert snapshot_changes(_snap([_TESSERACT], []), _snap([scaled], []), _MANIFEST) == [
-        "Tesseract scale: none -> x 1, y 1, z 1, w 0.5"]
+        "Tesseract scale: x 1, y 1, z 1, w 1 -> x 1, y 1, z 1, w 0.5"]
 
 
 def test_an_unscaled_object_has_no_scale_fact():
@@ -310,13 +311,52 @@ def test_the_axis_letters_come_from_the_manifest_with_a_fallback():
     assert axis_letters({}) == tuple("xyzwvuts")
 
 
-def test_an_unrequested_scale_change_is_reported_unless_the_prompt_asks_for_a_projection():
+def test_scale_is_its_own_kind_of_change_a_rotation_request_does_not_cover():
     before = _snap([dict(_TESSERACT, scale=[1, 1, 1, 0.25])], [])
     after = _snap([dict(_TESSERACT, scale=[1, 1, 1, 0.5])], [])
+    reported = ["also changed Tesseract scale: x 1, y 1, z 1, w 0.25 -> x 1, y 1, z 1, w 0.5"]
 
-    assert unrequested_changes(before, after, "make it blue", _MANIFEST) == [
-        "also changed Tesseract scale: x 1, y 1, z 1, w 0.25 -> x 1, y 1, z 1, w 0.5"]
-    assert unrequested_changes(before, after, "rotate it a little", _MANIFEST) == []
+    assert unrequested_changes(before, after, "make it blue", _MANIFEST) == reported
+    assert unrequested_changes(before, after, "rotate it a little", _MANIFEST) == reported
+    for request in ("extrude it", "flatten the tesseract", "stretch it along w",
+                    "scale it down", "fold it into a cube", "let it collapse"):
+        assert unrequested_changes(before, after, request, _MANIFEST) == [], request
+
+
+def test_a_scale_added_or_dropped_is_an_unrequested_change_against_all_ones():
+    unscaled = _snap([_TESSERACT], [])
+    scaled = _snap([dict(_TESSERACT, scale=[1, 1, 1, 0.5])], [])
+
+    assert unrequested_changes(unscaled, scaled, "make it blue", _MANIFEST) == [
+        "also changed Tesseract scale: x 1, y 1, z 1, w 1 -> x 1, y 1, z 1, w 0.5"]
+    assert unrequested_changes(scaled, unscaled, "make it blue", _MANIFEST) == [
+        "also changed Tesseract scale: x 1, y 1, z 1, w 0.5 -> x 1, y 1, z 1, w 1"]
+    assert unrequested_changes(scaled, unscaled, "extrude it", _MANIFEST) == []
+
+
+def test_an_animated_scale_keeps_its_all_ones_end_in_the_summary():
+    def at(t, scale):
+        return {"t": t, "objects": [dict(_TESSERACT, scale=scale)], "planes": []}
+
+    summary = summarise([at(0, [1, 1, 1, 0]), at(1, [1, 1, 1, 1])], _MANIFEST)
+
+    assert summary[("Tesseract", "scale")] == (
+        "animated from x 1, y 1, z 1, w 0 to x 1, y 1, z 1, w 1")
+
+
+def test_the_axis_letters_skip_a_convention_that_is_not_text():
+    from core.snapshot_facts import axis_letters
+
+    manifest = {"conventions": [None, {"a": 1}, "The axes are p q r s."]}
+
+    assert axis_letters(manifest) == tuple("pqrs")
+
+
+def test_a_scale_text_never_drops_a_factor():
+    from core.snapshot_facts import scale_text
+
+    assert scale_text([1, 2, 3], ("a",)) == "a 1, y 2, z 3"
+    assert scale_text([1] * 10).endswith("s 1, 9 1, 10 1")
 
 
 def test_same_material_between_4d_objects_names_missing_edge_tubes():
@@ -370,6 +410,69 @@ def test_keeping_the_view_finds_a_value_the_scene_no_longer_gives_at_the_windows
     assert kept_view_findings(5.04, shown, right) == []
     # A full turn later is the same view.
     assert kept_view_findings(5.04, shown, [_rotation(5.04, 505.44, 25.0)]) == []
+
+
+def _scaled_at(t: float, scale, projection=None) -> dict:
+    return {"t": t, "objects": [{"dslType": "Hypercube", "projection": projection, "scale": scale}]}
+
+
+def test_keeping_the_view_checks_a_shown_scale_per_axis():
+    from core.snapshot_facts import kept_view_findings
+
+    shown = [("Hypercube", {"scale": [1.0, 1.0, 1.0, 1.0, 0.3]})]
+    same = [_scaled_at(2.0, [1, 1, 1, 1, 0.3]), _scaled_at(3.0, [1, 1, 1, 1, 0.3])]
+    nearly = [_scaled_at(2.0, [1, 1, 1, 1, 0.305])]
+    changed = [_scaled_at(2.0, [1, 1, 1, 1, 0.8])]
+    dropped = [_scaled_at(2.0, None)]
+
+    assert kept_view_findings(2.0, shown, same) == []
+    assert kept_view_findings(2.0, shown, nearly) == []
+    (finding,) = kept_view_findings(2.0, shown, changed)
+    assert "Hypercube: the window showed scale x 1, y 1, z 1, w 1, v 0.3 at t = 2 s" in finding
+    assert "the scene now gives x 1, y 1, z 1, w 1, v 0.8 there" in finding
+    (finding,) = kept_view_findings(2.0, shown, dropped)
+    assert "the scene now gives x 1, y 1, z 1, w 1, v 1 there" in finding
+    # The manifest's letters, and a scale the window did not show but the scene now has.
+    unshown = [("Hypercube", {})]
+    (finding,) = kept_view_findings(2.0, unshown, changed, axes=tuple("abcde"))
+    assert "the window showed scale a 1, b 1, c 1, d 1, e 1 " in finding
+    assert kept_view_findings(2.0, unshown, dropped) == []
+
+
+def test_keeping_the_view_does_not_raise_on_a_scale_next_to_rotations():
+    from core.snapshot_facts import kept_view_findings
+
+    projection = {"rotXW": 0, "rotYW": 10, "rotZW": 0, "eyeW": 3}
+    shown = [("Tesseract", {"rotXW": 0.0, "rotYW": 10.0, "rotZW": 0.0, "eyeW": 3.0,
+                            "scale": [1.0, 1.0, 1.0, 0.5]})]
+    after = [_scaled_at(1.0, [1, 1, 1, 0.5], projection)]
+    after[0]["objects"][0]["dslType"] = "Tesseract"
+
+    assert kept_view_findings(1.0, shown, after) == []
+
+
+def test_a_scaled_object_without_a_projection_is_a_shown_view():
+    from core.snapshot_facts import projections_at
+
+    snapshots = [_scaled_at(0.0, [1, 1, 1, 1, 0.0]), _scaled_at(2.0, [1, 1, 1, 1, 1.0]),
+                 {"t": 3.0, "objects": [{"dslType": "Hypercube", "projection": None}]}]
+
+    values, interpolated = projections_at(snapshots, 1.0)
+
+    assert values == [("Hypercube", {"scale": [1.0, 1.0, 1.0, 1.0, 0.5]})]
+    assert interpolated
+    # Identity at both ends of the sampled range: nothing to show.
+    assert projections_at(snapshots[2:], 3.0) == ([], False)
+
+
+def test_a_scale_of_another_length_is_the_newer_scale_not_an_interpolation():
+    from core.snapshot_facts import projections_at
+
+    snapshots = [_scaled_at(0.0, [1, 1, 1, 0.0]), _scaled_at(2.0, [1, 1, 1, 1, 0.5])]
+
+    values, _ = projections_at(snapshots, 1.0)
+
+    assert values == [("Hypercube", {"scale": [1.0, 1.0, 1.0, 1.0, 0.5]})]
 
 
 def test_only_a_request_to_keep_the_view_is_checked_against_the_window():

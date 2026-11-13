@@ -462,6 +462,7 @@ def test_system_prompt_teaches_the_not_done_marker_the_turn_parses():
     assert "Hypercube(5, scale = Some(Scale[5](1f, 1f, 1f, 1f, e)))" in system_prompt
     assert "stretching a `scale` factor past 1 is not an extrusion" in system_prompt
     assert "wScale" not in system_prompt
+    assert "so it is a partial" in system_prompt and "not UNSUPPORTED" in system_prompt
 
 
 def test_system_prompt_carries_the_session_3_rules():

@@ -122,20 +122,20 @@ _FOLLOW_UP_HINT = "  Your next line continues this request; /drop abandons it."
 # --- small helpers the turn uses ----------------------------------------------------------
 
 
-def _window_state_text(store: SceneStore) -> Optional[str]:
+def _window_state_text(store: SceneStore, manifest: Optional[dict] = None) -> Optional[str]:
     """The render window's current state as a sentence, or `None` (no window, or menger older
     than the state file; usability review 2026-10, session 4, F96)."""
     try:
         state = read_window_state(store.session_dir)
-        return (describe_window_state(state, store.current_snapshots())
+        return (describe_window_state(state, store.current_snapshots(), manifest)
                 if state is not None else None)
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _window_state_kwargs(store: SceneStore) -> dict:
+def _window_state_kwargs(store: SceneStore, manifest: Optional[dict] = None) -> dict:
     """`{"window_state": text}` when a window state exists, else nothing."""
-    text = _window_state_text(store)
+    text = _window_state_text(store, manifest)
     return {"window_state": text} if text is not None else {}
 
 
@@ -288,7 +288,7 @@ def execute_turn(
             ctx.store,
             ctx.script_path,
             on_stage=clock,
-            **_window_state_kwargs(ctx.store),
+            **_window_state_kwargs(ctx.store, ctx.manifest),
             **_window_shown_kwargs(ctx.store),
             **({"answered": True} if answered else {}),
             **({"context_note": _consult_note(consult)} if consult else {}),
@@ -385,7 +385,7 @@ def _consult(ctx: Context, ports: Ports, state: TurnState, line: str) -> None:
     try:
         result = ports.answer_consult(
             question, ctx.manifest, ctx.corpus, ctx.adapter, state.prior_scene,
-            **_window_state_kwargs(ctx.store),
+            **_window_state_kwargs(ctx.store, ctx.manifest),
         )
     except KeyboardInterrupt:  # F51: abandons the question, not the REPL
         print("Consult interrupted (Ctrl-C).")

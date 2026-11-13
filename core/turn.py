@@ -45,6 +45,7 @@ from core.scene_facts import (
 from core.snapshot_facts import (
     CheckResult,
     asks_to_keep_view,
+    axis_letters,
     check_turn,
     kept_view_findings,
     snapshot_changes,
@@ -535,7 +536,9 @@ def run_turn(
                         prior_snapshots, outcome.snapshots, outcome.camera_path, prompt, manifest
                     )
                     if window_shown is not None and asks_to_keep_view(prompt):
-                        checks.findings.extend(kept_view_findings(*window_shown, outcome.snapshots))
+                        checks.findings.extend(kept_view_findings(
+                            *window_shown, outcome.snapshots, axes=axis_letters(manifest)
+                        ))
                     if not checks.findings or rounds_done >= repair_rounds:
                         break
                     feedback = list(checks.findings)
