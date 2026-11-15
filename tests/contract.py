@@ -3,5 +3,6 @@
 # The scenes of `reference/dsl-corpus.json`, among them CubeToTesseract
 # (usability review 2026-10, F124), Plinth (menger#156), TesseractToPenteract (menger#162),
 # HexeractTurning (menger#163), SunKeyLight (menger#158), PenteractFold (menger#164),
-# PenteractSpongeBreath (menger#166), DimensionLadder (menger#160).
-EXPECTED_CORPUS_SCENES = 41
+# PenteractSpongeBreath (menger#166). DimensionLadder (menger#160) left the corpus when it moved
+# to its own package, examples.dsl.ladder (menger#184).
+EXPECTED_CORPUS_SCENES = 40

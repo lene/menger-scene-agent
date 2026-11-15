@@ -47,7 +47,10 @@ from gauntlet.types import Finding
 # snapshots lose `projection.wScale`, gain an object `scale` and `maxCentreCoordinates`) is read
 # from `reference/process-result.json`, not from here. The agent ignores `maxCentreCoordinates`
 # and teaches no `HypercubeSponge` vocabulary until G11 (msa#67).
-EXPECTED_MANIFEST_SCHEMA_VERSION = "3.0.0"
+# 3.1.0 adds `Sun.measuredFromEnvMap` and the `Sun.fromEnvMap` convention (physical image-based
+# lighting of optix-jni 0.5.3); 3.2.0 adds `RenderSettings.ambient` and the `Ambient` choice
+# (menger#175). Both additive; the agent reads them from the manifest like any other field.
+EXPECTED_MANIFEST_SCHEMA_VERSION = "3.2.0"
 EXPECTED_CORPUS_SCHEMA_VERSION = "1.0.0"
 
 ErrorKind = Literal[
