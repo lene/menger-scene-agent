@@ -105,6 +105,15 @@ from adapters.render_window import (
     refresh_render_window,
     wait_for_window_event,
 )
+from adapters.sandbox import (
+    UNSANDBOXED_WARNING,
+    SandboxConfigError,
+    digest_changes,
+    digest_warning,
+    reference_session,
+    sandbox_record,
+    unsandboxed_requested,
+)
 from adapters.scene_export import export_scene
 from adapters.scene_store import SceneStore, history_entry_problem
 from adapters.scene_validator import validate_scene
@@ -147,8 +156,6 @@ _DEFAULT_SESSIONS_DIR = "./sessions"
 # varying location) -- same AD-10 reasoning as `_SCRIPT_PATH_ENV` above, so it's a required
 # env var with no default, checked alongside it before session bootstrap.
 _RENDER_LAUNCHER_ENV = "MENGER_RENDER_LAUNCHER"
-_CONTAINED_LAUNCHER_NAME = "run-render-window.sh"
-_HOST_RENDER_ENV = "MENGER_AGENT_HOST_RENDER"
 
 def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -160,6 +167,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
             "script (menger repo, AD-10).\n"
             f"  {_RENDER_LAUNCHER_ENV}   required; path to the staged menger-app render "
             "window launcher binary (menger repo, AD-10).\n"
+            "  MENGER_AGENT_UNSANDBOXED  optional; set to 1 to run generated scenes on this host "
+            "without attested launchers (warned at every start, recorded in session.json).\n"
             f"  {_SESSIONS_DIR_ENV}  optional; sessions base directory (default: "
             f"'{_DEFAULT_SESSIONS_DIR}').\n"
             "\n"
@@ -264,21 +273,43 @@ def _require_render_launcher() -> str:
             "the staged menger-app render window launcher binary (menger repo, AD-10: "
             "paths are injected, never discovered). Set it before starting the REPL."
         )
-    if Path(launcher_path).name != _CONTAINED_LAUNCHER_NAME:
-        # Review 2026-10-14 (menger#77): the window compiles and runs every accepted scene;
-        # outside the container that is generated code running as the user, with network.
-        if os.environ.get(_HOST_RENDER_ENV) != "1":
-            raise SystemExit(
-                f"error: {_RENDER_LAUNCHER_ENV} must name menger's contained render window, "
-                f"docker/scene-validator/{_CONTAINED_LAUNCHER_NAME} (got {launcher_path}). "
-                f"To run generated scenes on this host instead -- unsandboxed, as you, with "
-                f"network access -- set {_HOST_RENDER_ENV}=1."
-            )
-        print(
-            f"WARNING: {_HOST_RENDER_ENV}=1 -- the render window runs generated scene code on "
-            "this host, outside the sandbox, as you, with network access."
-        )
     return launcher_path
+
+
+def _unsandboxed_requested() -> bool:
+    try:
+        return unsandboxed_requested(os.environ)
+    except SandboxConfigError as e:
+        raise SystemExit(f"error: {e}") from e
+
+
+def _establish_sandbox(
+    script_path: str, render_launcher_path: str, session_id: Optional[str]
+) -> dict:
+    """The startup preflight (msa#58), run at every start: both launchers must exist, attest a
+    sandbox (no network, read-only root) and name images that fit this agent; otherwise the agent
+    does not start. Only `MENGER_AGENT_UNSANDBOXED=1` starts without (with a warning, and the
+    session records it). Returns the sandbox record for `session.json`. THREAT MODEL: the paths
+    come from the user's own environment; this guards against a wrong or stale configuration, not
+    against someone who controls the user's shell."""
+    unsandboxed = _unsandboxed_requested()
+    result = run_checks(script_path, render_launcher_path, unsandboxed=unsandboxed)
+    if unsandboxed:
+        print(UNSANDBOXED_WARNING, file=sys.stderr)
+    if not result.ok:
+        raise SystemExit(
+            "error: the startup preflight failed, the agent does not start:\n"
+            f"{report(result.checks)}\n"
+            "Fix what is marked FAIL (`--check` shows it again). To run generated scenes on this "
+            "host instead, unsandboxed, as you and possibly with network access, set "
+            "MENGER_AGENT_UNSANDBOXED=1."
+        )
+    changes = digest_changes(
+        reference_session(_sessions_base_dir(), session_id), result.attestations
+    )
+    for change in changes:
+        print(digest_warning(change), file=sys.stderr)
+    return sandbox_record(unsandboxed, result.attestations, changes)
 
 
 def _sessions_base_dir() -> Path:
@@ -422,9 +453,12 @@ def _main(argv: Optional[List[str]] = None) -> int:
     if args.check:
         # msa#32: before the required-env checks below, so a fresh install can ask what is
         # missing instead of failing on the first thing.
-        checks = run_checks(os.environ.get(_SCRIPT_PATH_ENV), os.environ.get(_RENDER_LAUNCHER_ENV))
-        print(report(checks))
-        return 0 if all(c.ok for c in checks) else 1
+        result = run_checks(
+            os.environ.get(_SCRIPT_PATH_ENV), os.environ.get(_RENDER_LAUNCHER_ENV),
+            _unsandboxed_requested(),
+        )
+        print(report(result.checks))
+        return 0 if result.ok else 1
 
     # Always checked first: a missing script_path, missing render launcher path, or invalid
     # --session must exit before manifest/corpus loading, model adapter construction, or
@@ -433,6 +467,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     script_path = _require_script_path()
     render_launcher_path = _require_render_launcher()
     _validate_session_id(args.session_id)
+    sandbox = _establish_sandbox(script_path, render_launcher_path, args.session_id)
 
     try:
         manifest = load_manifest(_MANIFEST_PATH)
@@ -475,7 +510,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     configure_session_logging(store.session_dir)
     provenance = collect_provenance(
         manifest, _MANIFEST_PATH, selected_provider(), model_name, script_path,
-        render_launcher_path,
+        render_launcher_path, sandbox,
     )
     write_session_json(store.session_dir, provenance)
     store = replace(store, provenance=history_provenance(provenance))

@@ -1,6 +1,23 @@
 {
-  "description": "The tagged result every menger process the scene agent runs prints on stdout when it ends at once (SceneValidator, run-sandboxed.sh, run-render-window.sh, menger-app's render-lock refusal), and the exit code that goes with each tag. Owned by menger (review 2026-10-14, menger#82/#100); ProcessContractSuite holds every producer to it; the agent keeps a copy in reference/ and holds its parser to it. A wall-clock timeout (exit 124) prints nothing.",
+  "description": "The tagged result every menger process the scene agent runs prints on stdout when it ends at once (SceneValidator, run-sandboxed.sh, run-render-window.sh, menger-app's render-lock refusal), and the exit code that goes with each tag. Owned by menger (review 2026-10-14, menger#82/#100); ProcessContractSuite holds every producer to it; the agent keeps a copy in reference/ and holds its parser to it. A wall-clock timeout of the sandbox wrapper (exit 124) prints nothing; the validator's own limit (100 s, below the wrapper's 120 s) is a `refused` result.",
   "schemaVersion": "2.0.0",
+  "meaningOfOk": "SceneValidator's `ok` (exit 0) means the scene compiled, loaded and passed every check, and that the validator process said so, not the scene's code that runs next to it: the scene runs in a worker process, and the result is the one line of the worker's output that carries a random secret (the nonce) the scene was not given, signed with an HMAC keyed by it. A scene that prints a result of its own, ends its process (System.exit, Runtime.halt), keeps it alive with a thread, or writes into the result line from another thread cannot change the verdict; one that ends the validation before a result is `refused` (exit 2), never `ok`. KNOWN LIMITATION, accepted for now: the scene's code runs in the worker's own process, so a scene that reads its own process's memory finds the nonce there and can sign a forged `ok` line the validator cannot tell from the worker's: a heap dump through the JVM's management interface and a scan of the dump for 32-digit hexadecimal runs is a few tens of lines and works in the image (a scan of /proc/self/mem does the same where the JVM is dumpable; the image's execute-only java closes that one route, not the heap dump). `ok` therefore holds against a scene that is wrong or greedy, and against one that is hostile only in the ways above; it does not hold against a scene written to forge it. The container is the security boundary, not the nonce. A stronger design (the worker in a second container, with only a result file shared) is pending the user's decision after menger-scene-agent#58 (menger#137).",
+  "consumerRules": "A consumer takes the verdict from exactly one JSON document on the process's stdout whose `tag` and the process's exit code agree (`exitCodes`: ok 0, compile-errors and lint-findings 1, refused 2). Zero or several documents, or a tag the exit code contradicts, is `refused`, whatever the documents say. run-sandboxed.sh enforces this itself before it prints anything (menger#137): the validator's stdout is also reachable by a scene through /proc/<pid>/fd/1 unless the image takes that away, which it does by making the java executable unreadable, so that the JVMs are not dumpable.",
+  "launcherAttestation": {
+    "description": "`<launcher> --attest` (run-sandboxed.sh, run-render-window.sh) prints exactly one JSON line on stdout, exit 0, and starts nothing: how the launcher runs its container, built from the very argument list it passes to `docker run`. The scene agent asserts it instead of trusting a launcher by its file name (menger-scene-agent#58). THREAT MODEL: the launcher paths come from the user's own environment, so this guards against a wrong or stale configuration (a script that runs on the host, a launcher older than this flag), not against someone who controls the user's shell: a script that prints a false line passes. A launcher that cannot attest (its image is not there) prints the `refused` result instead, exit 2. `image_digest` is the image id at the time of the call; a later run may start another image if the tag moved meanwhile.",
+    "requiredFields": {
+      "sandbox": "string",
+      "network": "string",
+      "rootfs": "string",
+      "image": "string",
+      "image_digest": "string"
+    },
+    "required": {
+      "sandbox": "docker",
+      "network": "none",
+      "rootfs": "read-only"
+    }
+  },
   "exitCodes": {
     "ok": 0,
     "compile-errors": 1,

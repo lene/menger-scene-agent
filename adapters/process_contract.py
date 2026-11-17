@@ -19,6 +19,21 @@ EXIT_CODES: dict = CONTRACT["exitCodes"]
 WINDOW_EVENT_VERSION: int = CONTRACT["windowEvents"]["version"]
 WINDOW_EVENT_KINDS: frozenset = frozenset(CONTRACT["windowEvents"]["kinds"])
 WINDOW_STATE_SCHEMA_VERSION: str = CONTRACT["windowStateSchemaVersion"]
+LAUNCHER_ATTESTATION_REQUIRED: dict = CONTRACT["launcherAttestation"]["required"]
+
+
+def single_document(text: str) -> object:
+    """The one JSON document `text` holds, or ValueError. The consumer rule of the contract
+    (`consumerRules`, menger#137): zero documents, several, text around one, or an object with a
+    key twice (a parser keeping the last of two `tag`s would read what the scene wrote) all mean
+    the process did not print one result, whatever the documents say."""
+    def _no_duplicate_keys(pairs: list) -> dict:
+        keys = [key for key, _ in pairs]
+        if len(set(keys)) != len(keys):
+            raise ValueError("a JSON object has a key twice")
+        return dict(pairs)
+
+    return json.loads(text, object_pairs_hook=_no_duplicate_keys)
 
 
 def _major(version: str) -> str:

@@ -4,7 +4,9 @@ model, version or image identity; raw model output and repair rounds were not ke
 logged. This module writes:
 
 - `session.json`: the provenance of the run that created the session (agent and Python
-  version, provider and model, manifest version, DSL revision and sha, validator image).
+  version, provider and model, manifest version, DSL revision and sha, validator image, and the
+  sandbox: each launcher's attestation with its image digest, or that the user opted out, and
+  any image that changed since the last session, msa#58).
 - `model-calls.jsonl`: every model request and its raw response or error, with timing --
   generation, each repair round, readback and consults alike (`RecordingModelAdapter`).
 - `agent.log`: the agent's `logging` output for the session (`configure_session_logging`).
@@ -64,9 +66,11 @@ def collect_provenance(
     model: str,
     validator_script: Union[str, Path],
     render_launcher: Union[str, Path],
+    sandbox: dict,
     image: Optional[str] = None,
 ) -> dict:
-    validator_image = image or VALIDATOR_IMAGE
+    attested = (sandbox.get("attestations") or {}).get("validator") or {}
+    validator_image = image or attested.get("image") or VALIDATOR_IMAGE
     return {
         "agent_version": agent_version(),
         "python": platform.python_version(),
@@ -78,6 +82,7 @@ def collect_provenance(
         "validator_image": {"name": validator_image, **_image_identity(validator_image)},
         "validator_script": str(validator_script),
         "render_launcher": str(render_launcher),
+        "sandbox": sandbox,
     }
 
 

@@ -42,6 +42,7 @@ from adapters.process_contract import (
     WINDOW_STATE_SCHEMA_VERSION,
     result_problem,
     same_major,
+    single_document,
 )
 from adapters.scene_validator import REFERENCE_DSL_REVISION
 from core.safe_text import safe_text
@@ -596,7 +597,7 @@ def _parse_fast_exit(stdout: str, stderr: str, returncode: int) -> RenderWindowO
     than `refused` (I/O & Edge-Case Matrix: "Launcher exits fast with unexpected/malformed
     output" -> "typed error naming the problem, never an unhandled exception")."""
     try:
-        payload = json.loads(stdout)
+        payload = single_document(stdout)
         if not isinstance(payload, dict):
             raise TypeError(f"expected a JSON object, got {type(payload).__name__}")
 
@@ -609,7 +610,7 @@ def _parse_fast_exit(stdout: str, stderr: str, returncode: int) -> RenderWindowO
             messages = []
         if not isinstance(messages, list) or not all(isinstance(m, str) for m in messages):
             raise TypeError("'messages' was not a list of strings")
-    except (json.JSONDecodeError, TypeError, KeyError, RecursionError, MemoryError) as e:
+    except (ValueError, TypeError, KeyError, RecursionError, MemoryError) as e:
         return RenderWindowError(
             kind="malformed_output",
             message=_unexpected_output_message(stdout, stderr, returncode, str(e)),

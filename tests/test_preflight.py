@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import cli
 from adapters import preflight
 from core.vocabulary import DSL_REVISION
+
+# The real file check, attestation and image check: the autouse sandbox of conftest.py is off.
+pytestmark = pytest.mark.real_preflight
+
+ATTESTATION = {"sandbox": "docker", "network": "none", "rootfs": "read-only",
+               "image": "menger-scene-validator:latest", "image_digest": "sha256:" + "e" * 64}
+
+
+def _launcher(path, attestation=ATTESTATION):
+    body = f"echo '{json.dumps(attestation)}'" if attestation is not None else ":"
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return str(path)
 
 
 def _labels(version="0.9.1", revision=DSL_REVISION):
@@ -42,16 +57,57 @@ def test_launcher_check(tmp_path):
 
 
 def test_cli_check_exits_with_the_verdict(monkeypatch, tmp_path, capsys):
-    script = tmp_path / "run.sh"
-    script.write_text("#!/bin/sh\n")
-    script.chmod(0o755)
-    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", str(script))
-    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", str(script))
+    script = _launcher(tmp_path / "run.sh")
+    monkeypatch.delenv("MENGER_AGENT_UNSANDBOXED", raising=False)
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", script)
+    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", script)
     monkeypatch.setattr(preflight, "image_labels", lambda image: _labels())
     assert cli.main(["--check"]) == 0
     monkeypatch.setattr(preflight, "image_labels", lambda image: None)
     assert cli.main(["--check"]) == 1
     assert "FAIL validator image" in capsys.readouterr().out
+
+
+def test_the_images_checked_are_the_ones_the_launchers_attest(monkeypatch, tmp_path):
+    validator = _launcher(tmp_path / "v.sh", {**ATTESTATION, "image": "mine/validator:7"})
+    render = _launcher(tmp_path / "r.sh", {**ATTESTATION, "image": "mine/window:7"})
+    asked = []
+    monkeypatch.setattr(preflight, "image_labels", lambda image: asked.append(image) or _labels())
+
+    result = preflight.run_checks(validator, render)
+
+    assert result.ok
+    assert asked == ["mine/validator:7", "mine/window:7"]
+    assert set(result.attestations) == {"validator", "render"}
+
+
+def test_a_launcher_that_attests_nothing_fails_the_check_whatever_its_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(preflight, "image_labels", lambda image: _labels())
+    render = _launcher(tmp_path / "run-render-window.sh", attestation=None)
+
+    result = preflight.run_checks(_launcher(tmp_path / "v.sh"), render)
+
+    assert not result.ok
+    (failed,) = [c for c in result.checks if not c.ok]
+    assert failed.name == "render sandbox" and "does not attest" in failed.detail
+    assert "render" not in result.attestations
+
+
+def test_a_launcher_that_is_not_there_is_not_asked_to_attest(tmp_path):
+    result = preflight.run_checks(str(tmp_path / "missing.sh"), None)
+
+    assert not result.ok
+    assert result.attestations == {}
+
+
+def test_unsandboxed_checks_the_launcher_files_only(tmp_path):
+    result = preflight.run_checks(
+        _launcher(tmp_path / "a", attestation=None), _launcher(tmp_path / "b", attestation=None),
+        unsandboxed=True,
+    )
+
+    assert result.ok and result.attestations == {}
+    assert "UNSANDBOXED" in result.checks[-1].detail
 
 
 def test_image_labels_without_docker(monkeypatch):

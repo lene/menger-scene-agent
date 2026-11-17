@@ -890,3 +890,13 @@ def test_sighup_and_sigterm_unwind_through_the_repls_cleanup():
     finally:
         for sig, handler in previous.items():
             _signal.signal(sig, handler)
+
+
+def test_a_fast_exit_with_two_documents_or_a_repeated_key_is_malformed_not_refused():
+    from adapters.render_window import _parse_fast_exit
+
+    refused = '{"tag": "refused", "messages": ["no"], "findings": [], "schemaVersion": "2.0.0"}'
+    for stdout in (refused + "\n" + refused, refused.replace('"messages"', '"tag": "ok", "messages"')):
+        outcome = _parse_fast_exit(stdout, "", 2)
+        assert isinstance(outcome, RenderWindowError)
+        assert outcome.kind == "malformed_output"

@@ -44,6 +44,9 @@ all-providers = [
 # and let it resolve `from core...` / `from adapters...` imports via this.
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "real_preflight: runs the real startup preflight, not the attested sandbox conftest.py fakes",
+]
 
 [tool.ruff]
 target-version = "py310"

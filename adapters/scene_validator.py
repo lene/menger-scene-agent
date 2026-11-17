@@ -16,7 +16,6 @@ a separate, deferred story (see `_bmad-output/implementation-artifacts/deferred-
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import time
@@ -24,7 +23,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from adapters.child_env import child_environment
-from adapters.process_contract import result_problem
+from adapters.process_contract import result_problem, single_document
 from core.types import (
     ValidationError,
     ValidationFinding,
@@ -154,7 +153,7 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
     usage-error path (e.g. "Scene file not found") puts its real diagnostic there while
     stdout is empty."""
     try:
-        payload = json.loads(stdout)
+        payload = single_document(stdout)
         if not isinstance(payload, dict):
             raise TypeError(f"expected a JSON object, got {type(payload).__name__}")
 
@@ -193,7 +192,7 @@ def _parse_stdout(stdout: str, stderr: str, returncode: int) -> ValidationOutcom
         schema_version = payload.get("schemaVersion", "")
         if not isinstance(schema_version, str):
             raise TypeError("'schemaVersion' was not a string")
-    except (json.JSONDecodeError, TypeError, KeyError) as e:
+    except (ValueError, TypeError, KeyError) as e:
         preview = stdout[:_STDOUT_PREVIEW_LENGTH]
         detail = (
             f"could not parse renderer response (exit {returncode}): {e} "

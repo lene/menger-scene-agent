@@ -23,6 +23,7 @@ import pytest
 
 import cli
 import repl.formatting as formatting
+from adapters import preflight
 from adapters.model import MissingAPIKeyError
 from adapters.render_window import RenderWindowError, RenderWindowResult, WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -33,6 +34,7 @@ from core.types import (
     TurnResult,
     ValidationResult,
 )
+from core.vocabulary import DSL_REVISION
 
 _FAKE_RENDER_LAUNCHER = "/fake/menger/docker/scene-validator/run-render-window.sh"
 
@@ -908,31 +910,194 @@ def test_whitespace_only_render_launcher_env_var_is_treated_as_unset(monkeypatch
     assert "MENGER_RENDER_LAUNCHER" in str(exc_info.value)
 
 
-# Review 2026-10-14 (menger#77): the window runs generated code, so it must be the contained one.
-def test_a_host_launcher_is_refused_without_the_explicit_opt_in(monkeypatch, tmp_path):
-    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
-    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", "/x/stage/bin/menger-app")
-    monkeypatch.delenv("MENGER_AGENT_HOST_RENDER", raising=False)
+# --- msa#58: the sandbox is attested by the launchers, never trusted by file name -----------
+
+_GOOD_ATTESTATION = {
+    "sandbox": "docker", "network": "none", "rootfs": "read-only",
+    "image": "menger-scene-validator:latest", "image_digest": "sha256:" + "b" * 64,
+}
+
+
+def _launcher(path: Path, attestation: Optional[dict]) -> str:
+    """An executable script that prints `attestation` for `--attest` (nothing when None)."""
+    body = f"echo '{json.dumps(attestation)}'" if attestation is not None else ":"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def _real_preflight_env(monkeypatch, tmp_path, validator, render):
+    """Both launchers set, for a test marked `real_preflight`: the real file check and
+    attestation, fitting images."""
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", validator)
+    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", render)
     monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.delenv("MENGER_AGENT_UNSANDBOXED", raising=False)
+    monkeypatch.delenv("MENGER_AGENT_HOST_RENDER", raising=False)
+    monkeypatch.setattr(preflight, "image_labels", lambda image: {
+        preflight.VERSION_LABEL: "0.9.1", preflight.DSL_REVISION_LABEL: DSL_REVISION, "id": "x"})
+    _stub_model_adapter(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+
+
+def _session_json(tmp_path) -> dict:
+    (session_dir,) = (tmp_path / "sessions").iterdir()
+    return json.loads((session_dir / "session.json").read_text())
+
+
+@pytest.mark.real_preflight
+def test_a_script_named_like_the_contained_launcher_that_attests_nothing_is_refused(
+    monkeypatch, tmp_path
+):
+    validator = _launcher(tmp_path / "validator.sh", _GOOD_ATTESTATION)
+    render = _launcher(tmp_path / "docker/scene-validator/run-render-window.sh", None)
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
     _refuse_model_adapter(monkeypatch)
     _refuse_create_session(monkeypatch)
-    _refuse_run_turn(monkeypatch)
-    _refuse_render_window(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         cli.main([])
 
-    assert "run-render-window.sh" in str(exc_info.value)
-    assert "MENGER_AGENT_HOST_RENDER=1" in str(exc_info.value)
+    message = str(exc_info.value)
+    assert "render sandbox" in message and "does not attest" in message
+    assert "MENGER_AGENT_UNSANDBOXED=1" in message
     assert not (tmp_path / "sessions").exists()
 
 
-def test_the_host_render_opt_in_is_accepted_with_a_warning(monkeypatch, capsys):
-    monkeypatch.setenv("MENGER_RENDER_LAUNCHER", "/x/stage/bin/menger-app")
-    monkeypatch.setenv("MENGER_AGENT_HOST_RENDER", "1")
+@pytest.mark.real_preflight
+def test_a_validator_script_that_attests_nothing_is_refused_too(monkeypatch, tmp_path):
+    validator = _launcher(tmp_path / "run-sandboxed.sh", None)
+    render = _launcher(tmp_path / "w.sh", {**_GOOD_ATTESTATION, "image": "menger-render-window:x"})
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+    _refuse_create_session(monkeypatch)
 
-    assert cli._require_render_launcher() == "/x/stage/bin/menger-app"
-    assert "outside the sandbox" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    assert "validator sandbox" in str(exc_info.value)
+
+
+@pytest.mark.real_preflight
+def test_launchers_of_any_name_that_attest_start_and_the_session_records_the_digests(
+    monkeypatch, tmp_path
+):
+    validator = _launcher(tmp_path / "anything.sh", _GOOD_ATTESTATION)
+    render = _launcher(
+        tmp_path / "other-name", {**_GOOD_ATTESTATION, "image": "menger-render-window:x",
+                                   "image_digest": "sha256:" + "c" * 64},
+    )
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+
+    assert cli.main([]) == 0
+
+    sandbox = _session_json(tmp_path)["sandbox"]
+    assert sandbox["unsandboxed"] is False
+    assert sandbox["attestations"]["validator"]["image_digest"] == "sha256:" + "b" * 64
+    assert sandbox["attestations"]["render"]["image_digest"] == "sha256:" + "c" * 64
+    assert sandbox["digest_changes"] == []
+
+
+@pytest.mark.real_preflight
+def test_the_opt_out_starts_without_attestation_warns_and_is_recorded(
+    monkeypatch, tmp_path, capsys
+):
+    validator = _launcher(tmp_path / "scene-validator", None)
+    render = _launcher(tmp_path / "menger-app", None)
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+    monkeypatch.setenv("MENGER_AGENT_UNSANDBOXED", "1")
+
+    assert cli.main([]) == 0
+
+    assert "MENGER_AGENT_UNSANDBOXED=1" in capsys.readouterr().err
+    sandbox = _session_json(tmp_path)["sandbox"]
+    assert sandbox["unsandboxed"] is True
+    assert sandbox["attestations"] == {}
+
+
+@pytest.mark.real_preflight
+def test_the_opt_out_warns_on_every_start_not_only_the_first(monkeypatch, tmp_path, capsys):
+    validator = _launcher(tmp_path / "scene-validator", None)
+    render = _launcher(tmp_path / "menger-app", None)
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+    monkeypatch.setenv("MENGER_AGENT_UNSANDBOXED", "1")
+
+    cli.main([])
+    first = capsys.readouterr().err
+    cli.main([])
+    second = capsys.readouterr().err
+
+    assert "WARNING" in first and "WARNING" in second
+
+
+@pytest.mark.real_preflight
+@pytest.mark.parametrize("value", ["0", "true", "yes", ""])
+def test_only_exactly_one_opts_out(monkeypatch, tmp_path, value):
+    validator = _launcher(tmp_path / "scene-validator", None)
+    render = _launcher(tmp_path / "menger-app", None)
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+    monkeypatch.setenv("MENGER_AGENT_UNSANDBOXED", value)
+
+    with pytest.raises(SystemExit):
+        cli.main([])
+
+
+@pytest.mark.real_preflight
+def test_the_old_host_render_opt_in_is_rejected_with_a_hint_to_the_new_name(
+    monkeypatch, tmp_path
+):
+    validator = _launcher(tmp_path / "v.sh", _GOOD_ATTESTATION)
+    render = _launcher(tmp_path / "menger-app", None)
+    _real_preflight_env(monkeypatch, tmp_path, validator, render)
+    monkeypatch.setenv("MENGER_AGENT_HOST_RENDER", "1")
+    _refuse_create_session(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    assert "MENGER_AGENT_UNSANDBOXED=1" in str(exc_info.value)
+    assert "MENGER_AGENT_HOST_RENDER" in str(exc_info.value)
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_the_preflight_runs_on_a_normal_start_and_a_failing_one_stops_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr(preflight, "image_labels", lambda image: None)  # the image is gone
+    _refuse_model_adapter(monkeypatch)
+    _refuse_create_session(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([])
+
+    assert "preflight failed" in str(exc_info.value)
+    assert "FAIL validator image" in str(exc_info.value)
+
+
+def test_an_image_digest_that_differs_from_the_last_session_warns_and_is_recorded(
+    monkeypatch, tmp_path, capsys
+):
+    sessions = tmp_path / "sessions"
+    earlier = sessions / "earlier"
+    earlier.mkdir(parents=True)
+    old_digest = "sha256:" + "0" * 64
+    (earlier / "session.json").write_text(json.dumps({
+        "created": "2026-11-01T00:00:00.000+00:00",
+        "sandbox": {"attestations": {"validator": {**_GOOD_ATTESTATION, "image_digest": old_digest}}},
+    }))
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(sessions))
+    _stub_model_adapter(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+
+    assert cli.main([]) == 0   # warned, not refused
+
+    assert "earlier" in capsys.readouterr().err
+    (new_dir,) = [d for d in sessions.iterdir() if d.name != "earlier"]
+    (change,) = json.loads((new_dir / "session.json").read_text())["sandbox"]["digest_changes"]
+    assert change["launcher"] == "validator" and change["was"] == old_digest
 
 
 # --- story 21: an accepted turn calls refresh_render_window() with the just-accepted -------

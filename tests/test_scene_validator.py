@@ -498,3 +498,40 @@ def test_never_raises_regardless_of_exit_code(monkeypatch, returncode):
     result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)  # must not raise
 
     assert isinstance(result, ValidationError)
+
+
+# --- menger#137 consumerRules: exactly one document, tag and exit status agree --------------
+
+_OK_DOC = json.dumps({"tag": "ok", "messages": [], "findings": [], "schemaVersion": "2.0.0"})
+_LINT_DOC = json.dumps(
+    {"tag": "lint-findings", "messages": [], "findings": [], "schemaVersion": "2.0.0"}
+)
+
+
+def test_a_forged_ok_next_to_the_real_verdict_is_not_accepted_in_either_order(monkeypatch):
+    for stdout in (_OK_DOC + "\n" + _LINT_DOC, _LINT_DOC + "\n" + _OK_DOC):
+        _patch_run(monkeypatch, lambda cmd, out=stdout, **kwargs: _completed(1, stdout=out))
+
+        result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
+
+        assert isinstance(result, ValidationError)
+        assert result.kind == "malformed_output"
+
+
+def test_a_document_with_its_tag_twice_is_not_accepted(monkeypatch):
+    twice = _LINT_DOC.replace('"tag": "lint-findings"', '"tag": "lint-findings", "tag": "ok"')
+    _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(0, stdout=twice))
+
+    result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
+
+    assert isinstance(result, ValidationError)
+    assert result.kind == "malformed_output"
+
+
+def test_an_ok_whose_exit_status_says_a_scene_defect_is_not_accepted(monkeypatch):
+    _patch_run(monkeypatch, lambda cmd, **kwargs: _completed(1, stdout=_OK_DOC))
+
+    result = validate_scene(_SCENE_FILE, _SCRIPT_PATH)
+
+    assert isinstance(result, ValidationError)
+    assert result.kind == "malformed_output"

@@ -127,11 +127,27 @@ call or session is created:
 
 Optional: `MENGER_AGENT_SESSIONS_DIR` (default `./sessions`).
 
-The render window compiles and runs every accepted scene, so it runs in the same kind of
-container as the validator: no network, no capabilities, read-only root, only the session's
-`window/` directory mounted. Pointing `MENGER_RENDER_LAUNCHER` at the bare
-`menger-app` launcher instead is refused unless you also set `MENGER_AGENT_HOST_RENDER=1` --
-then generated scene code runs on your host, as you, with network access.
+The render window compiles and runs every accepted scene, and the validator compiles it
+(compiling Scala runs code), so both run in a container: no network, no capabilities, read-only
+root, only the scene mounted (the window: the session's `window/` directory). The agent does not
+judge a launcher by its file name. At every start, and under `--check`, it runs
+`<launcher> --attest`: each launcher prints one JSON line (`sandbox`, `network`, `rootfs`,
+`image`, `image_digest`), built from the argument list it passes to `docker run`, and the agent
+requires `docker`, `none` and `read-only`. A launcher that does not attest, or an image that is
+missing, stale or built from another DSL, stops the start with what to do. The image digests are
+recorded in `session.json`; a digest that differs from the last session's (or the resumed one's)
+is a warning, since images are rebuilt often.
+
+What this guards against: a wrong or stale configuration -- a host script, a renamed copy, a
+launcher older than `--attest`. It does not guard against someone who controls your shell or the
+menger checkout (a script that prints a false line passes). A hostile *scene* is held in by the
+container the attested launcher starts, not by this check.
+
+To run generated scenes on this host instead -- unsandboxed, as you, possibly with network access
+-- set `MENGER_AGENT_UNSANDBOXED=1`. It covers both launchers (the packaged `menger-app` and
+`scene-validator` launchers), skips the attestation and the image checks, prints a warning at
+every start and is recorded in `session.json`. It replaces `MENGER_AGENT_HOST_RENDER=1`, which is
+now rejected with a hint to the new name.
 
 Anthropic (default):
 
@@ -207,7 +223,8 @@ uv run menger-scene-agent --check
 ```
 
 `--check` reports each part and what to do when one does not fit. It checks that both launcher
-scripts exist and are executable, and that both images exist, were built from menger 0.9.1 or
+scripts exist, are executable and attest a sandbox (the same check runs at every start), and that
+both images they attest exist, were built from menger 0.9.1 or
 later, and were built from the DSL in this agent's `reference/dsl-manifest.json`. It exits 0
 when everything fits. The images need the NVIDIA Container Toolkit and a licensed OptiX SDK at
 build time (see `../menger/docker/scene-validator/build.sh`).

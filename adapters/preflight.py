@@ -6,7 +6,12 @@ and says what to do when one does not fit:
 - each image exists, is built from a supported menger version (`org.opencontainers.image.
   version` >= MIN_MENGER_VERSION) and from the DSL this agent's manifest describes
   (`menger.dsl-content-revision` == the reference manifest's `contentRevision`);
-- each launcher script exists and is executable.
+- each launcher script exists, is executable and attests, with `--attest`, that it runs its
+  container with no network and a read-only root (`adapters/attestation.py`, msa#58); the
+  images checked are the ones the launchers attest, not a name assumed here.
+
+This runs at every start, not only under `--check`: a failed check refuses to start, unless
+`MENGER_AGENT_UNSANDBOXED=1` (`adapters/sandbox.py`), which skips the attestation and the images.
 
 The manifest's own schema version is checked at every start (`validate_artifacts`).
 """
@@ -19,14 +24,13 @@ import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from adapters.attestation import Attestation, AttestationFailure, attest_launcher
 from core.vocabulary import DSL_REVISION
 
 # The first menger release with the agent's process contract and DSL manifest 2.0.0 (README:
 # "menger 0.9.1 or later"); 0.9.0 was released prematurely and has neither.
 MIN_MENGER_VERSION = "0.9.1"
 VALIDATOR_IMAGE = "menger-scene-validator:latest"  # run-sandboxed.sh's default
-RENDER_IMAGE_ENV = "MENGER_RENDER_IMAGE"
-RENDER_IMAGE = "menger-render-window:latest"  # run-render-window.sh's default
 VERSION_LABEL = "org.opencontainers.image.version"
 DSL_REVISION_LABEL = "menger.dsl-content-revision"
 BUILD_HINT = "build them from a matching menger checkout: menger/docker/scene-validator/build.sh"
@@ -89,13 +93,58 @@ def check_launcher(name: str, path: Optional[str]) -> Check:
     return Check(name, True, path)
 
 
-def run_checks(validator_script: Optional[str], render_launcher: Optional[str]) -> List[Check]:
-    return [
-        check_launcher("validator script", validator_script),
-        check_launcher("render launcher", render_launcher),
-        check_image("validator image", VALIDATOR_IMAGE),
-        check_image("render image", os.environ.get(RENDER_IMAGE_ENV) or RENDER_IMAGE),
-    ]
+@dataclass(frozen=True)
+class PreflightResult:
+    checks: List[Check]
+    attestations: Dict[str, Attestation]  # by launcher name ("validator", "render")
+
+    @property
+    def ok(self) -> bool:
+        return all(c.ok for c in self.checks)
+
+
+VALIDATOR = "validator"
+RENDER = "render"
+UNSANDBOXED_NOTE = (
+    "UNSANDBOXED: launchers are not attested and images not checked; generated scene code runs "
+    "wherever the launchers run it"
+)
+
+
+def _check_sandboxed_launcher(name: str, path: Optional[str]) -> Tuple[List[Check], Optional[Attestation]]:
+    """The launcher's file check, its attestation, and the check of the image it attests."""
+    exists = check_launcher(f"{name} launcher", path)
+    if not exists.ok:
+        return [exists], None
+    attested = attest_launcher(str(path))
+    if isinstance(attested, AttestationFailure):
+        return [exists, Check(f"{name} sandbox", False, f"{path}: {attested.message}")], None
+    sandbox = Check(
+        f"{name} sandbox", True,
+        f"{attested.sandbox}, network {attested.network}, root {attested.rootfs}, "
+        f"{attested.image} {attested.image_digest[:19]}",
+    )
+    return [exists, sandbox, check_image(f"{name} image", attested.image)], attested
+
+
+def run_checks(
+    validator_script: Optional[str], render_launcher: Optional[str], unsandboxed: bool = False
+) -> PreflightResult:
+    if unsandboxed:
+        return PreflightResult(
+            [check_launcher("validator launcher", validator_script),
+             check_launcher("render launcher", render_launcher),
+             Check("sandbox", True, UNSANDBOXED_NOTE)],
+            {},
+        )
+    checks: List[Check] = []
+    attestations: Dict[str, Attestation] = {}
+    for name, path in ((VALIDATOR, validator_script), (RENDER, render_launcher)):
+        launcher_checks, attested = _check_sandboxed_launcher(name, path)
+        checks += launcher_checks
+        if attested is not None:
+            attestations[name] = attested
+    return PreflightResult(checks, attestations)
 
 
 def report(checks: List[Check]) -> str:

@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file. The format is b
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A release is a `<version>` tag
 (`.github/workflows/release.yml`); its section here names the menger release it pairs with.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: the sandbox is attested, not trusted by file name** (menger-scene-agent#58). At every
+  start (not only under `--check`) the agent runs `<launcher> --attest` on the validator script
+  and the render launcher, and refuses to start unless each prints one JSON line saying
+  `docker`, network `none`, root file system `read-only`, with an image and an image digest
+  (menger's `contracts/process-result.json`, `launcherAttestation`; needs a menger with
+  `--attest`). The launcher's file name is no longer looked at, and the validator script, which
+  was not checked at all, is held to the same rule. The images checked are the ones the
+  launchers attest. Threat model: a guard against a wrong or stale configuration, not against
+  someone who controls the user's shell.
+- `MENGER_AGENT_UNSANDBOXED=1` is the one opt-out for running on the host. It covers both
+  launchers, warns at every start and is recorded in `session.json`. It replaces
+  `MENGER_AGENT_HOST_RENDER=1`, which is now rejected with a hint to the new name.
+- `session.json` has a `sandbox` entry: the attestations (with image digests), whether the user
+  opted out, and any image whose digest differs from the last session's (a warning, not a refusal).
+- A validator or launcher result is read as exactly one JSON document, with no key twice; the rule
+  of menger's `consumerRules` (menger#137).
+
 ## [0.1.0] - 2026-10-31
 
 First release. Pairs with menger 0.9.1 (DSL manifest 2.0.0, result contract 1.3.0); menger 0.9.0

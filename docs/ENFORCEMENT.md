@@ -35,5 +35,6 @@ then CLAUDE.md said "Hooks enforce this" and pointed here, but neither existed.
 
 | Policy | Source | Mechanism | Status |
 |--------|--------|-----------|--------|
-| Generated scenes run only in containers | review 2026-10-14 (menger#77) | launcher gate in `cli.py` (`MENGER_AGENT_HOST_RENDER=1` to override); menger's `test-containment.sh` | ✅ |
+| Generated scenes run only in containers | review 2026-10-14 (menger#77) | startup preflight at every start: both launchers must attest `docker`/`none`/`read-only` with `--attest` (`adapters/attestation.py`, `adapters/preflight.py`; `MENGER_AGENT_UNSANDBOXED=1` to opt out, warned and recorded in `session.json`); menger's `test-containment.sh`. Guards a wrong or stale configuration, not someone who controls the user's shell | ✅ |
+| Sandbox identity is recorded | menger-scene-agent#58 | image digests in `session.json`, a changed digest warned (`adapters/sandbox.py`) | ✅ |
 | Children get no credentials | review 2026-10-14 (msa#27) | `adapters/child_env.py`, `tests/test_child_env.py` | ✅ |
