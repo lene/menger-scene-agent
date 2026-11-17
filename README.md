@@ -135,8 +135,10 @@ judge a launcher by its file name. At every start, and under `--check`, it runs
 `image`, `image_digest`), built from the argument list it passes to `docker run`, and the agent
 requires `docker`, `none` and `read-only`. A launcher that does not attest, or an image that is
 missing, stale or built from another DSL, stops the start with what to do. The image digests are
-recorded in `session.json`; a digest that differs from the last session's (or the resumed one's)
-is a warning, since images are rebuilt often.
+recorded in `session.json` (a resumed session appends its own run, opted out or attested, to
+`sandbox_runs`); a digest that differs from the last one recorded (the resumed session's latest
+run, or else the newest session's) is warned about once and recorded, since images are rebuilt
+often.
 
 What this guards against: a wrong or stale configuration -- a host script, a renamed copy, a
 launcher older than `--attest`. It does not guard against someone who controls your shell or the

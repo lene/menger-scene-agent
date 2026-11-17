@@ -24,6 +24,7 @@ import pytest
 import cli
 import repl.formatting as formatting
 from adapters import preflight
+from adapters.attestation import Attestation
 from adapters.model import MissingAPIKeyError
 from adapters.render_window import RenderWindowError, RenderWindowResult, WindowEvent
 from adapters.scene_store import SceneStore, SceneStoreError
@@ -1098,6 +1099,78 @@ def test_an_image_digest_that_differs_from_the_last_session_warns_and_is_recorde
     (new_dir,) = [d for d in sessions.iterdir() if d.name != "earlier"]
     (change,) = json.loads((new_dir / "session.json").read_text())["sandbox"]["digest_changes"]
     assert change["launcher"] == "validator" and change["was"] == old_digest
+
+
+def _start_session(monkeypatch, tmp_path, *argv: str) -> None:
+    """One `cli.main` run against the fake attested sandbox of conftest.py."""
+    monkeypatch.setenv("MENGER_SCENE_VALIDATOR_SCRIPT", "/fake/validator.sh")
+    _set_render_launcher_env(monkeypatch)
+    monkeypatch.setenv("MENGER_AGENT_SESSIONS_DIR", str(tmp_path / "sessions"))
+    _stub_model_adapter(monkeypatch)
+    monkeypatch.setattr("builtins.input", _scripted_input([]))
+    assert cli.main(list(argv)) == 0
+
+
+def _attest_with_digest(monkeypatch, digest: str) -> None:
+    monkeypatch.setattr(preflight, "attest_launcher", lambda launcher: Attestation(
+        "docker", "none", "read-only", "img:1", "sha256:" + digest * 64))
+
+
+def test_a_resumed_unsandboxed_run_is_recorded_and_the_creation_record_is_kept(
+    monkeypatch, tmp_path
+):
+    _start_session(monkeypatch, tmp_path)
+    (session_dir,) = (tmp_path / "sessions").iterdir()
+    monkeypatch.setenv("MENGER_AGENT_UNSANDBOXED", "1")
+
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+
+    data = json.loads((session_dir / "session.json").read_text())
+    assert data["sandbox"]["unsandboxed"] is False          # how the session was created
+    (resumed,) = data["sandbox_runs"]                        # what the resumed run was
+    assert resumed["unsandboxed"] is True and resumed["attestations"] == {}
+    assert resumed["ts"]
+
+
+def test_a_digest_change_found_on_a_resume_is_recorded_and_warned_once(
+    monkeypatch, tmp_path, capsys
+):
+    _attest_with_digest(monkeypatch, "1")
+    _start_session(monkeypatch, tmp_path)
+    (session_dir,) = (tmp_path / "sessions").iterdir()
+    capsys.readouterr()
+
+    _attest_with_digest(monkeypatch, "2")                   # the image was rebuilt
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+    assert session_dir.name in capsys.readouterr().err       # warned
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+    assert "is not the one of session" not in capsys.readouterr().err   # not again
+
+    runs = json.loads((session_dir / "session.json").read_text())["sandbox_runs"]
+    assert [len(run["digest_changes"]) for run in runs] == [2, 0]   # validator and render
+    assert runs[0]["digest_changes"][0]["now"] == "sha256:" + "2" * 64
+    assert runs[1]["attestations"]["validator"]["image_digest"] == "sha256:" + "2" * 64
+
+    _attest_with_digest(monkeypatch, "3")                   # rebuilt again: a new warning
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+    assert "is not the one of session" in capsys.readouterr().err
+
+
+def test_an_unsandboxed_resume_does_not_forget_the_digests_of_the_run_before(
+    monkeypatch, tmp_path, capsys
+):
+    _attest_with_digest(monkeypatch, "1")
+    _start_session(monkeypatch, tmp_path)
+    (session_dir,) = (tmp_path / "sessions").iterdir()
+    monkeypatch.setenv("MENGER_AGENT_UNSANDBOXED", "1")
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+    monkeypatch.delenv("MENGER_AGENT_UNSANDBOXED")
+    capsys.readouterr()
+
+    _attest_with_digest(monkeypatch, "2")
+    _start_session(monkeypatch, tmp_path, "--session", session_dir.name)
+
+    assert "is not the one of session" in capsys.readouterr().err
 
 
 # --- story 21: an accepted turn calls refresh_render_window() with the just-accepted -------

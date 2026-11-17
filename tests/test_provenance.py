@@ -72,6 +72,17 @@ def test_session_json_is_written_once(tmp_path):
     assert "created" in data
 
 
+def test_a_resume_appends_its_sandbox_state_and_leaves_the_rest_alone(tmp_path):
+    first = {"model": "first", "sandbox": {"unsandboxed": False, "attestations": {}}}
+    write_session_json(tmp_path, first)
+    write_session_json(tmp_path, {"model": "other", "sandbox": {"unsandboxed": True}})
+    write_session_json(tmp_path, {"model": "third"})   # no sandbox entry: nothing to record
+    data = json.loads((tmp_path / "session.json").read_text())
+    assert data["model"] == "first" and data["sandbox"] == first["sandbox"]
+    (run,) = data["sandbox_runs"]
+    assert run["unsandboxed"] is True and run["ts"]
+
+
 def test_window_logs_rotate_instead_of_being_overwritten(tmp_path):
     log = tmp_path / "render.stderr.log"
     for n in range(7):

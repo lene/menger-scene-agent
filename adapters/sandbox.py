@@ -50,7 +50,8 @@ def unsandboxed_requested(environ: Mapping[str, str]) -> bool:
 def sandbox_record(
     unsandboxed: bool, attestations: Mapping[str, Attestation], digest_changes: List[dict]
 ) -> dict:
-    """What `session.json` keeps of the sandbox: the attestations of this start, or that there
+    """What `session.json` keeps of the sandbox (`sandbox` for a new session, one more entry of
+    `sandbox_runs` for each resume): the attestations of this start, or that there
     were none because the user opted out; and the images that differ from the last session's."""
     return {
         "unsandboxed": unsandboxed,
@@ -60,11 +61,16 @@ def sandbox_record(
 
 
 def _recorded_digests(session_json: dict) -> Dict[str, str]:
-    attestations = (session_json.get("sandbox") or {}).get("attestations") or {}
-    return {
-        name: a["image_digest"] for name, a in attestations.items()
-        if isinstance(a, dict) and isinstance(a.get("image_digest"), str)
-    }
+    """Per launcher, the digest of the latest run that attested it: the creation record, then
+    each resumed run's (`sandbox_runs`), later ones overriding. A run that opted out attested
+    nothing and leaves the earlier digests as they were."""
+    runs = [session_json.get("sandbox") or {}, *(session_json.get("sandbox_runs") or [])]
+    digests: Dict[str, str] = {}
+    for run in runs:
+        for name, a in ((run or {}).get("attestations") or {}).items():
+            if isinstance(a, dict) and isinstance(a.get("image_digest"), str):
+                digests[name] = a["image_digest"]
+    return digests
 
 
 def _read_session_json(session_dir: Path) -> Optional[dict]:

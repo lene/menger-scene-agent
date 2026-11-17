@@ -90,17 +90,36 @@ def history_provenance(provenance: dict) -> dict:
     return {key: provenance.get(key) for key in HISTORY_KEYS}
 
 
+SANDBOX_RUNS_KEY = "sandbox_runs"
+
+
 def write_session_json(session_dir: Path, provenance: dict) -> None:
-    """Written once, by the run that created the session. A resumed run leaves it alone: its
-    own identity is in every history entry it writes (`HISTORY_KEYS`) and in `agent.log`."""
+    """Written in full by the run that created the session. A resumed run leaves the rest alone
+    (its identity is in every history entry it writes, `HISTORY_KEYS`, and in `agent.log`) but
+    appends its sandbox state -- opted out or attested, image digests, digest changes -- to
+    `sandbox_runs` with a timestamp (msa#58): the creation record under `sandbox` must not
+    claim a containment a later run did not have, and the next resume compares digests with the
+    latest one recorded here, so a change is warned about once."""
     path = session_dir / SESSION_FILENAME
     if path.exists():
         logger.info("resumed session; run provenance: %s", json.dumps(provenance, sort_keys=True))
+        _append_sandbox_run(path, provenance.get("sandbox"))
         return
     path.write_text(
         json.dumps({"created": utc_now(), **provenance}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _append_sandbox_run(path: Path, sandbox: Optional[dict]) -> None:
+    if sandbox is None:
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data.setdefault(SANDBOX_RUNS_KEY, []).append({"ts": utc_now(), **sandbox})
+        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, ValueError, AttributeError) as e:
+        logger.warning("could not record this run's sandbox in %s: %s", path, e)
 
 
 @dataclass
