@@ -69,7 +69,7 @@ def test_identical_snapshots_have_no_changes():
 def test_summarise_reports_only_non_default_render_settings():
     from core.snapshot_facts import summarise
 
-    snapshot = [{"t": 0, "render": "RenderSettings(true,Auto,true,3,0.1,None,4,Off)"}]
+    snapshot = [{"t": 0, "render": "RenderSettings(Auto,true,3,0.1,None,4,Off,None)"}]
 
     assert summarise(snapshot, _MANIFEST)[("scene", "render settings")] == (
         "antialiasing true, AA depth 3, accumulation 4"
@@ -80,17 +80,28 @@ def test_summarise_reports_transparent_shadows_off_as_non_default():
     # menger 6b753e63: transparentShadows is Auto by default, so an explicit false is a choice.
     from core.snapshot_facts import summarise
 
-    snapshot = [{"t": 0, "render": "RenderSettings(true,Off,false,2,0.1,None,1,Off)"}]
+    snapshot = [{"t": 0, "render": "RenderSettings(Off,false,2,0.1,None,1,Off,None)"}]
 
     assert summarise(snapshot, _MANIFEST)[("scene", "render settings")] == (
         "transparent shadows Off"
     )
 
 
+def test_summarise_reports_a_non_default_ambient():
+    # menger 2fe49a71: shadows are gone from RenderSettings; ambient (dff2a148) is its last field.
+    from core.snapshot_facts import summarise
+
+    snapshot = [{"t": 0, "render": "RenderSettings(Auto,false,2,0.1,None,1,Off,Some(Constant))"}]
+
+    assert summarise(snapshot, _MANIFEST)[("scene", "render settings")] == (
+        "ambient Some(Constant)"
+    )
+
+
 def test_summarise_omits_default_render_settings():
     from core.snapshot_facts import summarise
 
-    snapshot = [{"t": 0, "render": "RenderSettings(true,Auto,false,2,0.1,None,1,Off)"}]
+    snapshot = [{"t": 0, "render": "RenderSettings(Auto,false,2,0.1,None,1,Off,None)"}]
 
     assert ("scene", "render settings") not in summarise(snapshot, _MANIFEST)
 

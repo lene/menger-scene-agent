@@ -3,6 +3,8 @@ Filesystem-only, no network access."""
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from adapters.artifacts import ArtifactError, load_corpus, load_manifest
@@ -63,3 +65,13 @@ def test_load_corpus_reads_the_real_reference_artifact():
     assert corpus["schemaVersion"] == "1.0.0"
     assert len(corpus["scenes"]) > 0
     assert all("source" in scene for scene in corpus["scenes"])
+
+
+def test_the_reference_artifacts_have_no_shadows_setting():
+    # menger#196: shadows are always on; the artifacts must come from a menger without the switch.
+    manifest = load_manifest(REFERENCE_MANIFEST)
+    corpus = load_corpus(REFERENCE_CORPUS)
+
+    field_names = [f["name"] for f in manifest["renderSettings"]["fields"]]
+    assert "shadows" not in field_names
+    assert not [s["name"] for s in corpus["scenes"] if re.search(r"\bshadows\s*=", s["source"])]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from adapters.model import ModelError
 from core.generation import generate, revise
 from core.types import EXPECTED_MANIFEST_SCHEMA_VERSION, GenerationError
@@ -79,6 +81,15 @@ def test_generate_system_prompt_treats_complaints_as_change_requests():
     system_prompt = adapter.last_request.system_prompt
     assert "is a CHANGE REQUEST, not a question" in system_prompt
     assert "that's not glass, it looks like matte plastic" in system_prompt
+
+
+def test_generate_system_prompt_names_no_shadows_setting():
+    # menger#196: shadows are always on, RenderSettings has no `shadows` field to set.
+    adapter = FakeModelAdapter(result=SCENE_TEXT)
+
+    generate("prompt", VALID_MANIFEST, VALID_CORPUS, adapter)
+
+    assert not re.search(r"\bshadows\s*=", adapter.last_request.system_prompt)
 
 
 def test_generate_system_prompt_names_impossible_effects_and_the_nearest_option():

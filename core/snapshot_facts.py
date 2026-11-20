@@ -38,7 +38,7 @@ def _fmt(value: object) -> str:
 # Emission is left out: a glowing Glass is still Glass (it is shown separately).
 _MATERIAL_KEYS = ("ior", "roughness", "metallic", "specular", "filmThickness", "dispersion")
 _PRESET_TOLERANCE = 1e-4
-_DEFAULT_RENDER_SETTINGS = (True, "Auto", False, 2, 0.1, None, 1, "Off")
+_DEFAULT_RENDER_SETTINGS = ("Auto", False, 2, 0.1, None, 1, "Off", None)
 # The presets come from the manifest's structured `proceduralPresets` (review 2026-10-14,
 # menger#81). They were parsed out of the `proceduralType` description with a regex, so
 # rewording that sentence silently broke the F89 repair.
@@ -135,8 +135,8 @@ def _summary(values: list[object]) -> str:
 
 
 def _render_settings(value: object) -> Optional[str]:
-    """RenderSettings(shadows, transparentShadows, antialiasing, aaMaxDepth,
-    aaThreshold, maxRayDepth, accumulation, denoise) -> non-default fields only."""
+    """RenderSettings(transparentShadows, antialiasing, aaMaxDepth, aaThreshold,
+    maxRayDepth, accumulation, denoise, ambient) -> non-default fields only."""
     if not isinstance(value, str):
         return None
     match = re.fullmatch(r"RenderSettings\((.*)\)", value)
@@ -146,7 +146,6 @@ def _render_settings(value: object) -> Optional[str]:
     if len(values) != len(_DEFAULT_RENDER_SETTINGS):
         return value
     names = (
-        "shadows",
         "transparent shadows",
         "antialiasing",
         "AA depth",
@@ -154,6 +153,7 @@ def _render_settings(value: object) -> Optional[str]:
         "max ray depth",
         "accumulation",
         "denoise",
+        "ambient",
     )
     differences = [
         f"{name} {_fmt(actual)}"
